@@ -7,7 +7,67 @@ const state = {
   currentSceneId: null,
   editTarget: null,
   chapters: [],
+  writingProvider: 'kie',
 };
+
+const API_TIMEOUT_MS = 120000;
+let _isSending = false;
+
+async function api(path, opts = {}, timeoutMs = API_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const userSignal = opts.signal;
+  if (userSignal) {
+    userSignal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  try {
+    const r = await fetch('/api' + path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...opts,
+      signal: controller.signal,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || data.error || r.statusText);
+    return data;
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error('请求超时，请检查网络或稍后重试');
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function runWithLoading(fn, { btnId, loadingText = '处理中…' } = {}) {
+  if (_isSending) return null;
+  _isSending = true;
+  const btn = btnId ? document.getElementById(btnId) : null;
+  const defaultText = btn?.textContent || '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = loadingText;
+  }
+  try {
+    return await fn();
+  } finally {
+    _isSending = false;
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = defaultText;
+    }
+  }
+}
+
+function showTypingIndicator(containerId = 'chatMessages') {
+  const msgs = document.getElementById(containerId);
+  if (!msgs || document.getElementById('typingIndicator')) return;
+  msgs.insertAdjacentHTML('beforeend',
+    '<div id="typingIndicator" class="msg assistant"><div class="label">AI</div><span class="typing-dots">生成中…</span></div>');
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function removeTypingIndicator() {
+  document.getElementById('typingIndicator')?.remove();
+}
 
 const GLOBAL_LABELS = {
   world: '世界观 world.md',
@@ -24,16 +84,6 @@ const SIDEBAR_CONFIG = {
   free:  [{ id: 'freechats', label: '聊天记录' }],
   review: [{ id: 'codex', label: '设定库' }],
 };
-
-async function api(path, opts = {}) {
-  const r = await fetch('/api' + path, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(data.detail || data.error || r.statusText);
-  return data;
-}
 
 function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -139,6 +189,7 @@ async function loadStatus() {
   document.getElementById('ctxMode').value = s.context_mode;
   document.getElementById('providerSel').value = s.provider;
   document.getElementById('providerSelDrawer').value = s.provider;
+  state.writingProvider = s.provider;
   const freeSel = document.getElementById('freeProviderSel');
   if (freeSel) freeSel.value = s.free_chat_provider || 'deepseek';
   document.getElementById('footerStat').textContent =
@@ -387,7 +438,7 @@ async function selectScene(sceneId, chapterNum) {
 
 async function addScene(chapterNum) {
   if (!chapterNum) { toast('请先创建章节'); return; }
-  const title = prompt('场景标题', '新场景');
+  const title = prompt('场景标题', '新场景')?.trim();
   if (!title) return;
   const r = await api('/plan/scenes', { method: 'POST', body: JSON.stringify({ chapter_num: chapterNum, title }) });
   await selectScene(r.scene.id, chapterNum);
@@ -480,27 +531,37 @@ async function saveEditor({ silent = false } = {}) {
   const t = state.editTarget;
   const content = document.getElementById('mainEditor').value;
   if (!t) return toast('请先选择章节或设定');
-  if (t.type === 'chapter') {
-    await api(`/chapters/${t.num}`, { method: 'PUT', body: JSON.stringify({ content }) });
-    if (silent) {
-      const pill = document.getElementById('wordCountPill');
-      if (pill) {
-        pill.classList.add('saved-flash');
-        setTimeout(() => pill.classList.remove('saved-flash'), 1200);
+  const titleEl = document.getElementById('mainTitle');
+  try {
+    if (t.type === 'chapter') {
+      await api(`/chapters/${t.num}`, { method: 'PUT', body: JSON.stringify({ content }) });
+      if (silent) {
+        const pill = document.getElementById('wordCountPill');
+        if (pill) {
+          pill.classList.add('saved-flash');
+          setTimeout(() => pill.classList.remove('saved-flash'), 1200);
+        }
+      } else {
+        toast(`第${t.num}章已保存`);
       }
-    } else {
-      toast(`第${t.num}章已保存`);
+      if (titleEl) titleEl.textContent = `第${t.num}章 正文`;
+    } else if (t.type === 'codex-entry') {
+      await api(`/codex-entries/${t.id}`, { method: 'PUT', body: JSON.stringify({ content }) });
+      toast(silent ? 'Codex 已自动保存' : 'Codex 已保存');
+    } else if (t.type === 'global') {
+      await api(`/codex/${t.name}`, { method: 'PUT', body: JSON.stringify({ content }) });
+      toast(silent ? '设定已自动保存' : '设定已保存');
     }
-  } else if (t.type === 'codex-entry') {
-    await api(`/codex-entries/${t.id}`, { method: 'PUT', body: JSON.stringify({ content }) });
-    toast(silent ? 'Codex 已自动保存' : 'Codex 已保存');
-  } else if (t.type === 'global') {
-    await api(`/codex/${t.name}`, { method: 'PUT', body: JSON.stringify({ content }) });
-    toast(silent ? '设定已自动保存' : '设定已保存');
+  } catch (e) {
+    if (t.type === 'chapter' && titleEl) {
+      titleEl.textContent = `第${t.num}章 ⚠️ 保存失败`;
+    }
+    if (!silent) toast(e.message || '保存失败');
   }
 }
 
 async function newChapter() {
+  if (!confirm('将创建新的空章节，是否继续？')) return;
   const r = await api('/chapters/new', { method: 'POST' });
   state.currentChapter = r.num;
   toast(`第${r.num}章已创建`);
@@ -590,29 +651,34 @@ async function loadChat() {
 async function sendChat() {
   const instruction = document.getElementById('chatInstruction').value.trim();
   if (!instruction) return toast('请输入指令');
-  let scene_beat = '';
-  if (state.currentSceneId) {
-    const beatEl = document.getElementById('beatEditor');
-    scene_beat = beatEl?.value || '';
-  }
-  const errEl = document.getElementById('chatError');
-  errEl.textContent = '';
-  try {
-    const r = await api('/chat', {
-      method: 'POST',
-      body: JSON.stringify({
-        instruction, scene_beat,
-        scene_id: state.currentSceneId || '',
-      }),
-    });
-    if (!r.ok) throw new Error(r.error);
-    document.getElementById('chatInstruction').value = '';
-    await loadChat();
-    await loadStatus();
-    if (r.chapter_saved) toast(`已写入第${r.chapter_num}章`);
-  } catch (e) {
-    errEl.textContent = e.message;
-  }
+  await runWithLoading(async () => {
+    let scene_beat = '';
+    if (state.currentSceneId) {
+      const beatEl = document.getElementById('beatEditor');
+      scene_beat = beatEl?.value || '';
+    }
+    const errEl = document.getElementById('chatError');
+    errEl.textContent = '';
+    showTypingIndicator('chatMessages');
+    try {
+      const r = await api('/chat', {
+        method: 'POST',
+        body: JSON.stringify({
+          instruction, scene_beat,
+          scene_id: state.currentSceneId || '',
+        }),
+      });
+      if (!r.ok) throw new Error(r.error);
+      document.getElementById('chatInstruction').value = '';
+      await loadChat();
+      await loadStatus();
+      if (r.chapter_saved) toast(`已写入第${r.chapter_num}章`);
+    } catch (e) {
+      errEl.textContent = e.message;
+    } finally {
+      removeTypingIndicator();
+    }
+  }, { btnId: 'sendChatBtn', loadingText: '生成中…' });
 }
 
 async function clearChat() {
@@ -659,21 +725,26 @@ async function sendFreeChat() {
   const input = document.getElementById('freeChatInput');
   const content = input.value.trim();
   if (!content) return toast('请输入内容');
-  const provider = document.getElementById('freeProviderSel').value;
-  const errEl = document.getElementById('freeChatError');
-  errEl.textContent = '';
-  try {
-    const r = await api('/free-chat', {
-      method: 'POST',
-      body: JSON.stringify({ content, provider }),
-    });
-    if (!r.ok) throw new Error(r.error);
-    input.value = '';
-    await loadFreeChat();
-    await loadStatus();
-  } catch (e) {
-    errEl.textContent = e.message;
-  }
+  await runWithLoading(async () => {
+    const provider = document.getElementById('freeProviderSel').value;
+    const errEl = document.getElementById('freeChatError');
+    errEl.textContent = '';
+    showTypingIndicator('freeChatMessages');
+    try {
+      const r = await api('/free-chat', {
+        method: 'POST',
+        body: JSON.stringify({ content, provider }),
+      });
+      if (!r.ok) throw new Error(r.error);
+      input.value = '';
+      await loadFreeChat();
+      await loadStatus();
+    } catch (e) {
+      errEl.textContent = e.message;
+    } finally {
+      removeTypingIndicator();
+    }
+  }, { btnId: 'sendFreeChatBtn', loadingText: '生成中…' });
 }
 
 async function clearFreeChat() {
@@ -683,16 +754,20 @@ async function clearFreeChat() {
 }
 
 async function runSummary() {
-  const r = await api('/summary', { method: 'POST' });
-  if (!r.ok) return alert(r.error);
-  toast('概述已追加到 summaries.md');
-  alert(r.reply);
+  await runWithLoading(async () => {
+    const r = await api('/summary', { method: 'POST' });
+    if (!r.ok) return alert(r.error);
+    toast('概述已追加到 summaries.md');
+    alert(r.reply);
+  }, { btnId: 'runSummaryBtn', loadingText: '生成中…' });
 }
 
 async function runCheck() {
-  const r = await api('/check', { method: 'POST' });
-  if (!r.ok) return alert(r.error);
-  alert(r.reply);
+  await runWithLoading(async () => {
+    const r = await api('/check', { method: 'POST' });
+    if (!r.ok) return alert(r.error);
+    alert(r.reply);
+  }, { btnId: 'runCheckBtn', loadingText: '检查中…' });
 }
 
 // ── Review ─────────────────────────────────────
@@ -746,10 +821,21 @@ function syncProvider(v) {
 }
 
 async function switchProvider() {
-  const provider = document.getElementById('providerSel').value;
+  const sel = document.getElementById('providerSel');
+  const provider = sel.value;
+  if (provider === state.writingProvider) return;
+  const { messages } = await api('/chat/history');
+  if (messages.length > 0) {
+    if (!confirm('切换模型后，当前对话历史仍会发给新模型，是否继续？')) {
+      sel.value = state.writingProvider;
+      document.getElementById('providerSelDrawer').value = state.writingProvider;
+      return;
+    }
+  }
   await api('/config/provider', { method: 'PUT', body: JSON.stringify({ provider }) });
+  state.writingProvider = provider;
   await loadStatus();
-  toast('已切换主力模型');
+  toast(`已切换到 ${configLabel(provider)}`);
 }
 
 // ── Init ───────────────────────────────────────
@@ -762,4 +848,18 @@ async function init() {
 }
 
 document.getElementById('sidebarSearch').addEventListener('input', refreshSidebar);
+
+window.addEventListener('beforeunload', (e) => {
+  if (_autosaveTimer && state.editTarget) {
+    e.preventDefault();
+    e.returnValue = '';
+  }
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && _autosaveTimer) {
+    flushAutosave();
+  }
+});
+
 init();

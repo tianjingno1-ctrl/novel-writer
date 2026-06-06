@@ -113,9 +113,9 @@
         </div>
         <textarea id="chatInstruction" rows="4" placeholder="写作指令：续写 1500 字，番茄风格，章末留悬念…"></textarea>
         <div class="compose-actions">
-          <button class="btn btn-primary" onclick="sendChat()">发送</button>
-          <button class="btn btn-sm" onclick="runSummary()">生成概述</button>
-          <button class="btn btn-sm" onclick="runCheck()">连续性检查</button>
+          <button id="sendChatBtn" class="btn btn-primary" onclick="sendChat()">发送</button>
+          <button id="runSummaryBtn" class="btn btn-sm" onclick="runSummary()">生成概述</button>
+          <button id="runCheckBtn" class="btn btn-sm" onclick="runCheck()">连续性检查</button>
         </div>
         <span id="chatError" class="error-text"></span>
       </div>
@@ -139,7 +139,7 @@
         </div>
         <textarea id="freeChatInput" rows="4" placeholder="输入消息…"></textarea>
         <div class="compose-actions">
-          <button class="btn btn-primary" onclick="sendFreeChat()">发送</button>
+          <button id="sendFreeChatBtn" class="btn btn-primary" onclick="sendFreeChat()">发送</button>
         </div>
         <span id="freeChatError" class="error-text"></span>
       </div>

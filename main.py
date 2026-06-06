@@ -95,8 +95,12 @@ def backup_file(path: Path) -> None:
     """写入前自动备份。"""
     if path.exists() and path.stat().st_size > 0:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
         dest = BACKUPS_DIR / f"{path.stem}_{ts}{path.suffix}"
         shutil.copy2(path, dest)
+        old = sorted(BACKUPS_DIR.glob(f"{path.stem}_*{path.suffix}"))
+        for f in old[:-10]:
+            f.unlink(missing_ok=True)
 
 
 def write_text(path: Path, content: str, *, append: bool = False) -> None:

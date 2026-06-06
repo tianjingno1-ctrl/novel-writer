@@ -268,3 +268,4 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 }
 .api-key-banner code { background: rgba(0,0,0,.06); padding: 1px 4px; border-radius: 4px; }
 .pill.saved-flash { background: #d1fae5; color: #065f46; }
+.typing-dots { color: var(--text-3); font-style: italic; }

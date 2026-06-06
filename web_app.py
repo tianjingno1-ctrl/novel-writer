@@ -200,6 +200,8 @@ def plan_add_scene(body: SceneCreate) -> dict:
 @app.put("/api/plan/scenes/{scene_id}")
 def plan_update_scene(scene_id: str, body: SceneUpdate) -> dict:
     fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "title" in fields and not str(fields["title"]).strip():
+        raise HTTPException(400, "场景标题不能为空")
     scene = novel_data.update_scene(scene_id, **fields)
     if scene is None:
         raise HTTPException(404, "场景不存在")

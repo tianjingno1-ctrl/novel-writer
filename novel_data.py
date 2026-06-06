@@ -29,6 +29,9 @@ def backup_file(path: Path) -> None:
         dest = BACKUPS_DIR / f"{path.stem}_{ts}{path.suffix}"
         BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, dest)
+        old = sorted(BACKUPS_DIR.glob(f"{path.stem}_*{path.suffix}"))
+        for f in old[:-10]:
+            f.unlink(missing_ok=True)
 
 
 def write_text(path: Path, content: str) -> None:
