@@ -186,6 +186,84 @@
 <div class="overlay hidden" id="overlay" onclick="toggleSettings()"></div>
 
 <div id="toast" class="toast" role="alert" aria-live="polite"></div>
+
+<!-- DOM 模板：cloneNode 填充，避免 innerHTML 拼接 -->
+<template id="tpl-sidebar-tab"><div class="sidebar-tab"></div></template>
+
+<template id="tpl-chapter-label"><div class="chapter-label"></div></template>
+
+<template id="tpl-scene-sidebar-item">
+  <div class="list-item" data-scene-id="">
+    <div class="title"></div>
+    <div class="meta"></div>
+  </div>
+</template>
+
+<template id="tpl-codex-sidebar-item">
+  <label class="codex-check">
+    <input type="checkbox" />
+    <div class="codex-check-body">
+      <div class="title"></div>
+      <div class="meta"></div>
+    </div>
+  </label>
+</template>
+
+<template id="tpl-sidebar-list-item">
+  <div class="list-item">
+    <div class="title"></div>
+    <div class="meta"></div>
+  </div>
+</template>
+
+<template id="tpl-global-item">
+  <div class="list-item" data-global-key=""></div>
+</template>
+
+<template id="tpl-empty-inline"><div class="empty-inline"></div></template>
+
+<template id="tpl-scene-card">
+  <div class="scene-card" data-id="">
+    <h4>
+      <input type="checkbox" title="标记完成" />
+      <span class="scene-card-title"></span>
+    </h4>
+    <p class="scene-card-beat"></p>
+    <div class="tag"></div>
+  </div>
+</template>
+
+<template id="tpl-scene-add-card">
+  <div class="scene-card no-sort scene-add-card"><span>+ 添加场景</span></div>
+</template>
+
+<template id="tpl-nc-empty">
+  <div class="nc-empty" style="grid-column:1/-1">
+    <div class="nc-empty-box"><p></p></div>
+  </div>
+</template>
+
+<template id="tpl-chat-empty">
+  <div class="nc-empty">
+    <div class="nc-empty-box" style="border:none"><p></p></div>
+  </div>
+</template>
+
+<template id="tpl-chat-msg">
+  <div class="msg">
+    <div class="label"></div>
+    <div class="msg-body"></div>
+  </div>
+</template>
+
+<template id="tpl-stat-card">
+  <div class="stat-card">
+    <h4></h4>
+    <div class="num"></div>
+    <div class="desc"></div>
+  </div>
+</template>
+
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
