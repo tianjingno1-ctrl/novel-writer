@@ -44,6 +44,7 @@ python main.py         # CLI
 3. 写书与自由聊**模型选择独立**；自由聊 provider 存在 `data/free_chat.json`（已 gitignore）。
 4. `providers.py`：system 为空时不传 Anthropic `system` 参数。
 5. DeepSeek 不支持 Prompt Cache；kie 写作走 `build_cached_system()`。
+6. kie.ai Claude 须 `auth_token`（Bearer）+ 自定义 `User-Agent`（见 `providers._get_anthropic`），勿改回纯 `api_key`。
 6. 章节/会话写入用 `file_utils.atomic_write_text`；费用日志为 `cost_log.jsonl`。
 7. 保持中文 UI 文案与现有浅色主题风格。
 

@@ -136,20 +136,20 @@ PROVIDERS = {
         },
     },
     "deepseek": {
-        "name": "DeepSeek",
+        "name": "DeepSeek V4 Pro",
         "api_key_env": "DEEPSEEK_API_KEY",
         "api_key_default": "在这里填你的_DEEPSEEK_API_KEY",
         "base_url": "https://api.deepseek.com",
-        "model": "deepseek-chat",
+        "model": os.environ.get("DEEPSEEK_MODEL", "deepseek-v4-pro"),
         "supports_cache": False,
         "client": "openai",
-        # 价格参考：2025-06，单位 USD / 1M tokens
+        # 价格参考：V4-Pro 预估，单位 USD / 1M tokens（可在 prices.json 覆盖）
         "price": {
             "cache_read": 0.014,
             "cache_write_5m": 0.0,
             "cache_write_1h": 0.0,
-            "input": 0.27,
-            "output": 1.10,
+            "input": 1.74,
+            "output": 3.48,
         },
     },
 }

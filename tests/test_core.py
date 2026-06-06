@@ -98,6 +98,24 @@ class CodexTests(unittest.TestCase):
         self.assertEqual(novel_data._sanitize_codex_name("a/b"), "a_b")
         self.assertEqual(novel_data._sanitize_codex_name('x:y'), "x_y")
 
+    def test_delete_codex_entry(self) -> None:
+        import novel_data
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            entries = base / "codex" / "entries"
+            entries.mkdir(parents=True)
+            active = base / "codex" / "active.json"
+            active.write_text('{"active": ["测试条目"]}', encoding="utf-8")
+            novel_data.CODEX_DIR = entries
+            novel_data.CODEX_ACTIVE_FILE = active
+            novel_data.BACKUPS_DIR = base / "backups"
+            novel_data.create_codex_entry("测试条目", "# 测试\n")
+            r = novel_data.delete_codex_entry("测试条目")
+            self.assertTrue(r["ok"])
+            self.assertFalse((entries / "测试条目.md").exists())
+            self.assertEqual(novel_data.get_active_codex_ids(), [])
+
 
 class APIErrorTests(unittest.TestCase):
     def test_classify_auth(self) -> None:

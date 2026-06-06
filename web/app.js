@@ -9,12 +9,14 @@ const state = {
   editTarget: null,
   chapters: [],
   writingProvider: 'kie',
+  chatFocusTurn: null,
 };
 
 const dataCache = {
   chapters: [],
   planByNum: {},
   codex: { entries: [], active: [] },
+  chat: { messages: [], appended: [], turns: [] },
 };
 
 const API_TIMEOUT_MS = 120000;
@@ -98,7 +100,7 @@ function applyChrome() {
   document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
   const viewId = 'view' + mode.charAt(0).toUpperCase() + mode.slice(1);
   document.getElementById(viewId)?.classList.remove('hidden');
-  document.getElementById('sidebar')?.classList.toggle('hidden', mode === 'review');
+  document.getElementById('sidebar')?.classList.toggle('hidden', mode === 'review' || mode === 'overview');
 
   const tabs = SIDEBAR_CONFIG[mode] || SIDEBAR_CONFIG.write;
   let nextSidebar = sidebar;
@@ -114,6 +116,9 @@ function applyChrome() {
 
 async function renderMainView() {
   switch (state.mode) {
+    case 'overview':
+      await renderOverview();
+      break;
     case 'plan':
       await renderPlanBoardFull();
       break;
@@ -268,7 +273,13 @@ async function api(path, opts = {}, timeoutMs = API_TIMEOUT_MS) {
       }
       throw new Error(data.detail || '未授权');
     }
-    if (!r.ok) throw new Error(data.detail || data.error || r.statusText);
+    if (!r.ok) {
+      const msg = data.detail || data.error || r.statusText;
+      if (r.status === 403 && typeof msg === 'string' && msg.includes('非本地')) {
+        throw new Error(`${msg}\n\n请用 http://127.0.0.1:8765 打开，或在 .env 设置 NOVEL_WEB_TOKEN 后输入令牌`);
+      }
+      throw new Error(msg);
+    }
     return data;
   } catch (e) {
     if (e.name === 'AbortError') {
@@ -342,7 +353,7 @@ const PROVIDER_LABELS = {
   'kie-opus': 'Claude Opus 4.6',
   'kie-opus-47': 'Claude Opus 4.7',
   'kie-opus-48': 'Claude Opus 4.8',
-  deepseek: 'DeepSeek',
+  deepseek: 'DeepSeek V4 Pro',
 };
 
 function configLabel(p) {
@@ -557,18 +568,42 @@ function makeSidebarHistoryItem(role, index, preview, onClick) {
   return el;
 }
 
+function pairChatTurns(messages) {
+  const turns = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role !== 'user') continue;
+    const turn = { userIdx: i, user: messages[i].content || '', aiIdx: null, ai: '' };
+    if (i + 1 < messages.length && messages[i + 1].role === 'assistant') {
+      turn.aiIdx = i + 1;
+      turn.ai = messages[i + 1].content || '';
+    }
+    turns.push(turn);
+  }
+  return turns;
+}
+
 async function renderChatsSidebar(body) {
-  const { messages } = await api('/chat/history');
+  const { messages, appended_indices: appended = [] } = await api('/chat/history');
+  const turns = pairChatTurns(messages);
+  dataCache.chat = { messages, appended, turns };
   clearEl(body);
-  if (!messages.length) {
+  if (!turns.length) {
     const empty = cloneTplEl('tpl-empty-inline');
     empty.innerHTML = '写书对话为空<br>在「写书对话」模式发送指令';
     body.appendChild(empty);
     return;
   }
-  messages.forEach((m, i) => {
-    const role = m.role === 'user' ? '你' : 'AI';
-    body.appendChild(makeSidebarHistoryItem(role, i, (m.content || '').slice(0, 80), () => setMode('chat')));
+  turns.forEach((turn, t) => {
+    const el = cloneTplEl('tpl-sidebar-list-item');
+    el.dataset.chatTurn = String(t);
+    el.classList.toggle('active', state.chatFocusTurn === t);
+    const saved = turn.aiIdx != null && appended.includes(turn.aiIdx);
+    el.querySelector('.title').textContent = `第 ${t + 1} 轮${saved ? ' · ✓已写入' : ''}`;
+    const u = (turn.user || '').replace(/\s+/g, ' ').slice(0, 36);
+    const a = (turn.ai || '（无回复）').replace(/\s+/g, ' ').slice(0, 36);
+    el.querySelector('.meta').textContent = `你：${u} ｜ AI：${a}`;
+    el.addEventListener('click', () => openChatTurnCompare(t));
+    body.appendChild(el);
   });
 }
 
@@ -816,6 +851,19 @@ function onPlanChapterChange() {
 }
 
 // ── Write ──────────────────────────────────────
+function codexEntryPath(id) {
+  return `/codex-entries/${encodeURIComponent(id)}`;
+}
+
+function updateWriteToolbar() {
+  const sel = document.getElementById('writeChapterSel');
+  const deleteBtn = document.getElementById('deleteCodexBtn');
+  const t = state.editTarget;
+  const editingChapter = !t || t.type === 'chapter';
+  if (sel) sel.style.display = editingChapter ? '' : 'none';
+  if (deleteBtn) deleteBtn.classList.toggle('hidden', t?.type !== 'codex-entry');
+}
+
 async function renderWriteView() {
   await ensurePlanData();
   const { chapters, planByNum } = dataCache;
@@ -828,11 +876,11 @@ async function renderWriteView() {
   if (t?.type === 'global' || t?.type === 'codex-entry') {
     empty.classList.add('hidden');
     editor.classList.remove('hidden');
-    if (sel) sel.style.display = 'none';
+    updateWriteToolbar();
     return;
   }
 
-  if (sel) sel.style.display = '';
+  updateWriteToolbar();
 
   if (!chapters.length) {
     clearEl(sel);
@@ -880,6 +928,7 @@ async function openChapter(num) {
   document.getElementById('mainEditor').value = ch.content;
   _editorSnapshot = ch.content;
   document.getElementById('writeChapterSel').value = num;
+  updateWriteToolbar();
   updateWordCount();
 }
 
@@ -921,7 +970,7 @@ async function saveEditor({ silent = false, confirmed = false } = {}) {
       }
       if (titleEl) titleEl.textContent = `第${t.num}章 正文`;
     } else if (t.type === 'codex-entry') {
-      await api(`/codex-entries/${t.id}`, { method: 'PUT', body: JSON.stringify({ content }) });
+      await api(codexEntryPath(t.id), { method: 'PUT', body: JSON.stringify({ content }) });
       _editorSnapshot = content;
       toast(silent ? 'Codex 已自动保存' : 'Codex 已保存');
       invalidateCodexCache();
@@ -955,7 +1004,7 @@ async function newChapter() {
 
 async function openCodexEntry(id) {
   if (state.editTarget?.type !== 'codex-entry' || state.editTarget?.id !== id) await flushAutosave();
-  const entry = await api(`/codex-entries/${id}`);
+  const entry = await api(codexEntryPath(id));
   setState({ editTarget: { type: 'codex-entry', id } }, 'none');
   setMode('write');
   document.getElementById('mainTitle').textContent = `Codex · ${entry.name}`;
@@ -963,6 +1012,24 @@ async function openCodexEntry(id) {
   _editorSnapshot = entry.content;
   document.getElementById('writeEmpty').classList.add('hidden');
   document.getElementById('mainEditor').classList.remove('hidden');
+  updateWriteToolbar();
+}
+
+async function deleteCodexEntry() {
+  const t = state.editTarget;
+  if (t?.type !== 'codex-entry') return;
+  const entry = dataCache.codex.entries.find(e => e.id === t.id);
+  const label = entry?.name || t.id;
+  if (isEditorDirty()) {
+    if (!confirm(`条目「${label}」有未保存修改。\n\n确定 = 先保存再删除\n取消 = 中止删除`)) return;
+    await saveEditor({ silent: true });
+  }
+  if (!confirm(`删除 Codex 条目「${label}」？\n\n原文件会备份到 data/backups/，并从勾选列表移除。`)) return;
+  await api(codexEntryPath(t.id), { method: 'DELETE' });
+  setState({ editTarget: null }, 'none');
+  invalidateCodexCache();
+  scheduleRender({ main: true, sidebar: state.sidebar === 'codex' });
+  toast('条目已删除');
 }
 
 async function openGlobal(name) {
@@ -975,6 +1042,7 @@ async function openGlobal(name) {
   _editorSnapshot = data.content;
   document.getElementById('writeEmpty').classList.add('hidden');
   document.getElementById('mainEditor').classList.remove('hidden');
+  updateWriteToolbar();
 }
 
 async function createCodexEntry() {
@@ -1016,8 +1084,9 @@ function removeTypingIndicator() {
   document.getElementById('typingIndicator')?.remove();
 }
 
-function renderChatMessages(messages) {
+function renderChatMessages(messages, { highlight = [], scrollTo = null } = {}) {
   const log = document.getElementById('chatMessages');
+  const appended = dataCache.chat.appended || [];
   clearEl(log);
   if (!messages.length) {
     const empty = cloneTplEl('tpl-chat-empty');
@@ -1030,21 +1099,93 @@ function renderChatMessages(messages) {
     log.appendChild(empty);
     return;
   }
-  for (const m of messages) {
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
     const el = cloneTplEl('tpl-chat-msg');
     el.classList.add(m.role);
-    el.querySelector('.label').textContent = m.role === 'user' ? '你的指令' : 'AI 回复';
+    el.dataset.msgIndex = String(i);
+    if (highlight.includes(i)) el.classList.add('highlight');
+    let label = m.role === 'user' ? '你的指令' : 'AI 回复';
+    if (m.role === 'assistant' && appended.includes(i)) label += ' · ✓ 已写入章节';
+    el.querySelector('.label').textContent = label;
     let text = m.content || '';
     if (text.length > 4000) text = text.slice(0, 4000) + '\n…';
     el.querySelector('.msg-body').textContent = text;
     log.appendChild(el);
   }
+  if (scrollTo != null) {
+    const target = log.querySelector(`[data-msg-index="${scrollTo}"]`);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+  }
   log.scrollTop = log.scrollHeight;
 }
 
+function showChatCompare(turn, turnNum) {
+  const panel = document.getElementById('chatComparePanel');
+  if (!panel) return;
+  document.getElementById('chatCompareTitle').textContent = `第 ${turnNum + 1} 轮对照`;
+  document.getElementById('chatCompareUser').textContent = turn.user || '（空）';
+  document.getElementById('chatCompareAi').textContent = turn.ai || '（无回复）';
+  const savedEl = document.getElementById('chatCompareSaved');
+  const saved = turn.aiIdx != null && (dataCache.chat.appended || []).includes(turn.aiIdx);
+  savedEl.classList.toggle('hidden', !saved);
+  panel.classList.remove('hidden');
+}
+
+function closeChatCompare() {
+  document.getElementById('chatComparePanel')?.classList.add('hidden');
+  state.chatFocusTurn = null;
+  if (state.sidebar === 'chats') scheduleRender({ sidebar: true });
+  if (dataCache.chat.messages?.length) {
+    renderChatMessages(dataCache.chat.messages);
+  }
+}
+
+async function openChatTurnCompare(turnNum) {
+  if (!dataCache.chat.turns?.length) {
+    const { messages, appended_indices: appended = [] } = await api('/chat/history');
+    dataCache.chat = { messages, appended, turns: pairChatTurns(messages) };
+  }
+  const turn = dataCache.chat.turns[turnNum];
+  if (!turn) return;
+  state.chatFocusTurn = turnNum;
+  if (state.mode !== 'chat') setState({ mode: 'chat', sidebar: 'chats' }, 'full');
+  else if (state.sidebar !== 'chats') setState({ sidebar: 'chats' }, { chrome: true, sidebar: true });
+  showChatCompare(turn, turnNum);
+  const hi = [turn.userIdx, turn.aiIdx].filter(x => x != null);
+  renderChatMessages(dataCache.chat.messages, { highlight: hi, scrollTo: turn.userIdx });
+  scheduleRender({ sidebar: state.sidebar === 'chats' });
+}
+
+async function openChapterFromChat() {
+  await ensurePlanData();
+  const num = state.currentChapter || dataCache.chapters[dataCache.chapters.length - 1]?.num;
+  if (!num) return toast('请先在规划模式创建章节');
+  setState({ mode: 'write' }, 'chrome');
+  await openChapter(num);
+  toast(`已打开第 ${num} 章正文，请核对后保存`);
+}
+
 async function loadChat(refreshSidebarPanel = true) {
-  const { messages } = await api('/chat/history');
-  renderChatMessages(messages);
+  const { messages, appended_indices: appended = [] } = await api('/chat/history');
+  dataCache.chat = {
+    messages,
+    appended,
+    turns: pairChatTurns(messages),
+  };
+  const turn = state.chatFocusTurn;
+  if (turn != null && dataCache.chat.turns[turn]) {
+    showChatCompare(dataCache.chat.turns[turn], turn);
+    const t = dataCache.chat.turns[turn];
+    renderChatMessages(messages, {
+      highlight: [t.userIdx, t.aiIdx].filter(x => x != null),
+    });
+  } else {
+    renderChatMessages(messages);
+  }
   if (refreshSidebarPanel && state.sidebar === 'chats') scheduleRender({ sidebar: true });
 }
 
@@ -1200,6 +1341,8 @@ async function sendChat() {
 async function clearChat() {
   if (!confirm('清空写书对话？（章节文件保留）')) return;
   await api('/chat/clear', { method: 'POST' });
+  state.chatFocusTurn = null;
+  closeChatCompare();
   await loadChat(true);
 }
 
@@ -1351,11 +1494,179 @@ async function renderReview() {
   grid.appendChild(wide);
 }
 
+// ── Overview（书架）──────────────────────────────
+let _overviewReadChapter = null;
+
+async function renderOverview() {
+  const o = await api('/overview');
+  const host = document.getElementById('overviewShell');
+  clearEl(host);
+
+  const hero = document.createElement('div');
+  hero.className = 'overview-hero';
+  const worldBadge = o.project.world_label
+    ? `<span class="overview-badge">${escapeHtml(o.project.world_label)}</span>` : '';
+  hero.innerHTML = `
+    <div class="overview-hero-top">
+      <h1 class="overview-title">${escapeHtml(o.project.title || '未命名小说')}</h1>
+      ${worldBadge}
+      <button class="btn btn-sm" type="button" id="btnEditProject">改书名</button>
+    </div>
+    <p class="overview-tagline">${escapeHtml(o.project.tagline || '')}</p>
+    <p class="overview-current">当前进度：<strong>第 ${o.current_chapter || '—'} 章</strong>
+      ${o.current_chapter_title ? ` · ${escapeHtml(o.current_chapter_title)}` : ''}</p>
+  `;
+  host.appendChild(hero);
+  hero.querySelector('#btnEditProject').addEventListener('click', () => editProjectMeta(o.project));
+
+  if (o.multi_book_hint) {
+    const hint = document.createElement('div');
+    hint.className = 'overview-hint';
+    hint.textContent = o.multi_book_hint;
+    host.appendChild(hint);
+  }
+
+  host.appendChild(makeOverviewSection('世界观（全书框架）', o.world_excerpt || '（尚未填写 world.md）', () => openGlobal('world')));
+
+  if (o.active_worlds?.length) {
+    const worldBody = o.active_worlds.map(w =>
+      `【${w.name}】\n${w.preview}`).join('\n\n');
+    host.appendChild(makeOverviewSection('当前世界（已勾选 Codex）', worldBody, () => {
+      setState({ mode: 'write', sidebar: 'codex' }, 'full');
+      openCodexEntry(o.active_worlds[0].id);
+    }));
+  }
+
+  const outlineEl = makeOverviewSection('大纲（章节 · 场景）', '', null);
+  const outlineList = document.createElement('div');
+  outlineList.className = 'overview-outline';
+  for (const ch of o.outline || []) {
+    const block = document.createElement('div');
+    block.className = 'overview-chapter-block';
+    const h = document.createElement('h3');
+    h.textContent = `第 ${ch.num} 章 · ${ch.title}（${(ch.chars || 0).toLocaleString()} 字）`;
+    block.appendChild(h);
+    const ul = document.createElement('ul');
+    for (const s of ch.scenes || []) {
+      const li = document.createElement('li');
+      li.textContent = `${s.done ? '✓ ' : ''}${s.title}${s.beat ? ' — ' + s.beat : ''}`;
+      ul.appendChild(li);
+    }
+    if (!ch.scenes?.length) {
+      const li = document.createElement('li');
+      li.textContent = '（暂无场景，去规划模式添加）';
+      ul.appendChild(li);
+    }
+    block.appendChild(ul);
+    outlineList.appendChild(block);
+  }
+  outlineEl.querySelector('.overview-body').appendChild(outlineList);
+  host.appendChild(outlineEl);
+
+  const tocSec = makeOverviewSection('章节目录（点章节阅读正文）', '', null);
+  const toc = document.createElement('div');
+  toc.className = 'overview-toc';
+  for (const ch of o.outline || []) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'overview-toc-item';
+    btn.dataset.num = String(ch.num);
+    btn.classList.toggle('active', _overviewReadChapter === ch.num);
+    btn.textContent = `第 ${ch.num} 章 · ${ch.title}（${(ch.chars || 0).toLocaleString()} 字）`;
+    btn.addEventListener('click', () => loadOverviewChapter(ch.num));
+    toc.appendChild(btn);
+  }
+  if (!o.outline?.length) {
+    toc.textContent = '还没有章节正文';
+  }
+  tocSec.querySelector('.overview-body').appendChild(toc);
+  const reader = document.createElement('pre');
+  reader.id = 'overviewReader';
+  reader.className = 'overview-reader';
+  reader.textContent = _overviewReadChapter ? '加载中…' : '← 点上方章节阅读正文';
+  tocSec.querySelector('.overview-body').appendChild(reader);
+  if (_overviewReadChapter) loadOverviewChapter(_overviewReadChapter, reader);
+  host.appendChild(tocSec);
+
+  host.appendChild(makeOverviewSection('章节概述', o.summaries_excerpt || '（尚未生成概述）', () => openGlobal('summaries')));
+}
+
+function escapeHtml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function makeOverviewSection(title, bodyText, onEdit) {
+  const sec = document.createElement('section');
+  sec.className = 'overview-section';
+  const head = document.createElement('div');
+  head.className = 'overview-section-head';
+  head.innerHTML = `<h2>${escapeHtml(title)}</h2>`;
+  if (onEdit) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-sm btn-ghost';
+    btn.textContent = '去编辑';
+    btn.addEventListener('click', onEdit);
+    head.appendChild(btn);
+  }
+  sec.appendChild(head);
+  const body = document.createElement('div');
+  body.className = 'overview-body';
+  if (bodyText) {
+    const pre = document.createElement('pre');
+    pre.className = 'overview-pre';
+    pre.textContent = bodyText;
+    body.appendChild(pre);
+  }
+  sec.appendChild(body);
+  return sec;
+}
+
+async function loadOverviewChapter(num, readerEl) {
+  _overviewReadChapter = num;
+  const reader = readerEl || document.getElementById('overviewReader');
+  if (reader) reader.textContent = '加载中…';
+  const ch = await api(`/chapters/${num}`);
+  if (reader) {
+    reader.textContent = ch.content?.trim() || '（本章尚无正文）';
+  }
+  document.querySelectorAll('.overview-toc-item').forEach(el => {
+    el.classList.toggle('active', Number(el.dataset.num) === num);
+  });
+}
+
+async function editProjectMeta(current) {
+  const title = prompt('书名', current.title || '');
+  if (title === null) return;
+  const world_label = prompt('当前世界标签（如 世界一）', current.world_label || '');
+  if (world_label === null) return;
+  const tagline = prompt('一句话简介', current.tagline || '');
+  if (tagline === null) return;
+  await api('/project', {
+    method: 'PUT',
+    body: JSON.stringify({ title: title.trim(), world_label: world_label.trim(), tagline: tagline.trim() }),
+  });
+  await loadStatus();
+  await renderOverview();
+  toast('书目信息已更新');
+}
+
 // ── Status / settings ─────────────────────────
 async function loadStatus() {
   const s = await api('/status');
   updateApiKeyBanner(s);
-  document.getElementById('projectSub').textContent = `第${s.chapter_num || '—'}章 · ${s.provider_name}`;
+  const titleEl = document.querySelector('.brand-title');
+  if (titleEl && s.project_title) titleEl.textContent = s.project_title;
+  const sub = [
+    s.world_label || '单书',
+    s.chapter_num ? `第${s.chapter_num}章` : null,
+    s.provider_name,
+  ].filter(Boolean).join(' · ');
+  document.getElementById('projectSub').textContent = sub;
   document.getElementById('ctxTurns').value = s.context_turns;
   document.getElementById('ctxMode').value = s.context_mode;
   document.getElementById('providerSel').value = s.provider;

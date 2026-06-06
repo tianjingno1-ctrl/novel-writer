@@ -25,6 +25,7 @@
   </div>
 
   <nav class="mode-tabs">
+    <button class="mode-tab" data-mode="overview" onclick="setMode('overview')">概览</button>
     <button class="mode-tab" data-mode="plan" onclick="setMode('plan')">规划</button>
     <button class="mode-tab active" data-mode="write" onclick="setMode('write')">写作</button>
     <button class="mode-tab" data-mode="chat" onclick="setMode('chat')">写书对话</button>
@@ -57,6 +58,11 @@
   <!-- 主工作区 -->
   <main class="workspace" id="workspace">
 
+    <!-- OVERVIEW：书架 / 像看小说一样总览 -->
+    <section class="view view-overview hidden" id="viewOverview">
+      <div class="overview-shell" id="overviewShell"></div>
+    </section>
+
     <!-- PLAN：场景看板 -->
     <section class="view view-plan hidden" id="viewPlan">
       <div class="view-toolbar">
@@ -82,6 +88,7 @@
         <h2 id="mainTitle">章节正文</h2>
         <div class="row-actions">
           <select id="writeChapterSel" onchange="onWriteChapterChange()"></select>
+          <button class="btn btn-sm btn-danger hidden" id="deleteCodexBtn" onclick="deleteCodexEntry()">删除条目</button>
           <button class="btn btn-primary" onclick="saveEditor()">保存</button>
         </div>
       </div>
@@ -99,7 +106,28 @@
       <div class="chat-thread-bar">
         <span class="thread-label">写书对话</span>
         <span class="thread-hint" id="chatSceneHint"></span>
+        <button class="btn btn-sm btn-ghost" onclick="openChapterFromChat()">查看本章正文</button>
         <button class="btn btn-sm btn-ghost" onclick="clearChat()">清空</button>
+      </div>
+      <div id="chatComparePanel" class="chat-compare hidden">
+        <div class="chat-compare-head">
+          <span id="chatCompareTitle">第 1 轮对照</span>
+          <span id="chatCompareSaved" class="chat-compare-badge hidden">✓ 本轮 AI 正文已写入章节</span>
+          <button class="btn btn-sm btn-ghost" onclick="closeChatCompare()">关闭对照</button>
+        </div>
+        <div class="chat-compare-cols">
+          <div class="chat-compare-col">
+            <h4>你的指令</h4>
+            <pre id="chatCompareUser"></pre>
+          </div>
+          <div class="chat-compare-col">
+            <h4>AI 回复</h4>
+            <pre id="chatCompareAi"></pre>
+          </div>
+        </div>
+        <div class="chat-compare-actions">
+          <button class="btn btn-sm" onclick="openChapterFromChat()">去写作模式核对章节</button>
+        </div>
       </div>
       <div class="chat-messages" id="chatMessages"></div>
       <div class="chat-compose">
@@ -111,7 +139,7 @@
             <option value="kie-opus">Claude Opus 4.6</option>
             <option value="kie-opus-47">Claude Opus 4.7</option>
             <option value="kie-opus-48">Claude Opus 4.8</option>
-            <option value="deepseek">DeepSeek</option>
+            <option value="deepseek">DeepSeek V4 Pro</option>
           </select>
         </div>
         <textarea id="chatInstruction" rows="4" placeholder="写作指令：续写 1500 字，番茄风格，章末留悬念…"></textarea>
@@ -142,7 +170,7 @@
             <option value="kie-opus">Claude Opus 4.6</option>
             <option value="kie-opus-47">Claude Opus 4.7</option>
             <option value="kie-opus-48">Claude Opus 4.8</option>
-            <option value="deepseek">DeepSeek</option>
+            <option value="deepseek">DeepSeek V4 Pro</option>
           </select>
         </div>
         <textarea id="freeChatInput" rows="4" placeholder="输入消息…"></textarea>

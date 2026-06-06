@@ -74,6 +74,23 @@ def _flatten_system(system: list[dict] | str) -> str:
     return "\n\n".join(p for p in parts if p)
 
 
+def _is_kie_base_url(base_url: str) -> bool:
+    return "kie.ai" in (base_url or "")
+
+
+def _kie_anthropic_http_client():
+    """kie.ai 拒绝 Anthropic SDK 默认 User-Agent，须改用 Bearer + 自定义 UA。"""
+    import httpx
+
+    def _hook(request: httpx.Request) -> None:
+        for key in list(request.headers.keys()):
+            if key.lower().startswith("x-stainless"):
+                del request.headers[key]
+        request.headers["user-agent"] = "novel-writer/1.0"
+
+    return httpx.Client(event_hooks={"request": [_hook]})
+
+
 class APIClient:
     def __init__(self) -> None:
         self._pool: dict[str, _ProviderClients] = {}
@@ -104,10 +121,14 @@ class APIClient:
                 raise ImportError("请先安装：pip install anthropic") from e
 
             cfg = config.get_provider_config(provider)
-            kwargs = {
-                "api_key": config.get_api_key(provider),
-                "base_url": cfg["base_url"],
-            }
+            api_key = config.get_api_key(provider)
+            kwargs: dict = {"base_url": cfg["base_url"]}
+            if _is_kie_base_url(cfg["base_url"]):
+                # kie 走 Authorization: Bearer；x-api-key 会 401
+                kwargs["auth_token"] = api_key
+                kwargs["http_client"] = _kie_anthropic_http_client()
+            else:
+                kwargs["api_key"] = api_key
             if config.cache_enabled(provider):
                 kwargs["default_headers"] = {
                     "anthropic-beta": "extended-cache-ttl-2025-04-11",

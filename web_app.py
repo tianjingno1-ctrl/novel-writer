@@ -19,7 +19,23 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 MAX_CONTENT_BYTES = 2 * 1024 * 1024  # 2MB，章节/Codex 文件
 MAX_API_TEXT_CHARS = 50_000  # 对话/指令等 API 文本
 VALID_CODEX_NAMES = frozenset(core.CODEX_FILES.keys())
-_LOCAL_CLIENTS = frozenset({"127.0.0.1", "::1", "localhost"})
+_LOCAL_CLIENTS = frozenset({
+    "127.0.0.1",
+    "::1",
+    "localhost",
+    "::ffff:127.0.0.1",
+})
+
+
+def _is_local_client(host: str) -> bool:
+    h = (host or "").strip().lower()
+    if not h:
+        return True
+    if h in _LOCAL_CLIENTS:
+        return True
+    if h.startswith("::ffff:127.0.0.1"):
+        return True
+    return False
 
 
 @asynccontextmanager
@@ -50,7 +66,7 @@ async def web_auth_middleware(request: Request, call_next):
                 status_code=401,
                 content={"detail": "需要有效的 X-Novel-Token（与 .env 中 NOVEL_WEB_TOKEN 一致）"},
             )
-    elif client_host and client_host not in _LOCAL_CLIENTS:
+    elif client_host and not _is_local_client(client_host):
         return JSONResponse(
             status_code=403,
             content={
@@ -241,6 +257,39 @@ def status() -> dict:
     return status_data
 
 
+class ProjectUpdate(BaseModel):
+    title: str | None = None
+    world_label: str | None = None
+    tagline: str | None = None
+    notes: str | None = None
+
+
+@app.get("/api/project")
+def get_project() -> dict:
+    return novel_data.get_project_meta()
+
+
+@app.put("/api/project")
+def put_project(body: ProjectUpdate) -> dict:
+    fields = body.model_dump(exclude_unset=True)
+    return novel_data.save_project_meta(**fields)
+
+
+@app.get("/api/overview")
+def bookshelf_overview() -> dict:
+    chapters = core.list_chapters()
+    stats = _compute_stats(chapters)
+    latest = core.get_latest_chapter()
+    current = latest[0] if latest else None
+    return novel_data.build_bookshelf_overview(
+        chapters=chapters,
+        chapter_stats=stats.get("chapters", []),
+        summaries_text=core.read_text(core.SUMMARIES_FILE),
+        world_text=core.read_text(core.WORLD_FILE),
+        current_chapter=current,
+    )
+
+
 @app.get("/api/stats")
 def stats() -> dict:
     global _stats_cache, _stats_sig
@@ -411,11 +460,17 @@ def codex_entry_save(entry_id: str, body: ContentBody) -> dict:
     return _require_ok(novel_data.save_codex_entry(entry_id, body.content), "保存失败")
 
 
+@app.delete("/api/codex-entries/{entry_id}")
+def codex_entry_delete(entry_id: str) -> dict:
+    return _require_ok(novel_data.delete_codex_entry(entry_id), "删除失败")
+
+
 # ── 对话 ──────────────────────────────────────────
 @app.get("/api/chat/history")
 def chat_history() -> dict:
     return {
         "messages": core.get_chat_history(),
+        "appended_indices": core.get_appended_indices(),
         "context_turns": config.CHAT_CONTEXT_TURNS,
         "context_mode": config.CONTEXT_MODE,
     }

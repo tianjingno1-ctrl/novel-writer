@@ -286,6 +286,12 @@ def get_last_call_info() -> dict:
 
 
 def _api_error_message(exc: Exception) -> str:
+    raw = str(exc)
+    if "blocked" in raw.lower():
+        return (
+            f"{raw} — 多为 AI 服务商（kie/Cloudflare）拦截。"
+            "可尝试：① 换 DeepSeek 模型 ② 检查 .env 的 KIE_API_KEY ③ 缩短/调整指令内容 ④ 稍后重试"
+        )
     if isinstance(exc, APIError):
         hints = {
             "auth": "请检查 .env 中的 API Key 是否正确",
@@ -294,8 +300,8 @@ def _api_error_message(exc: Exception) -> str:
             "network": "网络连接失败，请检查网络",
         }
         hint = hints.get(exc.kind)
-        return f"{exc} — {hint}" if hint else str(exc)
-    return str(exc)
+        return f"{exc} — {hint}" if hint else raw
+    return raw
 
 
 def call_api(
@@ -923,6 +929,10 @@ def get_chat_history() -> list[dict]:
     return list(state.conversation_history)
 
 
+def get_appended_indices() -> list[int]:
+    return sorted(state.appended_indices)
+
+
 def _trim_free_history() -> list[dict]:
     turns = config.FREE_CHAT_CONTEXT_TURNS
     if turns <= 0 or len(state.free_chat_history) <= turns * 2:
@@ -1026,7 +1036,10 @@ def clear_chat_session() -> None:
 def get_app_status() -> dict:
     latest = get_latest_chapter()
     cfg = config.get_provider_config()
+    project = novel_data.get_project_meta()
     return {
+        "project_title": project.get("title", ""),
+        "world_label": project.get("world_label", ""),
         "provider": config.PROVIDER,
         "provider_name": cfg["name"],
         "model": cfg["model"],

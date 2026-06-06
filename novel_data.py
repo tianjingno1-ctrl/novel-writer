@@ -15,8 +15,16 @@ _BASE = Path(__file__).resolve().parent
 DATA_DIR = _BASE / "data"
 BACKUPS_DIR = DATA_DIR / "backups"
 PLAN_FILE = DATA_DIR / "plan.json"
+PROJECT_FILE = DATA_DIR / "project.json"
 CODEX_DIR = DATA_DIR / "codex" / "entries"
 CODEX_ACTIVE_FILE = DATA_DIR / "codex" / "active.json"
+
+DEFAULT_PROJECT = {
+    "title": "未命名小说",
+    "world_label": "",
+    "tagline": "",
+    "notes": "",
+}
 
 _plan_lock = threading.RLock()
 
@@ -305,6 +313,21 @@ def create_codex_entry(name: str, content: str = "") -> dict:
     return save_codex_entry(safe, default)
 
 
+def delete_codex_entry(name: str) -> dict:
+    _ensure_dirs()
+    safe = _sanitize_codex_name(name)
+    if not safe:
+        return {"ok": False, "error": "名称无效"}
+    path = CODEX_DIR / f"{safe}.md"
+    if not path.exists():
+        return {"ok": False, "error": "条目不存在"}
+    backup_file(path)
+    path.unlink()
+    ids = [x for x in get_active_codex_ids() if x != safe]
+    set_active_codex_ids(ids)
+    return {"ok": True, "id": safe}
+
+
 def get_active_codex_ids() -> list[str]:
     _ensure_dirs()
     data = _load_json(CODEX_ACTIVE_FILE, {"active": []})
@@ -327,3 +350,95 @@ def format_active_codex_text() -> str:
         if entry:
             parts.append(f"## {entry['name']}\n{entry['content']}")
     return "\n\n".join(parts)
+
+
+def get_project_meta() -> dict:
+    _ensure_dirs()
+    if not PROJECT_FILE.exists():
+        _save_json(PROJECT_FILE, DEFAULT_PROJECT)
+    meta = _load_json(PROJECT_FILE, DEFAULT_PROJECT)
+    for key, default in DEFAULT_PROJECT.items():
+        meta.setdefault(key, default)
+    return meta
+
+
+def save_project_meta(**fields: str) -> dict:
+    meta = get_project_meta()
+    for key, value in fields.items():
+        if key in DEFAULT_PROJECT and value is not None:
+            meta[key] = str(value).strip()
+    _save_json(PROJECT_FILE, meta)
+    return meta
+
+
+def _excerpt(text: str, limit: int = 480) -> str:
+    t = (text or "").strip()
+    if len(t) <= limit:
+        return t
+    return t[:limit].rstrip() + "…"
+
+
+def build_bookshelf_overview(
+    *,
+    chapters: list[tuple[int, object]],
+    chapter_stats: list[dict],
+    summaries_text: str,
+    world_text: str,
+    current_chapter: int | None,
+) -> dict:
+    """书架概览：书名、世界、大纲、章节目录。"""
+    project = get_project_meta()
+    plan = load_plan()
+    stats_by_num = {c["num"]: c for c in chapter_stats}
+    active_ids = get_active_codex_ids()
+
+    outline = []
+    for num, _path in chapters:
+        key = str(num)
+        ch = plan.get("chapters", {}).get(key, {})
+        scenes = []
+        for s in ch.get("scenes", []):
+            scenes.append({
+                "id": s.get("id"),
+                "title": s.get("title", ""),
+                "beat": _excerpt(s.get("beat", ""), 200),
+                "done": bool(s.get("done")),
+            })
+        outline.append({
+            "num": num,
+            "title": ch.get("title") or f"第{num}章",
+            "chars": stats_by_num.get(num, {}).get("chars", 0),
+            "scenes": scenes,
+        })
+
+    active_worlds = []
+    for entry_id in active_ids:
+        entry = get_codex_entry(entry_id)
+        if not entry:
+            continue
+        active_worlds.append({
+            "id": entry["id"],
+            "name": entry["name"],
+            "preview": _excerpt(entry["content"], 600),
+        })
+
+    current_title = None
+    if current_chapter is not None:
+        ch = plan.get("chapters", {}).get(str(current_chapter), {})
+        current_title = ch.get("title") or f"第{current_chapter}章"
+
+    return {
+        "project": project,
+        "single_book_mode": True,
+        "multi_book_hint": (
+            "当前为单书模式（一个 data/ 目录 = 一本书）。"
+            "同时写多本：复制整个 novel_writer 文件夹，或 Git 分支隔离各自的 data/。"
+        ),
+        "current_chapter": current_chapter,
+        "current_chapter_title": current_title,
+        "world_excerpt": _excerpt(world_text, 800),
+        "active_worlds": active_worlds,
+        "outline": outline,
+        "summaries_excerpt": _excerpt(summaries_text, 1200),
+        "chapter_count": len(chapters),
+    }

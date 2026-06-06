@@ -157,6 +157,44 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 }
 .editor:focus { outline: none; }
 
+/* Overview / 书架 */
+.view-overview { overflow-y: auto; }
+.overview-shell { max-width: 920px; margin: 0 auto; padding: 28px 32px 48px; }
+.overview-hero { margin-bottom: 24px; }
+.overview-hero-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.overview-title { font-size: 26px; font-weight: 700; font-family: var(--serif); }
+.overview-badge {
+  font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+  background: var(--accent-bg); color: var(--accent-2); border: 1px solid #e4deff;
+}
+.overview-tagline { color: var(--text-2); margin-top: 8px; font-size: 14px; }
+.overview-current { margin-top: 12px; font-size: 13px; color: var(--text-2); }
+.overview-hint {
+  font-size: 12px; color: var(--text-3); background: var(--panel); border: 1px dashed var(--border);
+  border-radius: var(--radius-sm); padding: 10px 14px; margin-bottom: 20px; line-height: 1.6;
+}
+.overview-section { margin-bottom: 28px; }
+.overview-section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.overview-section-head h2 { font-size: 14px; font-weight: 600; color: var(--text-2); }
+.overview-pre, .overview-reader {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 14px 16px; font-size: 13px; line-height: 1.7; white-space: pre-wrap; word-break: break-word;
+  font-family: var(--font); margin: 0;
+}
+.overview-reader {
+  margin-top: 12px; max-height: 50vh; overflow-y: auto; font-family: var(--serif); font-size: 16px; line-height: 1.85;
+}
+.overview-outline { display: flex; flex-direction: column; gap: 14px; }
+.overview-chapter-block h3 { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+.overview-chapter-block ul { margin-left: 1.2em; color: var(--text-2); font-size: 13px; line-height: 1.6; }
+.overview-toc { display: flex; flex-direction: column; gap: 6px; }
+.overview-toc-item {
+  text-align: left; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); cursor: pointer; font-size: 13px;
+}
+.overview-toc-item:hover { border-color: var(--accent); background: var(--accent-bg); }
+.overview-toc-item.active { border-color: var(--accent-2); background: var(--accent-bg); font-weight: 600; }
+
 /* NC empty state */
 .nc-empty {
   flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px;
@@ -182,6 +220,34 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .msg.user { background: #f3f0ff; border: 1px solid #e4deff; }
 .msg.assistant { background: #f0fdf4; border: 1px solid #dcfce7; }
 .msg .label { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
+.msg.highlight { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.chat-compare {
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  padding: 12px 20px;
+  max-height: 42vh;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.chat-compare-head {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.chat-compare-head span:first-child { font-weight: 600; font-size: 13px; }
+.chat-compare-badge { font-size: 11px; color: var(--green); font-weight: 600; }
+.chat-compare-head .btn { margin-left: auto; }
+.chat-compare-cols {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-height: 0;
+}
+.chat-compare-col h4 { font-size: 11px; color: var(--text-3); margin-bottom: 6px; text-transform: uppercase; }
+.chat-compare-col pre {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 12px; font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  max-height: 28vh; overflow-y: auto; font-family: var(--font); margin: 0;
+}
+.chat-compare-actions { display: flex; gap: 8px; }
+.list-item.active { background: var(--accent-bg); border-color: var(--accent); }
 
 .chat-compose {
   border-top: 1px solid var(--border); padding: 16px 24px 20px;
@@ -228,6 +294,8 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 .btn:hover { background: var(--panel-2); }
 .btn-primary { background: var(--accent-2); border-color: #7c3aed; color: #fff; }
 .btn-primary:hover { background: #7c3aed; }
+.btn-danger { color: #dc2626; border-color: #fecaca; background: #fff; }
+.btn-danger:hover { background: #fef2f2; }
 .btn-sm { padding: 5px 10px; font-size: 12px; }
 .btn-lg { padding: 12px 24px; font-size: 15px; }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--text-2); }
