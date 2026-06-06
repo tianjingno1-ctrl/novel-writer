@@ -71,20 +71,36 @@ PLACEHOLDER_PREFIX = "在这里填"
 
 PROVIDERS = {
     "kie": {
-        "name": "kie.ai Claude",
+        "name": "kie.ai Claude Sonnet",
         "api_key_env": "KIE_API_KEY",
         "api_key_default": "在这里填你的_KIE_API_KEY",
         "base_url": "https://api.kie.ai/claude",
         "model": "claude-sonnet-4-6",
         "supports_cache": True,
         "client": "anthropic",
-        # 价格参考：2025-06，单位 USD / 1M tokens
+        # 价格参考：2025-06 预估，单位 USD / 1M tokens
         "price": {
             "cache_read": 0.30,
             "cache_write_5m": 3.75,
             "cache_write_1h": 6.00,
             "input": 3.00,
             "output": 15.00,
+        },
+    },
+    "kie-opus": {
+        "name": "kie.ai Claude Opus",
+        "api_key_env": "KIE_API_KEY",
+        "api_key_default": "在这里填你的_KIE_API_KEY",
+        "base_url": "https://api.kie.ai/claude",
+        "model": "claude-opus-4-6",
+        "supports_cache": True,
+        "client": "anthropic",
+        "price": {
+            "cache_read": 0.50,
+            "cache_write_5m": 6.25,
+            "cache_write_1h": 10.00,
+            "input": 5.00,
+            "output": 25.00,
         },
     },
     "deepseek": {

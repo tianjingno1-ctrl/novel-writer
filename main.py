@@ -1288,7 +1288,7 @@ def do_provider(arg: str) -> None:
     if not arg:
         print("可用提供商：")
         print(config.list_providers())
-        print("\n用法：/provider kie  或  /provider deepseek")
+        print("\n用法：/provider kie  |  /provider kie-opus  |  /provider deepseek")
         print("（只切换主力写作；/summary、/check、/outline 见 config.py）")
         return
 
@@ -1298,6 +1298,7 @@ def do_provider(arg: str) -> None:
         return
 
     config.PROVIDER = arg
+    config.save_runtime_settings()
     reset_client(arg)
     cfg = config.get_provider_config()
     print(f"✅ 主力写作已切换至 {cfg['name']}（模型: {cfg['model']}）")

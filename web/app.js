@@ -337,7 +337,9 @@ function updateWordCount() {
 }
 
 function configLabel(p) {
-  return p === 'kie' ? 'Claude' : 'DeepSeek';
+  if (p === 'kie') return 'Claude Sonnet 4.6';
+  if (p === 'kie-opus') return 'Claude Opus 4.6';
+  return 'DeepSeek';
 }
 
 function updateFreeProviderHint(provider) {

@@ -22,7 +22,8 @@ pip install -r requirements.txt
 
 | 场景 | 默认提供商 | 配置项 |
 |------|------------|--------|
-| 正文续写、润色 | kie (Claude) | `PROVIDER` |
+| 正文续写、润色 | kie (Claude Sonnet) | `PROVIDER` 或 Web 顶栏切换 |
+| 更强推理写作 | kie-opus (Claude Opus) | Web 写书对话区 / `/provider kie-opus` |
 | `/summary` 概述 | DeepSeek | `SUMMARY_PROVIDER` |
 | `/check` 检查 | DeepSeek | `CHECK_PROVIDER` |
 
@@ -40,7 +41,7 @@ pip install -r requirements.txt
 
    或在 `config.py` → `PROVIDERS["kie"]["api_key_default"]` 填写。
 
-3. 默认模型：`claude-sonnet-4-6`（可在 `PROVIDERS["kie"]["model"]` 修改）
+3. 默认模型：`claude-sonnet-4-6`（`kie`）；可选 `claude-opus-4-6`（`kie-opus`，同一 Key）
 
 ### DeepSeek
 

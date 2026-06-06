@@ -107,7 +107,8 @@
           <span class="compose-tag">+ 上下文</span>
           <span class="compose-hint" id="contextHint">beats 模式 · Codex 勾选自动注入</span>
           <select id="providerSel" class="model-sel" onchange="switchProvider()">
-            <option value="kie">Claude 主力</option>
+            <option value="kie">Claude Sonnet 4.6</option>
+            <option value="kie-opus">Claude Opus 4.6</option>
             <option value="deepseek">DeepSeek</option>
           </select>
         </div>
@@ -135,7 +136,8 @@
         <div class="compose-row">
           <span class="compose-hint" id="freeProviderHint">纯对话，无系统提示词</span>
           <select id="freeProviderSel" class="model-sel" onchange="switchFreeProvider()">
-            <option value="kie">Claude</option>
+            <option value="kie">Claude Sonnet</option>
+            <option value="kie-opus">Claude Opus</option>
             <option value="deepseek">DeepSeek</option>
           </select>
         </div>
@@ -164,7 +166,8 @@
   <div class="drawer-body">
     <label>写书主力模型</label>
     <select id="providerSelDrawer" onchange="syncProvider(this.value)">
-      <option value="kie">kie.ai Claude</option>
+      <option value="kie">Claude Sonnet 4.6</option>
+      <option value="kie-opus">Claude Opus 4.6</option>
       <option value="deepseek">DeepSeek</option>
     </select>
 
