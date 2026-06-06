@@ -20,10 +20,11 @@ const dataCache = {
 const API_TIMEOUT_MS = 120000;
 const STREAM_FIRST_BYTE_MS = 90000;
 const STREAM_CHUNK_IDLE_MS = 180000;
+const RENDER_DEBOUNCE_MS = 16;
 let _isSending = false;
 let _planSortable = null;
 let _autosaveTimer = null;
-let _renderScheduled = false;
+let _renderTimer = null;
 let _renderOpts = { chrome: false, main: false, sidebar: false };
 
 const GLOBAL_LABELS = {
@@ -67,14 +68,14 @@ function scheduleRender(hint) {
   } else if (typeof hint === 'object') {
     Object.assign(_renderOpts, hint);
   }
-  if (!_renderScheduled) {
-    _renderScheduled = true;
-    queueMicrotask(flushRender);
-  }
+  if (_renderTimer) clearTimeout(_renderTimer);
+  _renderTimer = setTimeout(() => {
+    _renderTimer = null;
+    flushRender();
+  }, RENDER_DEBOUNCE_MS);
 }
 
 async function flushRender() {
-  _renderScheduled = false;
   const opts = _renderOpts;
   _renderOpts = { chrome: false, main: false, sidebar: false };
 
@@ -137,7 +138,11 @@ function cloneTpl(id) {
 }
 
 function cloneTplEl(id) {
-  return cloneTpl(id)?.firstElementChild || null;
+  const tpl = document.getElementById(id);
+  if (!tpl) throw new Error(`模板 #${id} 不存在，请检查 index.html`);
+  const el = tpl.content.cloneNode(true).firstElementChild;
+  if (!el) throw new Error(`模板 #${id} 内容为空`);
+  return el;
 }
 
 function clearEl(el) {
@@ -170,13 +175,23 @@ async function ensurePlanData(force = false) {
   return dataCache;
 }
 
+function invalidateCache(keys = ['all']) {
+  const all = keys.includes('all');
+  if (all || keys.includes('plan')) {
+    dataCache.chapters = [];
+    dataCache.planByNum = {};
+  }
+  if (all || keys.includes('codex')) {
+    dataCache.codex = { entries: [], active: [] };
+  }
+}
+
 function invalidatePlanCache() {
-  dataCache.chapters = [];
-  dataCache.planByNum = {};
+  invalidateCache(['plan']);
 }
 
 function invalidateCodexCache() {
-  dataCache.codex = { entries: [], active: [] };
+  invalidateCache(['codex']);
 }
 
 function patchSceneInCache(sceneId, patch) {
@@ -577,6 +592,7 @@ function makeSceneCard(scene, chapterNum) {
 
 function applyPlanPartial({ sceneId, patch }) {
   updatePlanSceneCard(sceneId, patch);
+  patchSceneInCache(sceneId, patch);
 }
 
 function updatePlanSceneCard(sceneId, patch) {
@@ -687,7 +703,6 @@ function initPlanSortable(chapterNum) {
 
 async function toggleSceneDone(sceneId, done) {
   await api(`/plan/scenes/${sceneId}`, { method: 'PUT', body: JSON.stringify({ done }) });
-  patchSceneInCache(sceneId, { done });
   scheduleRender({
     planPartial: { sceneId, patch: { done } },
     sidebarPartial: state.sidebar === 'scenes' ? { type: 'scene', sceneId, patch: { done } } : null,
@@ -744,6 +759,7 @@ async function addScene(chapterNum) {
   if (!title) return;
   const r = await api('/plan/scenes', { method: 'POST', body: JSON.stringify({ chapter_num: chapterNum, title }) });
   invalidatePlanCache();
+  await ensurePlanData();
   await selectScene(r.scene.id, chapterNum);
   scheduleRender({ main: state.mode === 'plan', sidebar: state.sidebar === 'scenes' });
   toast('场景已创建');
@@ -753,7 +769,6 @@ async function saveBeat() {
   if (!state.currentSceneId) return;
   const beat = document.getElementById('beatEditor').value;
   await api(`/plan/scenes/${state.currentSceneId}`, { method: 'PUT', body: JSON.stringify({ beat }) });
-  patchSceneInCache(state.currentSceneId, { beat });
   scheduleRender({
     planPartial: { sceneId: state.currentSceneId, patch: { beat } },
     sidebarPartial: state.sidebar === 'scenes'
@@ -892,7 +907,6 @@ async function createCodexEntry() {
   const name = prompt('Codex 名称（人物/地点/物品）');
   if (!name) return;
   const r = await api('/codex-entries', { method: 'POST', body: JSON.stringify({ name }) });
-  if (!r.ok) return alert(r.error || '创建失败');
   invalidateCodexCache();
   scheduleRender({ sidebar: state.sidebar === 'codex' });
   openCodexEntry(r.id);
@@ -1078,6 +1092,7 @@ async function sendChat() {
     });
     document.getElementById('chatInstruction').value = '';
     applyStreamDoneMeta(doneMeta);
+    if (doneMeta?.chapter_saved) invalidateCache(['plan']);
     await loadChat(true);
     await loadStatus();
     if (doneMeta?.chapter_saved) toast(`已写入第${doneMeta.chapter_num}章`);
@@ -1147,8 +1162,7 @@ async function sendFreeChat() {
     errEl.textContent = '';
     showTypingIndicator('freeChatMessages');
     try {
-      const r = await api('/free-chat', { method: 'POST', body: JSON.stringify({ content, provider }) });
-      if (!r.ok) throw new Error(r.error);
+      await api('/free-chat', { method: 'POST', body: JSON.stringify({ content, provider }) });
       input.value = '';
       await loadFreeChat();
       await loadStatus();
@@ -1169,8 +1183,8 @@ async function clearFreeChat() {
 async function runSummary() {
   await runWithLoading(async () => {
     const r = await api('/summary', { method: 'POST' });
-    if (!r.ok) return alert(r.error);
     toast('概述已追加到 summaries.md');
+    invalidateCache(['plan']);
     alert(r.reply);
   }, { btnId: 'runSummaryBtn', loadingText: '生成中…' });
 }
@@ -1178,7 +1192,6 @@ async function runSummary() {
 async function runCheck() {
   await runWithLoading(async () => {
     const r = await api('/check', { method: 'POST' });
-    if (!r.ok) return alert(r.error);
     alert(r.reply);
   }, { btnId: 'runCheckBtn', loadingText: '检查中…' });
 }

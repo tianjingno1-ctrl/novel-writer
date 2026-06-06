@@ -35,6 +35,61 @@ _stats_sig: tuple | None = None
 _stats_lock = threading.Lock()
 
 
+def _require_ok(result: dict, default_msg: str = "操作失败") -> dict:
+    """将 core 层 {ok: false, error} 统一转为 HTTPException。"""
+    if not result.get("ok", True):
+        raise HTTPException(400, result.get("error", default_msg))
+    return result
+
+
+def _build_stats_sig(chapters: list[tuple[int, object]]) -> tuple:
+    sig_parts: list[tuple] = []
+    for num, path in chapters:
+        st = path.stat()
+        sig_parts.append((num, st.st_mtime_ns, st.st_size))
+    if novel_data.PLAN_FILE.exists():
+        st = novel_data.PLAN_FILE.stat()
+        sig_parts.append(("plan", st.st_mtime_ns, st.st_size))
+    codex_dir = novel_data.CODEX_DIR
+    if codex_dir.exists():
+        for p in sorted(codex_dir.glob("*.md")):
+            st = p.stat()
+            sig_parts.append((p.name, st.st_mtime_ns, st.st_size))
+    for extra in (core.SUMMARIES_FILE, core.COST_LOG):
+        if extra.exists():
+            st = extra.stat()
+            sig_parts.append((extra.name, st.st_mtime_ns, st.st_size))
+    return tuple(sig_parts)
+
+
+def _compute_stats(chapters: list[tuple[int, object]]) -> dict:
+    import re
+
+    chapter_stats = []
+    total_chars = 0
+    for num, path in chapters:
+        text = core.read_text(path)
+        chars = len(re.sub(r"\s", "", text))
+        total_chars += chars
+        chapter_stats.append({"num": num, "chars": chars, "file": path.name})
+
+    plan = novel_data.load_plan()
+    scene_count = sum(
+        len(ch.get("scenes", [])) for ch in plan.get("chapters", {}).values()
+    )
+    codex_count = len(novel_data.list_codex_entries())
+
+    return {
+        "total_chars": total_chars,
+        "chapter_count": len(chapters),
+        "scene_count": scene_count,
+        "codex_count": codex_count,
+        "summary_count": core.count_summaries(),
+        "total_cost": core.total_cost,
+        "chapters": chapter_stats,
+    }
+
+
 def _check_file_content(v: str) -> str:
     if len(v.encode("utf-8")) > MAX_CONTENT_BYTES:
         mb = MAX_CONTENT_BYTES // 1024 // 1024
@@ -148,60 +203,18 @@ def status() -> dict:
 
 @app.get("/api/stats")
 def stats() -> dict:
-    import re
-
     global _stats_cache, _stats_sig
 
     chapters = core.list_chapters()
-    sig_parts: list[tuple] = []
-    for num, path in chapters:
-        st = path.stat()
-        sig_parts.append((num, st.st_mtime_ns, st.st_size))
-    if novel_data.PLAN_FILE.exists():
-        st = novel_data.PLAN_FILE.stat()
-        sig_parts.append(("plan", st.st_mtime_ns, st.st_size))
-    codex_dir = novel_data.CODEX_DIR
-    if codex_dir.exists():
-        for p in sorted(codex_dir.glob("*.md")):
-            st = p.stat()
-            sig_parts.append((p.name, st.st_mtime_ns, st.st_size))
-    for extra in (core.SUMMARIES_FILE, core.COST_LOG):
-        if extra.exists():
-            st = extra.stat()
-            sig_parts.append((extra.name, st.st_mtime_ns, st.st_size))
-    sig = tuple(sig_parts)
+    sig = _build_stats_sig(chapters)
 
     with _stats_lock:
         if _stats_cache is not None and _stats_sig == sig:
             return _stats_cache
-
-    chapter_stats = []
-    total_chars = 0
-    for num, path in chapters:
-        text = core.read_text(path)
-        chars = len(re.sub(r"\s", "", text))
-        total_chars += chars
-        chapter_stats.append({"num": num, "chars": chars, "file": path.name})
-
-    plan = novel_data.load_plan()
-    scene_count = sum(
-        len(ch.get("scenes", [])) for ch in plan.get("chapters", {}).values()
-    )
-    codex_count = len(novel_data.list_codex_entries())
-
-    result = {
-        "total_chars": total_chars,
-        "chapter_count": len(chapters),
-        "scene_count": scene_count,
-        "codex_count": codex_count,
-        "summary_count": core.count_summaries(),
-        "total_cost": core.total_cost,
-        "chapters": chapter_stats,
-    }
-    with _stats_lock:
+        result = _compute_stats(chapters)
         _stats_cache = result
         _stats_sig = sig
-    return result
+        return result
 
 
 # ── 章节 ──────────────────────────────────────────
@@ -323,10 +336,7 @@ def get_codex(name: str) -> dict:
 def put_codex(name: str, body: ContentBody) -> dict:
     if name not in VALID_CODEX_NAMES:
         raise HTTPException(400, "非法设定文件名")
-    result = core.save_codex(name, body.content)
-    if not result.get("ok"):
-        raise HTTPException(400, result.get("error", "保存失败"))
-    return result
+    return _require_ok(core.save_codex(name, body.content), "保存失败")
 
 
 # ── Codex 条目 ────────────────────────────────────
@@ -340,10 +350,7 @@ def codex_entries() -> dict:
 
 @app.post("/api/codex-entries")
 def codex_entry_create(body: CodexCreate) -> dict:
-    result = novel_data.create_codex_entry(body.name, body.content)
-    if not result.get("ok"):
-        raise HTTPException(400, result.get("error", "创建失败"))
-    return result
+    return _require_ok(novel_data.create_codex_entry(body.name, body.content), "创建失败")
 
 
 @app.put("/api/codex-entries/active")
@@ -361,7 +368,7 @@ def codex_entry_get(entry_id: str) -> dict:
 
 @app.put("/api/codex-entries/{entry_id}")
 def codex_entry_save(entry_id: str, body: ContentBody) -> dict:
-    return novel_data.save_codex_entry(entry_id, body.content)
+    return _require_ok(novel_data.save_codex_entry(entry_id, body.content), "保存失败")
 
 
 # ── 对话 ──────────────────────────────────────────
@@ -377,7 +384,10 @@ def chat_history() -> dict:
 @app.post("/api/chat")
 def chat(req: ChatRequest) -> dict:
     core.touch_user_active()
-    return core.writing_chat(req.instruction, req.scene_beat, req.scene_id)
+    return _require_ok(
+        core.writing_chat(req.instruction, req.scene_beat, req.scene_id),
+        "写书对话失败",
+    )
 
 
 @app.post("/api/chat/stream")
@@ -413,9 +423,7 @@ def free_chat_history() -> dict:
 
 @app.put("/api/free-chat/provider")
 def set_free_chat_provider(body: ProviderSwitch) -> dict:
-    result = core.set_free_chat_provider(body.provider)
-    if not result.get("ok"):
-        raise HTTPException(400, result.get("error", "切换失败"))
+    _require_ok(core.set_free_chat_provider(body.provider), "切换失败")
     from providers import reset_client
 
     reset_client(body.provider)
@@ -425,7 +433,7 @@ def set_free_chat_provider(body: ProviderSwitch) -> dict:
 @app.post("/api/free-chat")
 def free_chat_send(body: FreeChatRequest) -> dict:
     core.touch_user_active()
-    return core.free_chat(body.content, provider=body.provider)
+    return _require_ok(core.free_chat(body.content, provider=body.provider), "自由聊失败")
 
 
 @app.post("/api/free-chat/clear")
@@ -436,12 +444,12 @@ def free_chat_clear() -> dict:
 
 @app.post("/api/summary")
 def run_summary() -> dict:
-    return core.api_run_summary()
+    return _require_ok(core.api_run_summary(), "生成概述失败")
 
 
 @app.post("/api/check")
 def run_check() -> dict:
-    return core.api_run_check()
+    return _require_ok(core.api_run_check(), "连续性检查失败")
 
 
 @app.put("/api/config/context")
