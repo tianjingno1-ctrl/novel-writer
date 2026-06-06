@@ -177,6 +177,31 @@ def set_active_scene(scene_id: str | None) -> dict:
     return {"active_scene_id": scene_id}
 
 
+def update_chapter_title(chapter_num: int, title: str) -> dict | None:
+    plan = load_plan()
+    key = str(chapter_num)
+    if key not in plan["chapters"]:
+        return None
+    plan["chapters"][key]["title"] = title.strip()
+    save_plan(plan)
+    return plan["chapters"][key]
+
+
+def reorder_scenes(chapter_num: int, scene_ids: list[str]) -> bool:
+    plan = load_plan()
+    key = str(chapter_num)
+    if key not in plan["chapters"]:
+        return False
+    scenes = plan["chapters"][key]["scenes"]
+    id_map = {s["id"]: s for s in scenes}
+    ordered = [id_map[sid] for sid in scene_ids if sid in id_map]
+    seen = {s["id"] for s in ordered}
+    ordered.extend(s for s in scenes if s["id"] not in seen)
+    plan["chapters"][key]["scenes"] = ordered
+    save_plan(plan)
+    return True
+
+
 def get_active_scene() -> dict | None:
     plan = load_plan()
     sid = plan.get("active_scene_id")

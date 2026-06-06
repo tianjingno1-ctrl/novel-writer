@@ -120,6 +120,7 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
   display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px;
   align-content: start;
 }
+.plan-scene-list { display: contents; }
 .scene-card {
   background: var(--panel); border: 1px dashed var(--border); border-radius: var(--radius);
   padding: 20px; cursor: pointer; transition: border-color .15s, background .15s;
@@ -127,7 +128,9 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
 }
 .scene-card:hover { border-color: var(--accent); background: var(--panel-2); }
 .scene-card.active { border-style: solid; border-color: var(--accent); background: var(--accent-bg); }
-.scene-card h4 { font-size: 14px; margin-bottom: 8px; }
+.scene-card h4 { font-size: 14px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.scene-card h4 input[type=checkbox] { flex-shrink: 0; cursor: pointer; }
+.scene-card.dragging { opacity: 0.6; }
 .scene-card p { font-size: 12px; color: var(--text-2); line-height: 1.5;
   display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .scene-card .tag { font-size: 10px; color: var(--text-3); margin-top: 10px; }

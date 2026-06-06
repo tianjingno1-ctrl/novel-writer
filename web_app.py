@@ -64,6 +64,14 @@ class SceneUpdate(BaseModel):
     done: bool | None = None
 
 
+class ChapterTitleUpdate(BaseModel):
+    title: str
+
+
+class SceneReorder(BaseModel):
+    scene_ids: list[str]
+
+
 class CodexCreate(BaseModel):
     name: str
     content: str = ""
@@ -155,6 +163,23 @@ def plan_all() -> dict:
 @app.get("/api/plan/full")
 def plan_full() -> dict:
     return {"chapters": novel_data.list_plan_details()}
+
+
+@app.put("/api/plan/{chapter_num}/title")
+def plan_update_chapter_title(chapter_num: int, body: ChapterTitleUpdate) -> dict:
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(400, "标题不能为空")
+    if novel_data.update_chapter_title(chapter_num, title) is None:
+        raise HTTPException(404, "章节不存在")
+    return {"ok": True, "title": title}
+
+
+@app.put("/api/plan/{chapter_num}/reorder")
+def plan_reorder_scenes(chapter_num: int, body: SceneReorder) -> dict:
+    if not novel_data.reorder_scenes(chapter_num, body.scene_ids):
+        raise HTTPException(404, "章节不存在")
+    return {"ok": True}
 
 
 @app.get("/api/plan/{chapter_num}")

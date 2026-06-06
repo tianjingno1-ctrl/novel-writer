@@ -61,6 +61,7 @@
     <section class="view view-plan hidden" id="viewPlan">
       <div class="view-toolbar">
         <select id="planChapterSel" onchange="onPlanChapterChange()"></select>
+        <button class="btn btn-sm" onclick="renameChapter()" title="重命名当前章节">重命名</button>
         <button class="btn btn-sm" onclick="addScene(state.currentChapter)">+ 场景</button>
       </div>
       <div id="planBoard" class="plan-board"></div>
@@ -185,6 +186,7 @@
 <div class="overlay hidden" id="overlay" onclick="toggleSettings()"></div>
 
 <div id="toast" class="toast"></div>
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

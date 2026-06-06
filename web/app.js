@@ -260,13 +260,21 @@ async function renderFreeChatsSidebar(body) {
 }
 
 // ── Plan board ─────────────────────────────────
+let _planSortable = null;
+
 async function renderPlanBoard() {
-  const { chapters } = await api('/chapters');
+  const [{ chapters }, { chapters: planChapters }] = await Promise.all([
+    api('/chapters'),
+    api('/plan/full'),
+  ]);
   state.chapters = chapters;
+  const planByNum = Object.fromEntries(planChapters.map(p => [p.num, p]));
   const sel = document.getElementById('planChapterSel');
-  sel.innerHTML = chapters.map(c =>
-    `<option value="${c.num}" ${c.num===state.currentChapter?'selected':''}>第${c.num}章</option>`
-  ).join('');
+  sel.innerHTML = chapters.map(c => {
+    const title = planByNum[c.num]?.title;
+    const label = title && title !== `第${c.num}章` ? `第${c.num}章 · ${title}` : `第${c.num}章`;
+    return `<option value="${c.num}">${esc(label)}</option>`;
+  }).join('');
 
   const board = document.getElementById('planBoard');
   const beatPanel = document.getElementById('planBeatPanel');
@@ -281,9 +289,10 @@ async function renderPlanBoard() {
     return;
   }
 
-  const num = state.currentChapter || chapters[chapters.length-1].num;
+  const num = state.currentChapter || chapters[chapters.length - 1].num;
   state.currentChapter = num;
-  const plan = await api(`/plan/${num}`);
+  sel.value = String(num);
+  const plan = planByNum[num] || (await api(`/plan/${num}`));
   const scenes = plan.scenes || [];
 
   if (!scenes.length) {
@@ -296,16 +305,68 @@ async function renderPlanBoard() {
     return;
   }
 
-  board.innerHTML = scenes.map(s => `
-    <div class="scene-card ${state.currentSceneId===s.id?'active':''}" onclick="selectScene('${s.id}', ${num})">
-      <h4>${s.done?'✓ ':''}${esc(s.title)}</h4>
+  board.innerHTML = `<div id="planSceneList" class="plan-scene-list">${
+    scenes.map(s => `
+    <div class="scene-card ${state.currentSceneId===s.id?'active':''}" data-id="${esc(s.id)}"
+         onclick="selectScene('${esc(s.id)}', ${num})">
+      <h4>
+        <input type="checkbox" ${s.done?'checked':''}
+          onclick="event.stopPropagation()"
+          onchange="toggleSceneDone('${esc(s.id)}', this.checked)"
+          title="标记完成" />
+        ${esc(s.title)}
+      </h4>
       <p>${esc(s.beat || '点击添加 Scene Beat…')}</p>
-      <div class="tag">第${num}章 · 场景</div>
-    </div>
-  `).join('') + `<div class="scene-card" style="display:flex;align-items:center;justify-content:center;min-height:140px" onclick="addScene(${num})">
+      <div class="tag">第${num}章 · 场景 · 可拖拽排序</div>
+    </div>`).join('')
+  }</div><div class="scene-card no-sort" style="display:flex;align-items:center;justify-content:center;min-height:140px" onclick="addScene(${num})">
     <span style="color:var(--text-3)">+ 添加场景</span></div>`;
 
+  initPlanSortable(num);
   beatPanel.classList.toggle('hidden', !state.currentSceneId);
+}
+
+function initPlanSortable(chapterNum) {
+  const list = document.getElementById('planSceneList');
+  if (!list || typeof Sortable === 'undefined') return;
+  if (_planSortable) {
+    _planSortable.destroy();
+    _planSortable = null;
+  }
+  _planSortable = Sortable.create(list, {
+    animation: 150,
+    draggable: '.scene-card',
+    ghostClass: 'dragging',
+    onEnd: async () => {
+      const ids = [...list.querySelectorAll('.scene-card')].map(el => el.dataset.id);
+      await api(`/plan/${chapterNum}/reorder`, {
+        method: 'PUT',
+        body: JSON.stringify({ scene_ids: ids }),
+      });
+      toast('场景顺序已更新');
+      refreshSidebar();
+    },
+  });
+}
+
+async function toggleSceneDone(sceneId, done) {
+  await api(`/plan/scenes/${sceneId}`, { method: 'PUT', body: JSON.stringify({ done }) });
+  if (state.mode === 'plan') renderPlanBoard();
+  refreshSidebar();
+}
+
+async function renameChapter() {
+  const num = state.currentChapter;
+  if (!num) return toast('请先选择章节');
+  const plan = await api(`/plan/${num}`);
+  const newTitle = prompt('章节标题', plan.title || `第${num}章`);
+  if (newTitle === null) return;
+  const title = newTitle.trim();
+  if (!title) return toast('标题不能为空');
+  await api(`/plan/${num}/title`, { method: 'PUT', body: JSON.stringify({ title }) });
+  await renderPlanBoard();
+  if (state.mode === 'write') await renderWriteView();
+  toast('章节标题已更新');
 }
 
 async function selectScene(sceneId, chapterNum) {
@@ -352,8 +413,12 @@ function onPlanChapterChange() {
 
 // ── Write ──────────────────────────────────────
 async function renderWriteView() {
-  const { chapters } = await api('/chapters');
+  const [{ chapters }, { chapters: planChapters }] = await Promise.all([
+    api('/chapters'),
+    api('/plan/full'),
+  ]);
   state.chapters = chapters;
+  const planByNum = Object.fromEntries(planChapters.map(p => [p.num, p]));
   const sel = document.getElementById('writeChapterSel');
   const empty = document.getElementById('writeEmpty');
   const editor = document.getElementById('mainEditor');
@@ -367,15 +432,26 @@ async function renderWriteView() {
 
   empty.classList.add('hidden');
   editor.classList.remove('hidden');
-  sel.innerHTML = chapters.map(c =>
-    `<option value="${c.num}">第${c.num}章</option>`
-  ).join('');
+  sel.innerHTML = chapters.map(c => {
+    const title = planByNum[c.num]?.title;
+    const label = title && title !== `第${c.num}章` ? `第${c.num}章 · ${title}` : `第${c.num}章`;
+    return `<option value="${c.num}">${esc(label)}</option>`;
+  }).join('');
 
-  const num = state.currentChapter || chapters[chapters.length-1].num;
+  const num = state.currentChapter || chapters[chapters.length - 1].num;
   await openChapter(num);
 }
 
+async function flushAutosave() {
+  clearTimeout(_autosaveTimer);
+  _autosaveTimer = null;
+  if (!state.editTarget) return;
+  await saveEditor({ silent: true });
+}
+
 async function openChapter(num) {
+  const switching = state.editTarget?.type !== 'chapter' || state.editTarget?.num !== num;
+  if (switching && state.editTarget) await flushAutosave();
   const ch = await api(`/chapters/${num}`);
   state.currentChapter = num;
   state.editTarget = { type: 'chapter', num };
@@ -434,6 +510,9 @@ async function newChapter() {
 }
 
 async function openCodexEntry(id) {
+  if (state.editTarget?.type !== 'codex-entry' || state.editTarget?.id !== id) {
+    await flushAutosave();
+  }
   const entry = await api(`/codex-entries/${id}`);
   state.editTarget = { type: 'codex-entry', id };
   setMode('write');
@@ -444,6 +523,9 @@ async function openCodexEntry(id) {
 }
 
 async function openGlobal(name) {
+  if (state.editTarget?.type !== 'global' || state.editTarget?.name !== name) {
+    await flushAutosave();
+  }
   const data = await api(`/codex/${name}`);
   state.editTarget = { type: 'global', name };
   setMode('write');
