@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
