@@ -81,6 +81,10 @@ cd novel_writer
 python main.py
 ```
 
+## 用户手册
+
+完整操作说明见 [docs/novel-writer-manual.md](./docs/novel-writer-manual.md)（界面、五大模式、FAQ、更新日志）。
+
 ## 给 AI / 协作者
 
 - 仓库**不含 API Key**，本地复制 `.env.example` → `.env` 后自行配置。
