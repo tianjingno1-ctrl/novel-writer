@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>小说写作助手</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<!-- 顶栏：对标 NC 的 Plan/Write/Chat/Review -->
+<header class="topbar">
+  <div class="brand">
+    <div class="brand-icon">✦</div>
+    <div>
+      <div class="brand-title">小说写作助手</div>
+      <div class="brand-sub" id="projectSub">单项目 · 本地</div>
+    </div>
+  </div>
+
+  <nav class="mode-tabs">
+    <button class="mode-tab" data-mode="plan" onclick="setMode('plan')">规划</button>
+    <button class="mode-tab active" data-mode="write" onclick="setMode('write')">写作</button>
+    <button class="mode-tab" data-mode="chat" onclick="setMode('chat')">写书对话</button>
+    <button class="mode-tab" data-mode="free" onclick="setMode('free')">自由聊</button>
+    <button class="mode-tab" data-mode="review" onclick="setMode('review')">统计</button>
+  </nav>
+
+  <div class="topbar-meta" id="topMeta">
+    <span id="wordCountPill" class="pill hidden">0 字</span>
+    <span id="cachePill" class="pill pill-cache hidden" title="上次请求缓存命中">cache —</span>
+  </div>
+
+  <button class="btn btn-ghost btn-icon" onclick="toggleSettings()" title="设置">⚙</button>
+</header>
+
+<div class="shell">
+  <!-- 左栏：随模式切换 Codex / 对话 / 场景 -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-tabs" id="sidebarTabs"></div>
+    <div class="sidebar-toolbar">
+      <input type="text" id="sidebarSearch" placeholder="搜索…" />
+      <button class="btn btn-sm btn-primary" id="sidebarAddBtn" onclick="sidebarAdd()">+</button>
+    </div>
+    <div class="sidebar-body" id="sidebarBody"></div>
+    <div class="sidebar-footer">
+      <div class="footer-stat" id="footerStat">—</div>
+    </div>
+  </aside>
+
+  <!-- 主工作区 -->
+  <main class="workspace" id="workspace">
+
+    <!-- PLAN：场景看板 -->
+    <section class="view view-plan hidden" id="viewPlan">
+      <div class="view-toolbar">
+        <select id="planChapterSel" onchange="onPlanChapterChange()"></select>
+        <button class="btn btn-sm" onclick="addScene(state.currentChapter)">+ 场景</button>
+      </div>
+      <div id="planBoard" class="plan-board"></div>
+      <div id="planBeatPanel" class="plan-beat-panel hidden">
+        <h3 id="planSceneTitle">场景</h3>
+        <label>Scene Beat</label>
+        <textarea id="beatEditor" rows="5" placeholder="导演式描述：谁、在哪、发生什么、情绪转折…"></textarea>
+        <div class="row-actions">
+          <button class="btn btn-primary" onclick="saveBeat()">保存 Beat</button>
+          <button class="btn" onclick="setMode('chat')">用此 Beat 去写书对话 →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- WRITE：正文编辑器 -->
+    <section class="view view-write" id="viewWrite">
+      <div class="view-toolbar">
+        <h2 id="mainTitle">章节正文</h2>
+        <div class="row-actions">
+          <select id="writeChapterSel" onchange="onWriteChapterChange()"></select>
+          <button class="btn btn-primary" onclick="saveEditor()">保存</button>
+        </div>
+      </div>
+      <div id="writeEmpty" class="nc-empty hidden">
+        <div class="nc-empty-box">
+          <p>还没有章节。创建第一章开始写作，或从 Plan 规划场景。</p>
+          <button class="btn btn-primary btn-lg" onclick="newChapter()">+ 创建第一章</button>
+        </div>
+      </div>
+      <textarea id="mainEditor" class="editor" placeholder="在这里写正文…"></textarea>
+    </section>
+
+    <!-- 写书对话：带设定上下文，自动写入章节 -->
+    <section class="view view-chat hidden" id="viewChat">
+      <div class="chat-thread-bar">
+        <span class="thread-label">写书对话</span>
+        <span class="thread-hint" id="chatSceneHint"></span>
+        <button class="btn btn-sm btn-ghost" onclick="clearChat()">清空</button>
+      </div>
+      <div class="chat-messages" id="chatMessages"></div>
+      <div class="chat-compose">
+        <div class="compose-row">
+          <span class="compose-tag">+ 上下文</span>
+          <span class="compose-hint" id="contextHint">beats 模式 · Codex 勾选自动注入</span>
+          <select id="providerSel" class="model-sel" onchange="switchProvider()">
+            <option value="kie">Claude 主力</option>
+            <option value="deepseek">DeepSeek</option>
+          </select>
+        </div>
+        <textarea id="chatInstruction" rows="4" placeholder="写作指令：续写 1500 字，番茄风格，章末留悬念…"></textarea>
+        <div class="compose-actions">
+          <button class="btn btn-primary" onclick="sendChat()">发送</button>
+          <button class="btn btn-sm" onclick="runSummary()">生成概述</button>
+          <button class="btn btn-sm" onclick="runCheck()">连续性检查</button>
+        </div>
+        <span id="chatError" class="error-text"></span>
+      </div>
+    </section>
+
+    <!-- 自由聊：与写作完全分离 -->
+    <section class="view view-free hidden" id="viewFree">
+      <div class="chat-thread-bar">
+        <span class="thread-label">自由聊天</span>
+        <span class="thread-hint" id="freeChatHint">普通聊天，无提示词限制，不写入章节</span>
+        <button class="btn btn-sm btn-ghost" onclick="clearFreeChat()">清空</button>
+      </div>
+      <div class="chat-messages" id="freeChatMessages"></div>
+      <div class="chat-compose">
+        <div class="compose-row">
+          <span class="compose-hint" id="freeProviderHint">纯对话，无系统提示词</span>
+          <select id="freeProviderSel" class="model-sel" onchange="switchFreeProvider()">
+            <option value="kie">Claude</option>
+            <option value="deepseek">DeepSeek</option>
+          </select>
+        </div>
+        <textarea id="freeChatInput" rows="4" placeholder="输入消息…"></textarea>
+        <div class="compose-actions">
+          <button class="btn btn-primary" onclick="sendFreeChat()">发送</button>
+        </div>
+        <span id="freeChatError" class="error-text"></span>
+      </div>
+    </section>
+
+    <!-- REVIEW：轻量统计（不做热力图） -->
+    <section class="view view-review hidden" id="viewReview">
+      <div class="review-grid" id="reviewGrid"></div>
+    </section>
+
+  </main>
+</div>
+
+<!-- 设置抽屉 -->
+<aside class="settings-drawer hidden" id="settingsDrawer">
+  <div class="drawer-head">
+    <h3>设置</h3>
+    <button class="btn btn-ghost" onclick="toggleSettings()">✕</button>
+  </div>
+  <div class="drawer-body">
+    <label>写书主力模型</label>
+    <select id="providerSelDrawer" onchange="syncProvider(this.value)">
+      <option value="kie">kie.ai Claude</option>
+      <option value="deepseek">DeepSeek</option>
+    </select>
+
+    <label>写书上下文策略</label>
+    <select id="ctxMode">
+      <option value="beats">场景 Beat + 概述（推荐）</option>
+      <option value="summaries">偏重章节概述</option>
+      <option value="turns">纯对话轮数</option>
+      <option value="codex">仅勾选 Codex 条目</option>
+    </select>
+
+    <label>写书对话保留轮数</label>
+    <input type="number" id="ctxTurns" min="0" max="100" value="10" />
+    <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="saveContext()">应用</button>
+
+    <hr class="divider" />
+    <div class="drawer-info" id="settingsInfo"></div>
+    <p class="hint">写书对话走三层 Prompt Cache（kie）。自由聊为普通对话，无系统提示词，不写章节。</p>
+  </div>
+</aside>
+<div class="overlay hidden" id="overlay" onclick="toggleSettings()"></div>
+
+<div id="toast" class="toast"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
