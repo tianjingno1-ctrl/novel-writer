@@ -427,9 +427,10 @@ async function openGlobal(name) {
 async function createCodexEntry() {
   const name = prompt('Codex 名称（人物/地点/物品）');
   if (!name) return;
-  await api('/codex-entries', { method: 'POST', body: JSON.stringify({ name }) });
+  const r = await api('/codex-entries', { method: 'POST', body: JSON.stringify({ name }) });
+  if (!r.ok) return alert(r.error || '创建失败');
   refreshSidebar();
-  openCodexEntry(name);
+  openCodexEntry(r.id);
 }
 
 async function toggleCodex(id, checked) {

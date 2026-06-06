@@ -114,7 +114,7 @@ def load_total_cost() -> float:
         return 0.0
     total = 0.0
     for line in COST_LOG.read_text(encoding="utf-8").splitlines():
-        m = re.search(r"费用:\s*\$?([\d.]+)", line)
+        m = re.search(r"费用:\s*\$?([\d.]+)\b", line)
         if m:
             total += float(m.group(1))
     return total
@@ -724,6 +724,7 @@ def _resolve_free_provider(provider: str | None = None) -> str:
 
 
 def save_free_chat() -> None:
+    FREE_CHAT_FILE.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "provider": free_chat_provider,
@@ -985,8 +986,8 @@ def do_heartbeat_toggle() -> None:
         print("当前提供商不支持 Prompt Cache，心跳无意义")
         return
     config.HEARTBEAT_ENABLED = not config.HEARTBEAT_ENABLED
-    state = "已开启" if config.HEARTBEAT_ENABLED else "已关闭"
-    print(f"智能心跳{state}")
+    status = "已开启" if config.HEARTBEAT_ENABLED else "已关闭"
+    print(f"智能心跳{status}")
 
 
 def do_provider(arg: str) -> None:

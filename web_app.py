@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import config
@@ -14,7 +15,16 @@ from pydantic import BaseModel
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
-app = FastAPI(title="小说写作助手")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    core.init_data_dirs()
+    core.total_cost = core.load_total_cost()
+    core.load_free_chat()
+    yield
+
+
+app = FastAPI(title="小说写作助手", lifespan=lifespan)
 
 
 class ChatRequest(BaseModel):
@@ -63,13 +73,7 @@ class CodexActive(BaseModel):
     active: list[str]
 
 
-@app.on_event("startup")
-def startup() -> None:
-    core.init_data_dirs()
-    core.total_cost = core.load_total_cost()
-    core.load_free_chat()
-
-
+# ── 路由 ──────────────────────────────────────────
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(WEB_DIR / "index.html")
@@ -214,14 +218,6 @@ def codex_entries() -> dict:
     }
 
 
-@app.get("/api/codex-entries/{entry_id}")
-def codex_entry_get(entry_id: str) -> dict:
-    entry = novel_data.get_codex_entry(entry_id)
-    if entry is None:
-        raise HTTPException(404, "条目不存在")
-    return entry
-
-
 @app.post("/api/codex-entries")
 def codex_entry_create(body: CodexCreate) -> dict:
     result = novel_data.create_codex_entry(body.name, body.content)
@@ -230,14 +226,22 @@ def codex_entry_create(body: CodexCreate) -> dict:
     return result
 
 
-@app.put("/api/codex-entries/{entry_id}")
-def codex_entry_save(entry_id: str, body: ContentBody) -> dict:
-    return novel_data.save_codex_entry(entry_id, body.content)
-
-
 @app.put("/api/codex-entries/active")
 def codex_set_active(body: CodexActive) -> dict:
     return novel_data.set_active_codex_ids(body.active)
+
+
+@app.get("/api/codex-entries/{entry_id}")
+def codex_entry_get(entry_id: str) -> dict:
+    entry = novel_data.get_codex_entry(entry_id)
+    if entry is None:
+        raise HTTPException(404, "条目不存在")
+    return entry
+
+
+@app.put("/api/codex-entries/{entry_id}")
+def codex_entry_save(entry_id: str, body: ContentBody) -> dict:
+    return novel_data.save_codex_entry(entry_id, body.content)
 
 
 # ── 对话 ──────────────────────────────────────────

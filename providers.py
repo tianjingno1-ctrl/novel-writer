@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import config
 
@@ -17,8 +17,8 @@ class TokenUsage:
 
 @dataclass
 class _ProviderClients:
-    anthropic=None
-    openai=None
+    anthropic: object | None = field(default=None)
+    openai: object | None = field(default=None)
 
 
 def _has_system(system: list[dict] | str | None) -> bool:

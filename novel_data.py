@@ -78,6 +78,7 @@ def ensure_chapter_plan(chapter_num: int, title: str = "") -> dict:
     key = str(chapter_num)
     if key not in plan["chapters"]:
         plan["chapters"][key] = {"title": title or f"第{chapter_num}章", "scenes": []}
+        save_plan(plan)
     return plan
 
 
