@@ -26,6 +26,7 @@ let _planSortable = null;
 let _autosaveTimer = null;
 let _renderTimer = null;
 let _renderOpts = { chrome: false, main: false, sidebar: false };
+let _editorSnapshot = null;
 
 const GLOBAL_LABELS = {
   world: '世界观 world.md',
@@ -740,6 +741,9 @@ async function renameChapter() {
   if (newTitle === null) return;
   const title = newTitle.trim();
   if (!title) return toast('标题不能为空');
+  const oldTitle = plan.title || `第${num}章`;
+  if (title === oldTitle) return;
+  if (!confirm(`将第${num}章标题由「${oldTitle}」改为「${title}」？`)) return;
   await api(`/plan/${num}/title`, { method: 'PUT', body: JSON.stringify({ title }) });
   invalidatePlanCache();
   scheduleRender({ main: true, sidebar: state.sidebar === 'scenes' });
@@ -818,6 +822,17 @@ async function renderWriteView() {
   const sel = document.getElementById('writeChapterSel');
   const empty = document.getElementById('writeEmpty');
   const editor = document.getElementById('mainEditor');
+  const t = state.editTarget;
+
+  // 编辑全局设定或 Codex 条目时不依赖章节，保留当前编辑器内容
+  if (t?.type === 'global' || t?.type === 'codex-entry') {
+    empty.classList.add('hidden');
+    editor.classList.remove('hidden');
+    if (sel) sel.style.display = 'none';
+    return;
+  }
+
+  if (sel) sel.style.display = '';
 
   if (!chapters.length) {
     clearEl(sel);
@@ -833,10 +848,23 @@ async function renderWriteView() {
   await openChapter(num);
 }
 
+function isEditorDirty() {
+  const ed = document.getElementById('mainEditor');
+  if (!ed || !state.editTarget) return false;
+  return _editorSnapshot !== null && ed.value !== _editorSnapshot;
+}
+
 async function flushAutosave() {
   clearTimeout(_autosaveTimer);
   _autosaveTimer = null;
   if (!state.editTarget) return;
+  if (state.editTarget.type === 'global') {
+    if (!isEditorDirty()) return;
+    if (confirm('全局设定有未保存的修改，是否保存？\n\n确定 = 保存并切换\n取消 = 不保存，丢弃修改')) {
+      await saveEditor({ silent: true, confirmed: true });
+    }
+    return;
+  }
   await saveEditor({ silent: true });
 }
 
@@ -850,6 +878,7 @@ async function openChapter(num) {
   );
   document.getElementById('mainTitle').textContent = `第${num}章 正文`;
   document.getElementById('mainEditor').value = ch.content;
+  _editorSnapshot = ch.content;
   document.getElementById('writeChapterSel').value = num;
   updateWordCount();
 }
@@ -861,11 +890,21 @@ function onWriteChapterChange() {
 function scheduleAutosave() {
   updateWordCount();
   if (!state.editTarget) return;
+  // 全局设定须手动保存并确认，避免误删段落被静默写入
+  if (state.editTarget.type === 'global') return;
   clearTimeout(_autosaveTimer);
   _autosaveTimer = setTimeout(() => saveEditor({ silent: true }), 2000);
 }
 
-async function saveEditor({ silent = false } = {}) {
+const GLOBAL_SAVE_HINTS = {
+  world: '世界观变更会影响后续所有章节的 AI 理解。',
+  characters: '建议只在末尾追加；删改旧段落会破坏「只增不改」与缓存命中。',
+  summaries: '概述通常由「生成概述」自动追加；手动删改可能导致前后矛盾。',
+  char_current: '人物当前状态可随章更新；大幅删改前请确认。',
+  plot_threads: '伏笔清单手动维护；删改前请确认。',
+};
+
+async function saveEditor({ silent = false, confirmed = false } = {}) {
   const t = state.editTarget;
   const content = document.getElementById('mainEditor').value;
   if (!t) return toast('请先选择章节或设定');
@@ -873,6 +912,7 @@ async function saveEditor({ silent = false } = {}) {
   try {
     if (t.type === 'chapter') {
       await api(`/chapters/${t.num}`, { method: 'PUT', body: JSON.stringify({ content }) });
+      _editorSnapshot = content;
       if (silent) {
         document.getElementById('wordCountPill')?.classList.add('saved-flash');
         setTimeout(() => document.getElementById('wordCountPill')?.classList.remove('saved-flash'), 1200);
@@ -882,11 +922,20 @@ async function saveEditor({ silent = false } = {}) {
       if (titleEl) titleEl.textContent = `第${t.num}章 正文`;
     } else if (t.type === 'codex-entry') {
       await api(`/codex-entries/${t.id}`, { method: 'PUT', body: JSON.stringify({ content }) });
+      _editorSnapshot = content;
       toast(silent ? 'Codex 已自动保存' : 'Codex 已保存');
       invalidateCodexCache();
     } else if (t.type === 'global') {
+      if (silent && !confirmed) return;
+      if (!confirmed) {
+        const label = GLOBAL_LABELS[t.name] || t.name;
+        const hint = GLOBAL_SAVE_HINTS[t.name] || '';
+        const msg = `保存「${label}」？\n\n${hint}\n\n（备份在 data/backups/）`;
+        if (!confirm(msg)) return;
+      }
       await api(`/codex/${t.name}`, { method: 'PUT', body: JSON.stringify({ content }) });
-      toast(silent ? '设定已自动保存' : '设定已保存');
+      _editorSnapshot = content;
+      toast('设定已保存');
     }
   } catch (e) {
     if (t.type === 'chapter' && titleEl) titleEl.textContent = `第${t.num}章 ⚠️ 保存失败`;
@@ -911,6 +960,7 @@ async function openCodexEntry(id) {
   setMode('write');
   document.getElementById('mainTitle').textContent = `Codex · ${entry.name}`;
   document.getElementById('mainEditor').value = entry.content;
+  _editorSnapshot = entry.content;
   document.getElementById('writeEmpty').classList.add('hidden');
   document.getElementById('mainEditor').classList.remove('hidden');
 }
@@ -922,6 +972,7 @@ async function openGlobal(name) {
   setMode('write');
   document.getElementById('mainTitle').textContent = GLOBAL_LABELS[name];
   document.getElementById('mainEditor').value = data.content;
+  _editorSnapshot = data.content;
   document.getElementById('writeEmpty').classList.add('hidden');
   document.getElementById('mainEditor').classList.remove('hidden');
 }
@@ -1219,6 +1270,7 @@ async function clearFreeChat() {
 }
 
 async function runSummary() {
+  if (!confirm('为最新章节生成概述并追加到 summaries.md？\n\n（只追加不覆盖；可撤销需从 backups 恢复）')) return;
   await runWithLoading(async () => {
     const r = await api('/summary', { method: 'POST' });
     toast('概述已追加到 summaries.md');
@@ -1252,6 +1304,7 @@ async function runOutline() {
 }
 
 async function undoChapterWrite() {
+  if (!confirm('撤销上一次 AI 自动写入章节的正文？\n\n（对话记录保留；可从 data/backups/ 恢复更早版本）')) return;
   await runWithLoading(async () => {
     const r = await api('/chapters/undo-last', { method: 'POST' });
     toast(`已撤销写入（${r.file}）`);
@@ -1380,7 +1433,7 @@ document.getElementById('mainEditor')?.addEventListener('input', scheduleAutosav
 document.getElementById('sidebarSearch').addEventListener('input', () => scheduleRender({ sidebar: true }));
 
 window.addEventListener('beforeunload', (e) => {
-  if (_autosaveTimer && state.editTarget) {
+  if ((_autosaveTimer && state.editTarget) || (state.editTarget?.type === 'global' && isEditorDirty())) {
     e.preventDefault();
     e.returnValue = '';
   }

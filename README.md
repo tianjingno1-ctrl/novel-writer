@@ -83,7 +83,7 @@ python main.py
 
 ## 用户手册
 
-完整操作说明见 [docs/novel-writer-manual.md](./docs/novel-writer-manual.md)（界面、五大模式、FAQ、更新日志）。
+完整操作说明见 [docs/novel-writer-manual.md](./docs/novel-writer-manual.md)（**§1.5 顺序写作手册**、界面、五大模式、FAQ、更新日志）。
 
 ## 给 AI / 协作者
 
