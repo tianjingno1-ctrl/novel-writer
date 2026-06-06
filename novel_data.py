@@ -153,7 +153,15 @@ def delete_scene(scene_id: str) -> bool:
             if scene["id"] == scene_id:
                 scenes.pop(i)
                 if plan.get("active_scene_id") == scene_id:
-                    plan["active_scene_id"] = scenes[-1]["id"] if scenes else None
+                    if scenes:
+                        plan["active_scene_id"] = scenes[-1]["id"]
+                    else:
+                        fallback = None
+                        for ch in plan.get("chapters", {}).values():
+                            if ch.get("scenes"):
+                                fallback = ch["scenes"][0]["id"]
+                                break
+                        plan["active_scene_id"] = fallback
                 save_plan(plan)
                 return True
     return False

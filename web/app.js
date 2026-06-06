@@ -72,6 +72,9 @@ async function api(path, opts = {}, timeoutMs = API_TIMEOUT_MS) {
       }
       throw new Error('请求超时，请检查网络或稍后重试');
     }
+    if (e instanceof TypeError) {
+      throw new Error('无法连接到服务，请确认后端已启动（python web_app.py）');
+    }
     throw e;
   } finally {
     clearTimeout(timer);
@@ -129,7 +132,10 @@ const SIDEBAR_CONFIG = {
 };
 
 function esc(s) {
-  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function jsEsc(s) {
@@ -469,15 +475,26 @@ async function renameChapter() {
 }
 
 async function selectScene(sceneId, chapterNum) {
-  state.currentSceneId = sceneId;
   state.currentChapter = chapterNum;
+  if (!sceneId) {
+    state.currentSceneId = null;
+    document.getElementById('planBeatPanel')?.classList.add('hidden');
+    if (state.mode === 'plan') renderPlanBoard();
+    refreshSidebar();
+    updateChatHints();
+    return;
+  }
+  state.currentSceneId = sceneId;
   await api(`/plan/active/${sceneId}`, { method: 'PUT' });
   const plan = await api(`/plan/${chapterNum}`);
-  const scene = plan.scenes.find(s => s.id === sceneId);
+  const scene = plan.scenes?.find(s => s.id === sceneId);
   if (scene) {
     document.getElementById('beatEditor').value = scene.beat || '';
     document.getElementById('planSceneTitle').textContent = scene.title;
     document.getElementById('planBeatPanel').classList.remove('hidden');
+  } else {
+    state.currentSceneId = null;
+    document.getElementById('planBeatPanel')?.classList.add('hidden');
   }
   if (state.mode === 'plan') renderPlanBoard();
   refreshSidebar();

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -14,7 +15,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
-MAX_CONTENT_BYTES = 2 * 1024 * 1024  # 2MB
+MAX_CONTENT_BYTES = 2 * 1024 * 1024  # 2MB，章节/Codex 文件
+MAX_API_TEXT_CHARS = 50_000  # 对话/指令等 API 文本
+VALID_CODEX_NAMES = frozenset(core.CODEX_FILES.keys())
 
 
 @asynccontextmanager
@@ -29,12 +32,29 @@ app = FastAPI(title="小说写作助手", lifespan=lifespan)
 
 _stats_cache: dict | None = None
 _stats_sig: tuple | None = None
+_stats_lock = threading.Lock()
+
+
+def _check_file_content(v: str) -> str:
+    if len(v.encode("utf-8")) > MAX_CONTENT_BYTES:
+        mb = MAX_CONTENT_BYTES // 1024 // 1024
+        raise ValueError(f"内容过大（上限 {mb}MB）")
+    return v
+
+
+def _check_api_text(v: str) -> str:
+    if len(v) > MAX_API_TEXT_CHARS:
+        raise ValueError(f"文本过长（上限 {MAX_API_TEXT_CHARS} 字符）")
+    return v
 
 
 class ChatRequest(BaseModel):
     instruction: str = ""
     scene_beat: str = ""
     scene_id: str = ""
+
+    _validate_instruction = field_validator("instruction")(_check_api_text)
+    _validate_scene_beat = field_validator("scene_beat")(_check_api_text)
 
 
 class ContentBody(BaseModel):
@@ -43,15 +63,14 @@ class ContentBody(BaseModel):
     @field_validator("content")
     @classmethod
     def check_size(cls, v: str) -> str:
-        if len(v.encode("utf-8")) > MAX_CONTENT_BYTES:
-            mb = MAX_CONTENT_BYTES // 1024 // 1024
-            raise ValueError(f"内容过大（上限 {mb}MB）")
-        return v
+        return _check_file_content(v)
 
 
 class FreeChatRequest(BaseModel):
     content: str
     provider: str | None = None
+
+    _validate_content = field_validator("content")(_check_api_text)
 
 
 class ContextConfig(BaseModel):
@@ -68,6 +87,9 @@ class SceneCreate(BaseModel):
     title: str = "新场景"
     beat: str = ""
 
+    _validate_title = field_validator("title")(_check_api_text)
+    _validate_beat = field_validator("beat")(_check_api_text)
+
 
 class SceneUpdate(BaseModel):
     title: str | None = None
@@ -75,9 +97,18 @@ class SceneUpdate(BaseModel):
     summary: str | None = None
     done: bool | None = None
 
+    @field_validator("title", "beat", "summary")
+    @classmethod
+    def check_optional_text(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return _check_api_text(v)
+
 
 class ChapterTitleUpdate(BaseModel):
     title: str
+
+    _validate_title = field_validator("title")(_check_api_text)
 
 
 class SceneReorder(BaseModel):
@@ -87,6 +118,13 @@ class SceneReorder(BaseModel):
 class CodexCreate(BaseModel):
     name: str
     content: str = ""
+
+    _validate_name = field_validator("name")(_check_api_text)
+
+    @field_validator("content")
+    @classmethod
+    def check_content(cls, v: str) -> str:
+        return _check_file_content(v)
 
 
 class CodexActive(BaseModel):
@@ -117,7 +155,8 @@ def stats() -> dict:
     chapters = core.list_chapters()
     sig_parts: list[tuple] = []
     for num, path in chapters:
-        sig_parts.append((num, path.stat().st_mtime_ns, path.stat().st_size))
+        st = path.stat()
+        sig_parts.append((num, st.st_mtime_ns, st.st_size))
     if novel_data.PLAN_FILE.exists():
         st = novel_data.PLAN_FILE.stat()
         sig_parts.append(("plan", st.st_mtime_ns, st.st_size))
@@ -131,8 +170,10 @@ def stats() -> dict:
             st = extra.stat()
             sig_parts.append((extra.name, st.st_mtime_ns, st.st_size))
     sig = tuple(sig_parts)
-    if _stats_cache is not None and _stats_sig == sig:
-        return _stats_cache
+
+    with _stats_lock:
+        if _stats_cache is not None and _stats_sig == sig:
+            return _stats_cache
 
     chapter_stats = []
     total_chars = 0
@@ -157,8 +198,9 @@ def stats() -> dict:
         "total_cost": core.total_cost,
         "chapters": chapter_stats,
     }
-    _stats_cache = result
-    _stats_sig = sig
+    with _stats_lock:
+        _stats_cache = result
+        _stats_sig = sig
     return result
 
 
@@ -256,6 +298,8 @@ def plan_delete_scene(scene_id: str) -> dict:
 
 @app.put("/api/plan/active/{scene_id}")
 def plan_set_active(scene_id: str) -> dict:
+    if novel_data.get_scene(scene_id) is None:
+        raise HTTPException(404, "场景不存在")
     return novel_data.set_active_scene(scene_id)
 
 
@@ -267,6 +311,8 @@ def codex_list() -> dict:
 
 @app.get("/api/codex/{name}")
 def get_codex(name: str) -> dict:
+    if name not in VALID_CODEX_NAMES:
+        raise HTTPException(400, "非法设定文件名")
     data = core.get_codex(name)
     if data is None:
         raise HTTPException(404, f"未知设定: {name}")
@@ -275,6 +321,8 @@ def get_codex(name: str) -> dict:
 
 @app.put("/api/codex/{name}")
 def put_codex(name: str, body: ContentBody) -> dict:
+    if name not in VALID_CODEX_NAMES:
+        raise HTTPException(400, "非法设定文件名")
     result = core.save_codex(name, body.content)
     if not result.get("ok"):
         raise HTTPException(400, result.get("error", "保存失败"))

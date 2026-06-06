@@ -1,5 +1,8 @@
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path(__file__).resolve().parent
 _ENV_CANDIDATES = (_CONFIG_DIR / ".env", _CONFIG_DIR / ".evn")
@@ -11,7 +14,9 @@ def _load_env_file() -> None:
     if env_path is None:
         return
     if env_path.name == ".evn":
-        print("提示：检测到 .evn 文件名，建议重命名为 .env（启动.bat 可自动处理）")
+        logger.warning(
+            "检测到 .evn 文件名，建议重命名为 .env（启动.bat 可自动处理）"
+        )
     for line in env_path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -65,6 +70,7 @@ PROVIDERS = {
         "model": "claude-sonnet-4-6",
         "supports_cache": True,
         "client": "anthropic",
+        # 价格参考：2025-06，单位 USD / 1M tokens
         "price": {
             "cache_read": 0.30,
             "cache_write_5m": 3.75,
@@ -81,6 +87,7 @@ PROVIDERS = {
         "model": "deepseek-chat",
         "supports_cache": False,
         "client": "openai",
+        # 价格参考：2025-06，单位 USD / 1M tokens
         "price": {
             "cache_read": 0.014,
             "cache_write_5m": 0.0,

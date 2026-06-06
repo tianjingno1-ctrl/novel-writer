@@ -61,6 +61,7 @@ last_request_time = 0.0
 last_user_active = time.time()
 total_cost = 0.0
 _cost_lock = threading.Lock()
+# 串行化 LLM 请求（call_api / writing_chat_stream），避免并发写会话与费用统计
 _request_lock = threading.Lock()
 _heartbeat_stop = threading.Event()
 _exiting = False
@@ -112,8 +113,14 @@ def load_total_cost() -> float:
     total = 0.0
     for line in COST_LOG.read_text(encoding="utf-8").splitlines():
         m = re.search(r"费用:\s*\$?([\d.]+)\b", line)
-        if m:
-            total += float(m.group(1))
+        if not m:
+            continue
+        try:
+            val = float(m.group(1))
+            if 0 <= val < 1000:
+                total += val
+        except ValueError:
+            pass
     return total
 
 
