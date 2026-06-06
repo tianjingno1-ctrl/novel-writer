@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 import config
+import file_utils
 import novel_data
 from providers import TokenUsage, get_client, reset_client
 from summarizer import (
@@ -92,15 +93,7 @@ def read_text(path: Path) -> str:
 
 
 def backup_file(path: Path) -> None:
-    """写入前自动备份。"""
-    if path.exists() and path.stat().st_size > 0:
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
-        dest = BACKUPS_DIR / f"{path.stem}_{ts}{path.suffix}"
-        shutil.copy2(path, dest)
-        old = sorted(BACKUPS_DIR.glob(f"{path.stem}_*{path.suffix}"))
-        for f in old[:-10]:
-            f.unlink(missing_ok=True)
+    file_utils.backup_file(path, BACKUPS_DIR)
 
 
 def write_text(path: Path, content: str, *, append: bool = False) -> None:
@@ -645,6 +638,23 @@ def do_writing(instruction: str) -> None:
 
 def writing_chat(instruction: str, scene_beat: str = "", scene_id: str = "") -> dict:
     """Web/API：结构化写作对话，返回 JSON 友好结果。"""
+    prep = _prepare_writing_turn(instruction, scene_beat, scene_id)
+    if not prep.get("ok"):
+        return prep
+
+    reply = call_api(prep["system"], prep["messages"], silent=True)
+    if reply is None:
+        conversation_history.pop()
+        info = get_last_call_info()
+        return {"ok": False, "error": info.get("error", "API 调用失败")}
+
+    return _finalize_writing_turn(reply, prep["chapter_num"])
+
+
+def _prepare_writing_turn(
+    instruction: str, scene_beat: str = "", scene_id: str = ""
+) -> dict:
+    """追加用户消息并构建 API 请求上下文。"""
     global session_includes_chapter
 
     beat_text = scene_beat.strip()
@@ -682,13 +692,15 @@ def writing_chat(instruction: str, scene_beat: str = "", scene_id: str = "") -> 
         user_content = full_instruction
 
     conversation_history.append({"role": "user", "content": user_content})
-    system = build_cached_system(WRITING_INSTRUCTION)
-    reply = call_api(system, prepare_messages_for_context(conversation_history), silent=True)
-    if reply is None:
-        conversation_history.pop()
-        info = get_last_call_info()
-        return {"ok": False, "error": info.get("error", "API 调用失败")}
+    return {
+        "ok": True,
+        "chapter_num": chapter_num,
+        "system": build_cached_system(WRITING_INSTRUCTION),
+        "messages": prepare_messages_for_context(conversation_history),
+    }
 
+
+def _finalize_writing_turn(reply: str, chapter_num: int) -> dict:
     conversation_history.append({"role": "assistant", "content": reply})
     msg_index = len(conversation_history) - 1
     save_chapter_after_reply(reply, msg_index)
@@ -707,6 +719,71 @@ def writing_chat(instruction: str, scene_beat: str = "", scene_id: str = "") -> 
         "history_len": len(conversation_history),
         **get_last_call_info(),
     }
+
+
+def writing_chat_stream(
+    instruction: str, scene_beat: str = "", scene_id: str = ""
+):
+    """流式写作对话，yield JSON 字符串事件。"""
+    global last_request_time, _last_call_info
+
+    prep = _prepare_writing_turn(instruction, scene_beat, scene_id)
+    if not prep.get("ok"):
+        yield json.dumps({"type": "error", "message": prep["error"]}, ensure_ascii=False)
+        return
+
+    pid = config.resolve_provider(None)
+    if not config.is_api_key_configured(pid):
+        conversation_history.pop()
+        cfg = config.get_provider_config(pid)
+        err = f"请设置 {cfg['api_key_env']}，或在 .env / config.py 中填写 API Key"
+        yield json.dumps({"type": "error", "message": err}, ensure_ascii=False)
+        return
+
+    chunks: list[str] = []
+    try:
+        with _request_lock:
+            for chunk in get_client().iter_message(
+                prep["system"],
+                prep["messages"],
+                max_tokens=config.MAX_TOKENS,
+                provider=pid,
+            ):
+                chunks.append(chunk)
+                yield json.dumps({"type": "chunk", "text": chunk}, ensure_ascii=False)
+            last_request_time = time.time()
+        usage = get_client().pop_stream_usage()
+        cost = calc_cost(usage, provider=pid)
+        log_cost(usage, cost, "请求", provider=pid, silent=True)
+        cfg = config.get_provider_config(pid)
+        _last_call_info = {
+            "ok": True,
+            "provider": pid,
+            "provider_name": cfg["name"],
+            "cost": cost,
+            "total_cost": total_cost,
+            "usage": {
+                "cache_read": usage.cache_read_input_tokens,
+                "cache_write": usage.cache_creation_input_tokens,
+                "input": usage.input_tokens,
+                "output": usage.output_tokens,
+            },
+        }
+    except Exception as e:
+        conversation_history.pop()
+        yield json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
+        return
+
+    reply = "".join(chunks)
+    result = _finalize_writing_turn(reply, prep["chapter_num"])
+    yield json.dumps(
+        {
+            "type": "done",
+            "chapter_num": result["chapter_num"],
+            "chapter_saved": result["chapter_saved"],
+        },
+        ensure_ascii=False,
+    )
 
 
 def get_chat_history() -> list[dict]:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 
 import config
@@ -44,6 +45,12 @@ def _flatten_system(system: list[dict] | str) -> str:
 class APIClient:
     def __init__(self) -> None:
         self._pool: dict[str, _ProviderClients] = {}
+        self._last_stream_usage: TokenUsage | None = None
+
+    def pop_stream_usage(self) -> TokenUsage:
+        usage = self._last_stream_usage or TokenUsage()
+        self._last_stream_usage = None
+        return usage
 
     def reset(self, provider: str | None = None) -> None:
         if provider is None:
@@ -105,6 +112,88 @@ class APIClient:
         if cfg["client"] == "anthropic":
             return self._call_anthropic(system, messages, max_tokens=max_tokens, provider=pid)
         return self._call_openai(system, messages, max_tokens=max_tokens, provider=pid)
+
+    def iter_message(
+        self,
+        system: list[dict] | str | None,
+        messages: list[dict],
+        *,
+        max_tokens: int,
+        provider: str | None = None,
+    ) -> Iterator[str]:
+        pid = config.resolve_provider(provider)
+        cfg = config.get_provider_config(pid)
+        if cfg["client"] == "anthropic":
+            yield from self._iter_anthropic(system, messages, max_tokens=max_tokens, provider=pid)
+        else:
+            yield from self._iter_openai(system, messages, max_tokens=max_tokens, provider=pid)
+
+    def _iter_anthropic(
+        self,
+        system: list[dict] | str | None,
+        messages: list[dict],
+        *,
+        max_tokens: int,
+        provider: str,
+    ) -> Iterator[str]:
+        kwargs: dict = {
+            "model": config.get_model(provider),
+            "max_tokens": max_tokens,
+            "messages": messages,
+        }
+        if _has_system(system):
+            kwargs["system"] = system
+        with self._get_anthropic(provider).messages.stream(**kwargs) as stream:
+            yield from stream.text_stream
+            final = stream.get_final_message()
+        usage_obj = final.usage
+        self._last_stream_usage = TokenUsage(
+            cache_read_input_tokens=getattr(usage_obj, "cache_read_input_tokens", None) or 0,
+            cache_creation_input_tokens=getattr(usage_obj, "cache_creation_input_tokens", None) or 0,
+            input_tokens=getattr(usage_obj, "input_tokens", None) or 0,
+            output_tokens=getattr(usage_obj, "output_tokens", None) or 0,
+        )
+
+    def _iter_openai(
+        self,
+        system: list[dict] | str | None,
+        messages: list[dict],
+        *,
+        max_tokens: int,
+        provider: str,
+    ) -> Iterator[str]:
+        openai_messages: list[dict] = []
+        system_text = _flatten_system(system) if _has_system(system) else ""
+        if system_text.strip():
+            openai_messages.append({"role": "system", "content": system_text})
+        openai_messages.extend(messages)
+        stream = self._get_openai(provider).chat.completions.create(
+            model=config.get_model(provider),
+            max_tokens=max_tokens,
+            messages=openai_messages,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        prompt_tokens = 0
+        completion_tokens = 0
+        cached = 0
+        for chunk in stream:
+            if chunk.choices:
+                delta = chunk.choices[0].delta.content
+                if delta:
+                    yield delta
+            usage_obj = getattr(chunk, "usage", None)
+            if usage_obj is not None:
+                prompt_tokens = getattr(usage_obj, "prompt_tokens", None) or 0
+                completion_tokens = getattr(usage_obj, "completion_tokens", None) or 0
+                prompt_details = getattr(usage_obj, "prompt_tokens_details", None)
+                if prompt_details is not None:
+                    cached = getattr(prompt_details, "cached_tokens", None) or 0
+        self._last_stream_usage = TokenUsage(
+            cache_read_input_tokens=cached,
+            input_tokens=max(prompt_tokens - cached, 0),
+            output_tokens=completion_tokens,
+        )
 
     def _call_anthropic(
         self,

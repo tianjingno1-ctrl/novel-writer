@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
+
+import file_utils
 
 _BASE = Path(__file__).resolve().parent
 DATA_DIR = _BASE / "data"
@@ -24,14 +25,7 @@ def read_text(path: Path) -> str:
 
 
 def backup_file(path: Path) -> None:
-    if path.exists() and path.stat().st_size > 0:
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        dest = BACKUPS_DIR / f"{path.stem}_{ts}{path.suffix}"
-        BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, dest)
-        old = sorted(BACKUPS_DIR.glob(f"{path.stem}_*{path.suffix}"))
-        for f in old[:-10]:
-            f.unlink(missing_ok=True)
+    file_utils.backup_file(path, BACKUPS_DIR)
 
 
 def write_text(path: Path, content: str) -> None:

@@ -15,22 +15,36 @@ let _isSending = false;
 
 async function api(path, opts = {}, timeoutMs = API_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
   const userSignal = opts.signal;
-  if (userSignal) {
+  if (userSignal?.aborted) {
+    controller.abort();
+  } else if (userSignal) {
     userSignal.addEventListener('abort', () => controller.abort(), { once: true });
   }
+  const { signal: _ignored, ...fetchOpts } = opts;
   try {
     const r = await fetch('/api' + path, {
       headers: { 'Content-Type': 'application/json' },
-      ...opts,
+      ...fetchOpts,
       signal: controller.signal,
     });
     const data = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(data.detail || data.error || r.statusText);
     return data;
   } catch (e) {
-    if (e.name === 'AbortError') throw new Error('请求超时，请检查网络或稍后重试');
+    if (e.name === 'AbortError') {
+      if (!timedOut && userSignal?.aborted) {
+        const err = new Error('请求已取消');
+        err.cancelled = true;
+        throw err;
+      }
+      throw new Error('请求超时，请检查网络或稍后重试');
+    }
     throw e;
   } finally {
     clearTimeout(timer);
@@ -38,7 +52,10 @@ async function api(path, opts = {}, timeoutMs = API_TIMEOUT_MS) {
 }
 
 async function runWithLoading(fn, { btnId, loadingText = '处理中…' } = {}) {
-  if (_isSending) return null;
+  if (_isSending) {
+    toast('请等待当前请求完成');
+    return null;
+  }
   _isSending = true;
   const btn = btnId ? document.getElementById(btnId) : null;
   const defaultText = btn?.textContent || '';
@@ -648,6 +665,94 @@ async function loadChat() {
   refreshSidebar();
 }
 
+function appendStreamBubble(containerId) {
+  const log = document.getElementById(containerId);
+  if (!log) return null;
+  const empty = log.querySelector('.nc-empty');
+  if (empty) empty.remove();
+  const el = document.createElement('div');
+  el.id = 'streamBubble';
+  el.className = 'msg assistant';
+  el.innerHTML = '<div class="label">AI 回复</div><div class="stream-body"></div>';
+  log.appendChild(el);
+  log.scrollTop = log.scrollHeight;
+  return el.querySelector('.stream-body');
+}
+
+async function sendChatStream(body, errEl) {
+  const controller = new AbortController();
+  let timedOut = false;
+  let gotChunk = false;
+  let timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, API_TIMEOUT_MS);
+
+  const resetTimer = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, API_TIMEOUT_MS);
+  };
+
+  try {
+    const resp = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      throw new Error(data.detail || data.error || resp.statusText);
+    }
+
+    removeTypingIndicator();
+    const bubble = appendStreamBubble('chatMessages');
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let doneMeta = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!gotChunk) {
+        gotChunk = true;
+        clearTimeout(timer);
+      }
+      resetTimer();
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split('\n\n');
+      buffer = parts.pop() || '';
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data: ')) continue;
+        const evt = JSON.parse(line.slice(6));
+        if (evt.type === 'chunk' && bubble) {
+          bubble.textContent += evt.text;
+          document.getElementById('chatMessages').scrollTop =
+            document.getElementById('chatMessages').scrollHeight;
+        } else if (evt.type === 'done') {
+          doneMeta = evt;
+        } else if (evt.type === 'error') {
+          throw new Error(evt.message || '生成失败');
+        }
+      }
+    }
+    return doneMeta;
+  } catch (e) {
+    if (e.name === 'AbortError' && timedOut) {
+      throw new Error('请求超时，请检查网络或稍后重试');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    document.getElementById('streamBubble')?.removeAttribute('id');
+  }
+}
+
 async function sendChat() {
   const instruction = document.getElementById('chatInstruction').value.trim();
   if (!instruction) return toast('请输入指令');
@@ -661,21 +766,17 @@ async function sendChat() {
     errEl.textContent = '';
     showTypingIndicator('chatMessages');
     try {
-      const r = await api('/chat', {
-        method: 'POST',
-        body: JSON.stringify({
-          instruction, scene_beat,
-          scene_id: state.currentSceneId || '',
-        }),
-      });
-      if (!r.ok) throw new Error(r.error);
+      const doneMeta = await sendChatStream({
+        instruction,
+        scene_beat,
+        scene_id: state.currentSceneId || '',
+      }, errEl);
       document.getElementById('chatInstruction').value = '';
       await loadChat();
       await loadStatus();
-      if (r.chapter_saved) toast(`已写入第${r.chapter_num}章`);
+      if (doneMeta?.chapter_saved) toast(`已写入第${doneMeta.chapter_num}章`);
     } catch (e) {
-      errEl.textContent = e.message;
-    } finally {
+      if (!e.cancelled) errEl.textContent = e.message;
       removeTypingIndicator();
     }
   }, { btnId: 'sendChatBtn', loadingText: '生成中…' });

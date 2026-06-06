@@ -9,7 +9,7 @@ import config
 import main as core
 import novel_data
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -193,13 +193,16 @@ def plan_chapter(chapter_num: int) -> dict:
 
 @app.post("/api/plan/scenes")
 def plan_add_scene(body: SceneCreate) -> dict:
-    scene = novel_data.add_scene(body.chapter_num, body.title, body.beat)
+    title = body.title.strip()
+    if not title:
+        raise HTTPException(400, "场景标题不能为空")
+    scene = novel_data.add_scene(body.chapter_num, title, body.beat)
     return {"ok": True, "scene": scene}
 
 
 @app.put("/api/plan/scenes/{scene_id}")
 def plan_update_scene(scene_id: str, body: SceneUpdate) -> dict:
-    fields = {k: v for k, v in body.model_dump().items() if v is not None}
+    fields = body.model_dump(exclude_unset=True)
     if "title" in fields and not str(fields["title"]).strip():
         raise HTTPException(400, "场景标题不能为空")
     scene = novel_data.update_scene(scene_id, **fields)
@@ -291,6 +294,23 @@ def chat_history() -> dict:
 def chat(req: ChatRequest) -> dict:
     core.touch_user_active()
     return core.writing_chat(req.instruction, req.scene_beat, req.scene_id)
+
+
+@app.post("/api/chat/stream")
+def chat_stream(req: ChatRequest) -> StreamingResponse:
+    core.touch_user_active()
+
+    def generate():
+        for event in core.writing_chat_stream(
+            req.instruction, req.scene_beat, req.scene_id
+        ):
+            yield f"data: {event}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.post("/api/chat/clear")
