@@ -64,8 +64,6 @@ def _build_stats_sig(chapters: list[tuple[int, object]]) -> tuple:
 
 
 def _compute_stats(chapters: list[tuple[int, object]]) -> dict:
-    import re
-
     chapter_stats = []
     total_chars = 0
     for num, path in chapters:
@@ -185,6 +183,17 @@ class CodexCreate(BaseModel):
 
 class CodexActive(BaseModel):
     active: list[str]
+
+
+class OutlineRequest(BaseModel):
+    next_count: int = 3
+
+    @field_validator("next_count")
+    @classmethod
+    def validate_next_count(cls, v: int) -> int:
+        if v < 1 or v > 10:
+            raise ValueError("章节数须在 1-10 之间")
+        return v
 
 
 # ── 路由 ──────────────────────────────────────────
@@ -451,6 +460,11 @@ def run_summary() -> dict:
 @app.post("/api/check")
 def run_check() -> dict:
     return _require_ok(core.api_run_check(), "连续性检查失败")
+
+
+@app.post("/api/outline")
+def run_outline(body: OutlineRequest) -> dict:
+    return _require_ok(core.api_run_outline(body.next_count), "续章灵感生成失败")
 
 
 @app.put("/api/config/context")

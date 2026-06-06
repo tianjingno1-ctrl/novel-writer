@@ -36,6 +36,7 @@ PROVIDER = os.environ.get("NOVEL_PROVIDER", "kie")
 # 辅助任务专用提供商（不影响主对话，自动走便宜模型）
 SUMMARY_PROVIDER = os.environ.get("NOVEL_SUMMARY_PROVIDER", "deepseek")
 CHECK_PROVIDER = os.environ.get("NOVEL_CHECK_PROVIDER", "deepseek")
+OUTLINE_PROVIDER = os.environ.get("NOVEL_OUTLINE_PROVIDER", "deepseek")
 
 MAX_TOKENS = 4096
 
@@ -154,12 +155,15 @@ def list_providers() -> str:
             marks.append("/summary")
         if key == CHECK_PROVIDER:
             marks.append("/check")
+        if key == OUTLINE_PROVIDER:
+            marks.append("/outline")
         mark = f" ← {', '.join(marks)}" if marks else ""
         cache = "支持缓存" if cfg["supports_cache"] else "无 Prompt Cache"
         lines.append(f"  {key}: {cfg['name']} ({cfg['model']}, {cache}){mark}")
     lines.append(
         f"\n  主力写作: {PROVIDER}  |  "
-        f"/summary: {SUMMARY_PROVIDER}  |  /check: {CHECK_PROVIDER}"
+        f"/summary: {SUMMARY_PROVIDER}  |  "
+        f"/check: {CHECK_PROVIDER}  |  /outline: {OUTLINE_PROVIDER}"
     )
     lines.append("  （辅助任务提供商在 config.py 修改，/provider 只切换主力）")
     return "\n".join(lines)

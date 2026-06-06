@@ -33,6 +33,29 @@ CHECK_SYSTEM = """你是一位严谨的小说 continuity editor（连续性编�
 不要改写正文，不要输出无关内容。
 若未发现明显矛盾，仅回复：✅ 未发现明显矛盾"""
 
+OUTLINE_SYSTEM = """你是一位资深小说主编，擅长长篇叙事节奏与剧情规划。
+用户会提供「世界观设定」「人物当前状态」「已有章节概述」「未回收伏笔清单」。
+请基于这些已确立的事实，为接下来的 N 章设计剧情走向建议。
+
+要求：
+1. 必须承接已有伏笔与人物动机，不得引入与设定矛盾的新元素。
+2. 每一章给出：章节定位、核心事件、冲突升级点、章末悬念钩子。
+3. 至少推进或回收 1 条已有伏笔，并可埋设 1 条新伏笔。
+4. 节奏上注意张弛交替，避免连续高潮或连续铺垫。
+5. 伏笔动向须引用 plot_threads 或概述中的具体条目原文或编号描述，不得凭空编造伏笔。
+
+严格使用以下格式输出：
+
+【后续第X章（建议）】
+定位：本章在主线中的作用
+核心事件：...
+冲突/转折：...
+章末钩子：...
+伏笔动向：回收【...】 / 埋设【...】
+
+最后附一行：
+【整体节奏提示】：对这 N 章整体走向的一句话点评。"""
+
 
 def build_summary_user_message(chapter_num: int, chapter_content: str) -> str:
     return f"请为以下第{chapter_num}章正文生成概述：\n\n{chapter_content}"
@@ -62,3 +85,19 @@ def build_check_user_message(
 {chapter_content}
 
 请对照以上资料，检查最新章节中的矛盾与不一致。"""
+
+
+def build_outline_user_message(
+    world: str,
+    char_current: str,
+    summaries: str,
+    plot_threads: str,
+    next_count: int = 3,
+) -> str:
+    return (
+        f"请基于以下资料，为接下来的 {next_count} 章设计剧情走向：\n\n"
+        f"## 世界观\n{world or '（未维护）'}\n\n"
+        f"## 人物当前状态\n{char_current or '（未维护）'}\n\n"
+        f"## 已有章节概述\n{summaries or '（暂无概述，请先 /summary）'}\n\n"
+        f"## 未回收伏笔\n{plot_threads or '（未维护）'}\n"
+    )

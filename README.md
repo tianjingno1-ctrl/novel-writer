@@ -110,6 +110,7 @@ python main.py
 | （直接输入文字） | 写作模式：根据指令协助创作 |
 | `/summary` | 为最新章节生成 150–300 字概述并追加 |
 | `/check` | 对照设定检查最新章节的矛盾 |
+| `/outline [N]` | 基于概述与伏笔，预测后续 N 章剧情走向（默认 3 章） |
 | `/patch 内容` | 在 characters.md 末尾追加设定补充 |
 | `/heartbeat` | 开关智能心跳（续命 Prompt Cache，仅 kie） |
 | `/provider` | 切换主力写作提供商（辅助任务见 config.py） |
@@ -138,11 +139,12 @@ System prompt 按「稳定 → 变化」分三层，均带 `cache_control`，利
 2. **Plan 模式** → 「新建章节」→ 添加场景 → 填写 Scene Beat。
 3. 每写完一章 → **写书对话（Chat）模式** → 点击「生成概述」（等同 CLI 的 `/summary`）。
 4. 每写完 3–5 章 → **写书对话（Chat）模式** → 点击「连续性检查」（等同 `/check`）。
-5. 有新人物或设定变更时：
+5. 需要规划后续剧情 → **写书对话（Chat）模式** → 点击「续章灵感」（等同 `/outline`，需先有概述）。
+6. 有新人物或设定变更时：
    - 推荐在侧边栏 **「设定库 Codex」** 新建独立条目（勾选后注入 AI，不易误改旧内容）；
    - 或打开「全局文件 → 人物总表」，**滚到文件末尾追加**，不要改上方已有内容（等同 `/patch` 的只增不改习惯）。
 
-> 仍可使用 `python main.py` 命令行，上述 `/summary`、`/check`、`/patch` 命令在 CLI 中继续有效。详见 [用户手册](./docs/novel-writer-manual.md)。
+> 仍可使用 `python main.py` 命令行，上述 `/summary`、`/check`、`/outline`、`/patch` 命令在 CLI 中继续有效。详见 [用户手册](./docs/novel-writer-manual.md)。
 
 ## 费用说明
 

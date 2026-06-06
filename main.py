@@ -20,9 +20,11 @@ import novel_data
 from providers import TokenUsage, get_client, reset_client
 from summarizer import (
     CHECK_SYSTEM,
+    OUTLINE_SYSTEM,
     SUMMARY_SYSTEM,
     WRITING_INSTRUCTION,
     build_check_user_message,
+    build_outline_user_message,
     build_summary_user_message,
 )
 
@@ -913,6 +915,7 @@ def get_app_status() -> dict:
         "model": cfg["model"],
         "summary_provider": config.SUMMARY_PROVIDER,
         "check_provider": config.CHECK_PROVIDER,
+        "outline_provider": config.OUTLINE_PROVIDER,
         "context_turns": config.CHAT_CONTEXT_TURNS,
         "context_mode": config.CONTEXT_MODE,
         "total_cost": total_cost,
@@ -974,6 +977,51 @@ def api_run_check() -> dict:
     if reply is None:
         return {"ok": False, "error": get_last_call_info().get("error", "检查失败")}
     return {"ok": True, "reply": reply, "chapter_num": chapter_num, **get_last_call_info()}
+
+
+def _outline_context_ready() -> str | None:
+    """返回 None 表示可生成；否则为错误说明。"""
+    if get_latest_chapter() is None:
+        return "没有找到章节文件"
+    summaries = read_text(SUMMARIES_FILE).strip()
+    placeholder = INITIAL_FILES[SUMMARIES_FILE].strip()
+    if not summaries or summaries == placeholder or count_summaries() == 0:
+        return "请先生成章节概述（/summary 或 Web「生成概述」）"
+    return None
+
+
+def api_run_outline(next_count: int = 3) -> dict:
+    err = _outline_context_ready()
+    if err:
+        return {"ok": False, "error": err}
+
+    n = max(1, min(10, next_count))
+    pid = config.OUTLINE_PROVIDER
+    system = build_cached_system(OUTLINE_SYSTEM, provider=pid)
+    messages = [
+        {
+            "role": "user",
+            "content": build_outline_user_message(
+                read_text(WORLD_FILE),
+                read_text(CHAR_CURRENT_FILE),
+                read_text(SUMMARIES_FILE),
+                read_text(PLOT_THREADS_FILE),
+                n,
+            ),
+        }
+    ]
+    reply = call_api(system, messages, provider=pid, tag="续章灵感", silent=True)
+    if reply is None:
+        return {"ok": False, "error": get_last_call_info().get("error", "生成失败")}
+    latest = get_latest_chapter()
+    chapter_num = latest[0] if latest else None
+    return {
+        "ok": True,
+        "reply": reply,
+        "next_count": n,
+        "chapter_num": chapter_num,
+        **get_last_call_info(),
+    }
 
 
 def get_chapter_by_num(num: int) -> dict | None:
@@ -1070,6 +1118,33 @@ def do_check() -> None:
         print(f"\n{reply}\n")
 
 
+def do_outline(next_count: int = 3) -> None:
+    err = _outline_context_ready()
+    if err:
+        print(f"错误：{err}")
+        return
+
+    n = max(1, min(10, next_count))
+    pid = config.OUTLINE_PROVIDER
+    cfg = config.get_provider_config(pid)
+    system = build_cached_system(OUTLINE_SYSTEM, provider=pid)
+    messages = [
+        {
+            "role": "user",
+            "content": build_outline_user_message(
+                read_text(WORLD_FILE),
+                read_text(CHAR_CURRENT_FILE),
+                read_text(SUMMARIES_FILE),
+                read_text(PLOT_THREADS_FILE),
+                n,
+            ),
+        }
+    ]
+    reply = call_api(system, messages, provider=pid, tag="续章灵感")
+    if reply is not None:
+        print(f"\n（{cfg['name']} · 后续 {n} 章建议）\n{reply}\n")
+
+
 def do_patch(content: str) -> None:
     if not content.strip():
         print("用法：/patch 补充内容...")
@@ -1097,7 +1172,7 @@ def do_provider(arg: str) -> None:
         print("可用提供商：")
         print(config.list_providers())
         print("\n用法：/provider kie  或  /provider deepseek")
-        print("（只切换主力写作；/summary、/check 见 config.py 的 SUMMARY_PROVIDER、CHECK_PROVIDER）")
+        print("（只切换主力写作；/summary、/check、/outline 见 config.py）")
         return
 
     if arg not in config.PROVIDERS:
@@ -1109,7 +1184,10 @@ def do_provider(arg: str) -> None:
     reset_client(arg)
     cfg = config.get_provider_config()
     print(f"✅ 主力写作已切换至 {cfg['name']}（模型: {cfg['model']}）")
-    print(f"   /summary → {config.SUMMARY_PROVIDER}  |  /check → {config.CHECK_PROVIDER}（不变）")
+    print(
+        f"   /summary → {config.SUMMARY_PROVIDER}  |  "
+        f"/check → {config.CHECK_PROVIDER}  |  /outline → {config.OUTLINE_PROVIDER}（不变）"
+    )
     if not config.supports_prompt_cache():
         print("   该提供商不支持 Prompt Cache，心跳已自动跳过")
     elif not config.is_api_key_configured():
@@ -1151,6 +1229,7 @@ def print_help() -> None:
 可用命令：
   /summary   — 生成概述（默认 DeepSeek，config.SUMMARY_PROVIDER）
   /check     — 连续性检查（默认 DeepSeek，config.CHECK_PROVIDER）
+  /outline [N] — 续章剧情灵感，默认后续 3 章（config.OUTLINE_PROVIDER）
   /patch     — 在 characters.md 末尾追加设定补充
   /heartbeat — 开关智能心跳（续命缓存，仅 kie）
   /provider  — 切换主力写作提供商（/summary /check 独立配置）
@@ -1173,9 +1252,13 @@ def print_startup_banner() -> None:
     cfg = config.get_provider_config()
     sum_cfg = config.get_provider_config(config.SUMMARY_PROVIDER)
     chk_cfg = config.get_provider_config(config.CHECK_PROVIDER)
+    out_cfg = config.get_provider_config(config.OUTLINE_PROVIDER)
     print("=== 小说写作助手 ===")
     print(f"🔌 主力写作：{cfg['name']}（{cfg['model']}）")
-    print(f"📋 /summary → {sum_cfg['name']}  |  /check → {chk_cfg['name']}")
+    print(
+        f"📋 /summary → {sum_cfg['name']}  |  /check → {chk_cfg['name']}  |  "
+        f"/outline → {out_cfg['name']}"
+    )
 
     if config.supports_prompt_cache():
         if config.HEARTBEAT_ENABLED:
@@ -1266,6 +1349,11 @@ def main() -> None:
                 do_summary()
             elif cmd == "/check":
                 do_check()
+            elif cmd == "/outline":
+                n = 3
+                if arg.strip().isdigit():
+                    n = int(arg.strip())
+                do_outline(n)
             elif cmd == "/patch":
                 do_patch(arg)
             elif cmd == "/heartbeat":

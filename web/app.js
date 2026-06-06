@@ -1204,6 +1204,23 @@ async function runCheck() {
   }, { btnId: 'runCheckBtn', loadingText: '检查中…' });
 }
 
+async function runOutline() {
+  const raw = prompt('预测后续几章剧情？', '3');
+  if (raw === null) return;
+  const nextCount = parseInt(raw.trim(), 10);
+  if (!Number.isFinite(nextCount) || nextCount < 1 || nextCount > 10) {
+    return toast('请输入 1-10 之间的数字');
+  }
+  await runWithLoading(async () => {
+    const r = await api('/outline', {
+      method: 'POST',
+      body: JSON.stringify({ next_count: nextCount }),
+    });
+    alert(r.reply);
+    await loadStatus();
+  }, { btnId: 'runOutlineBtn', loadingText: '生成中…' });
+}
+
 // ── Review ─────────────────────────────────────
 function makeStatCard(title, num, desc, wide = false) {
   const el = cloneTplEl('tpl-stat-card');
@@ -1270,7 +1287,7 @@ async function loadStatus() {
   clearEl(info);
   info.innerHTML =
     `主力：<b>${s.provider_name}</b><br>` +
-    `概述 → ${s.summary_provider} · 检查 → ${s.check_provider}<br>` +
+    `概述 → ${s.summary_provider} · 检查 → ${s.check_provider} · 续章 → ${s.outline_provider}<br>` +
     `上下文：${s.context_mode} / ${s.context_turns} 轮`;
 
   document.getElementById('contextHint').textContent =
