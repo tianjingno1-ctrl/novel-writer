@@ -41,7 +41,7 @@ pip install -r requirements.txt
 
    或在 `config.py` → `PROVIDERS["kie"]["api_key_default"]` 填写。
 
-3. 默认模型：`claude-sonnet-4-6`（`kie`）；可选 `claude-opus-4-6`（`kie-opus`，同一 Key）
+3. 默认模型：`claude-sonnet-4-6`（`kie`）；Opus 可选 `kie-opus`（4.6）、`kie-opus-47`（4.7）、`kie-opus-48`（4.8），同一 Key
 
 ### DeepSeek
 

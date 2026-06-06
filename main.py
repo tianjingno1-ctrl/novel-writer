@@ -1288,7 +1288,7 @@ def do_provider(arg: str) -> None:
     if not arg:
         print("可用提供商：")
         print(config.list_providers())
-        print("\n用法：/provider kie  |  /provider kie-opus  |  /provider deepseek")
+        print("\n用法：/provider kie | kie-opus | kie-opus-47 | kie-opus-48 | deepseek")
         print("（只切换主力写作；/summary、/check、/outline 见 config.py）")
         return
 

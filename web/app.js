@@ -336,10 +336,16 @@ function updateWordCount() {
   }
 }
 
+const PROVIDER_LABELS = {
+  kie: 'Claude Sonnet 4.6',
+  'kie-opus': 'Claude Opus 4.6',
+  'kie-opus-47': 'Claude Opus 4.7',
+  'kie-opus-48': 'Claude Opus 4.8',
+  deepseek: 'DeepSeek',
+};
+
 function configLabel(p) {
-  if (p === 'kie') return 'Claude Sonnet 4.6';
-  if (p === 'kie-opus') return 'Claude Opus 4.6';
-  return 'DeepSeek';
+  return PROVIDER_LABELS[p] || p;
 }
 
 function updateFreeProviderHint(provider) {

@@ -109,6 +109,8 @@
           <select id="providerSel" class="model-sel" onchange="switchProvider()">
             <option value="kie">Claude Sonnet 4.6</option>
             <option value="kie-opus">Claude Opus 4.6</option>
+            <option value="kie-opus-47">Claude Opus 4.7</option>
+            <option value="kie-opus-48">Claude Opus 4.8</option>
             <option value="deepseek">DeepSeek</option>
           </select>
         </div>
@@ -137,7 +139,9 @@
           <span class="compose-hint" id="freeProviderHint">纯对话，无系统提示词</span>
           <select id="freeProviderSel" class="model-sel" onchange="switchFreeProvider()">
             <option value="kie">Claude Sonnet</option>
-            <option value="kie-opus">Claude Opus</option>
+            <option value="kie-opus">Claude Opus 4.6</option>
+            <option value="kie-opus-47">Claude Opus 4.7</option>
+            <option value="kie-opus-48">Claude Opus 4.8</option>
             <option value="deepseek">DeepSeek</option>
           </select>
         </div>
@@ -168,6 +172,8 @@
     <select id="providerSelDrawer" onchange="syncProvider(this.value)">
       <option value="kie">Claude Sonnet 4.6</option>
       <option value="kie-opus">Claude Opus 4.6</option>
+      <option value="kie-opus-47">Claude Opus 4.7</option>
+      <option value="kie-opus-48">Claude Opus 4.8</option>
       <option value="deepseek">DeepSeek</option>
     </select>
 

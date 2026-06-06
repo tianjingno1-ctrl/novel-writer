@@ -14,6 +14,20 @@
     "input": 5.00,
     "output": 25.00
   },
+  "kie-opus-47": {
+    "cache_read": 0.50,
+    "cache_write_5m": 6.25,
+    "cache_write_1h": 10.00,
+    "input": 5.00,
+    "output": 25.00
+  },
+  "kie-opus-48": {
+    "cache_read": 0.50,
+    "cache_write_5m": 6.25,
+    "cache_write_1h": 10.00,
+    "input": 5.00,
+    "output": 25.00
+  },
   "deepseek": {
     "cache_read": 0.014,
     "cache_write_5m": 0.0,
