@@ -41,10 +41,17 @@ function esc(s) {
 
 function toast(msg) {
   const el = document.getElementById('toast');
+  if (!el) return;
   el.textContent = msg;
   el.style.display = 'block';
   clearTimeout(el._t);
   el._t = setTimeout(() => el.style.display = 'none', 2800);
+}
+
+function updateApiKeyBanner(s) {
+  const el = document.getElementById('apiKeyBanner');
+  if (!el) return;
+  el.classList.toggle('hidden', !!s.api_key_ok);
 }
 
 function countChars(text) {
@@ -125,6 +132,7 @@ function toggleSettings() {
 // ── Status ───────────────────────────────────
 async function loadStatus() {
   const s = await api('/status');
+  updateApiKeyBanner(s);
   document.getElementById('projectSub').textContent =
     `第${s.chapter_num || '—'}章 · ${s.provider_name}`;
   document.getElementById('ctxTurns').value = s.context_turns;
@@ -175,10 +183,14 @@ async function refreshSidebar() {
 }
 
 async function renderScenesSidebar(body, q) {
-  const { chapters } = await api('/chapters');
+  const [{ chapters }, { chapters: planChapters }] = await Promise.all([
+    api('/chapters'),
+    api('/plan/full'),
+  ]);
+  const planByNum = Object.fromEntries(planChapters.map(p => [p.num, p]));
   let html = '';
   for (const ch of chapters) {
-    const plan = await api(`/plan/${ch.num}`);
+    const plan = planByNum[ch.num] || { scenes: [] };
     html += `<div class="chapter-label">第${ch.num}章</div>`;
     html += (plan.scenes || []).filter(s =>
       !q || s.title.toLowerCase().includes(q) || (s.beat||'').toLowerCase().includes(q)
@@ -377,21 +389,38 @@ function onWriteChapterChange() {
   openChapter(parseInt(document.getElementById('writeChapterSel').value, 10));
 }
 
-document.getElementById('mainEditor')?.addEventListener('input', updateWordCount);
+let _autosaveTimer = null;
 
-async function saveEditor() {
+function scheduleAutosave() {
+  updateWordCount();
+  if (!state.editTarget) return;
+  clearTimeout(_autosaveTimer);
+  _autosaveTimer = setTimeout(() => saveEditor({ silent: true }), 2000);
+}
+
+document.getElementById('mainEditor')?.addEventListener('input', scheduleAutosave);
+
+async function saveEditor({ silent = false } = {}) {
   const t = state.editTarget;
   const content = document.getElementById('mainEditor').value;
   if (!t) return toast('请先选择章节或设定');
   if (t.type === 'chapter') {
     await api(`/chapters/${t.num}`, { method: 'PUT', body: JSON.stringify({ content }) });
-    toast(`第${t.num}章已保存`);
+    if (silent) {
+      const pill = document.getElementById('wordCountPill');
+      if (pill) {
+        pill.classList.add('saved-flash');
+        setTimeout(() => pill.classList.remove('saved-flash'), 1200);
+      }
+    } else {
+      toast(`第${t.num}章已保存`);
+    }
   } else if (t.type === 'codex-entry') {
     await api(`/codex-entries/${t.id}`, { method: 'PUT', body: JSON.stringify({ content }) });
-    toast('Codex 已保存');
+    toast(silent ? 'Codex 已自动保存' : 'Codex 已保存');
   } else if (t.type === 'global') {
     await api(`/codex/${t.name}`, { method: 'PUT', body: JSON.stringify({ content }) });
-    toast('设定已保存');
+    toast(silent ? '设定已自动保存' : '设定已保存');
   }
 }
 
@@ -606,7 +635,7 @@ async function renderReview() {
     </div>
     <div class="stat-card">
       <h4>API 费用</h4>
-      <div class="num">$${st.total_cost.toFixed(2)}</div>
+      <div class="num">$${(s.total_cost ?? st.total_cost).toFixed(4)}</div>
       <div class="desc">累计费用 · 详见 cost_log.txt</div>
     </div>
     <div class="stat-card" style="grid-column:1/-1">

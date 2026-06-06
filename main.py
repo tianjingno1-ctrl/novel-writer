@@ -833,6 +833,10 @@ def get_app_status() -> dict:
         "codex_count": len(novel_data.list_codex_entries()),
         "free_chat_provider": free_chat_provider,
         "free_chat_len": len(free_chat_history),
+        "api_key_ok": config.is_api_key_configured(),
+        "api_keys": {
+            key: config.is_api_key_configured(key) for key in config.PROVIDERS
+        },
     }
 
 
@@ -868,6 +872,7 @@ def api_run_check() -> dict:
             "content": build_check_user_message(
                 read_text(WORLD_FILE),
                 read_text(CHARACTERS_FILE),
+                read_text(CHAR_CURRENT_FILE),
                 read_text(SUMMARIES_FILE),
                 chapter_num,
                 chapter_content,
@@ -960,7 +965,12 @@ def do_check() -> None:
         {
             "role": "user",
             "content": build_check_user_message(
-                world, characters, summaries, chapter_num, chapter_content
+                world,
+                characters,
+                read_text(CHAR_CURRENT_FILE),
+                summaries,
+                chapter_num,
+                chapter_content,
             ),
         }
     ]

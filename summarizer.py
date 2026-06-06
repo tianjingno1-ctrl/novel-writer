@@ -41,6 +41,7 @@ def build_summary_user_message(chapter_num: int, chapter_content: str) -> str:
 def build_check_user_message(
     world: str,
     characters: str,
+    char_current: str,
     summaries: str,
     chapter_num: int,
     chapter_content: str,
@@ -50,6 +51,9 @@ def build_check_user_message(
 
 ## 人物设定
 {characters}
+
+## 人物当前状态
+{char_current or "（未维护）"}
 
 ## 章节概述（已写章节）
 {summaries}

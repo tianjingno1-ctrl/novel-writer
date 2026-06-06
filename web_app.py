@@ -113,6 +113,7 @@ def stats() -> dict:
         "scene_count": scene_count,
         "codex_count": codex_count,
         "summary_count": core.count_summaries(),
+        "total_cost": core.total_cost,
         "chapters": chapter_stats,
     }
 
@@ -149,6 +150,11 @@ def new_chapter() -> dict:
 @app.get("/api/plan")
 def plan_all() -> dict:
     return {"chapters": novel_data.list_plan_chapters()}
+
+
+@app.get("/api/plan/full")
+def plan_full() -> dict:
+    return {"chapters": novel_data.list_plan_details()}
 
 
 @app.get("/api/plan/{chapter_num}")

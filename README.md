@@ -2,6 +2,11 @@
 
 基于大模型 API 的长篇小说写作助手，支持 **kie.ai Claude** 与 **DeepSeek**，帮助你在保持世界观一致性的同时高效续写、生成概述、检查连续性。
 
+## 环境要求
+
+- **Python 3.10+**（代码使用 `str | None` 等新语法）
+- Windows / macOS / Linux 均可
+
 ## 安装
 
 ```bash
@@ -32,8 +37,8 @@ pip install -r requirements.txt
 2. 配置方式（二选一）：
 
    ```powershell
-   # Windows PowerShell
-   $env:KIE_API_KEY = "你的_kie_密钥"
+   # Windows PowerShell（等号两侧不要空格）
+   $env:KIE_API_KEY="你的_kie_密钥"
    ```
 
    或在 `config.py` → `PROVIDERS["kie"]["api_key_default"]` 填写。
@@ -46,7 +51,7 @@ pip install -r requirements.txt
 2. 配置方式（二选一）：
 
    ```powershell
-   $env:DEEPSEEK_API_KEY = "你的_deepseek_密钥"
+   $env:DEEPSEEK_API_KEY="你的_deepseek_密钥"
    ```
 
    或在 `config.py` → `PROVIDERS["deepseek"]["api_key_default"]` 填写。

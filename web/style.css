@@ -259,3 +259,9 @@ body { font-family: var(--font); background: var(--bg); color: var(--text); heig
   border: 1px solid var(--border); padding: 12px 18px; border-radius: var(--radius);
   font-size: 13px; z-index: 300; display: none; box-shadow: 0 8px 32px rgba(0,0,0,.4);
 }
+.api-key-banner {
+  background: #fef3c7; color: #92400e; text-align: center; padding: 8px 16px;
+  font-size: 13px; border-bottom: 1px solid #fcd34d;
+}
+.api-key-banner code { background: rgba(0,0,0,.06); padding: 1px 4px; border-radius: 4px; }
+.pill.saved-flash { background: #d1fae5; color: #065f46; }

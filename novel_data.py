@@ -95,6 +95,19 @@ def list_plan_chapters() -> list[dict]:
     return items
 
 
+def list_plan_details() -> list[dict]:
+    plan = load_plan()
+    items = []
+    for key in sorted(plan.get("chapters", {}), key=lambda x: int(x)):
+        ch = plan["chapters"][key]
+        items.append({
+            "num": int(key),
+            "title": ch.get("title", ""),
+            "scenes": ch.get("scenes", []),
+        })
+    return items
+
+
 def get_chapter_plan(chapter_num: int) -> dict | None:
     plan = load_plan()
     ch = plan.get("chapters", {}).get(str(chapter_num))
