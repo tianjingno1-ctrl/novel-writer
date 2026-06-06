@@ -392,8 +392,12 @@ def build_bookshelf_overview(
     stats_by_num = {c["num"]: c for c in chapter_stats}
     active_ids = get_active_codex_ids()
 
+    file_nums = {n for n, _ in chapters}
+    plan_nums = {int(k) for k in plan.get("chapters", {})}
+    all_nums = sorted(file_nums | plan_nums)
+
     outline = []
-    for num, _path in chapters:
+    for num in all_nums:
         key = str(num)
         ch = plan.get("chapters", {}).get(key, {})
         scenes = []
@@ -408,6 +412,7 @@ def build_bookshelf_overview(
             "num": num,
             "title": ch.get("title") or f"第{num}章",
             "chars": stats_by_num.get(num, {}).get("chars", 0),
+            "has_body": num in file_nums,
             "scenes": scenes,
         })
 
@@ -440,5 +445,145 @@ def build_bookshelf_overview(
         "active_worlds": active_worlds,
         "outline": outline,
         "summaries_excerpt": _excerpt(summaries_text, 1200),
-        "chapter_count": len(chapters),
+        "chapter_count": len(all_nums),
+    }
+
+
+_OUTLINE_BLOCK_RE = re.compile(
+    r"【后续第(\d+)章[^】]*】\s*\n(.*?)(?=【后续第|\【整体节奏提示】|\Z)",
+    re.DOTALL,
+)
+
+
+def _outline_field(block: str, field_name: str) -> str:
+    pattern = rf"{re.escape(field_name)}[：:]\s*(.+?)(?=\n[^\s]{{1,12}}[：:]|$)"
+    m = re.search(pattern, block, re.DOTALL)
+    return m.group(1).strip() if m else ""
+
+
+def parse_outline_suggestions(text: str) -> list[dict]:
+    """解析续章灵感输出为结构化建议列表。"""
+    results: list[dict] = []
+    for offset_str, body in _OUTLINE_BLOCK_RE.findall(text or ""):
+        body = body.strip()
+        if not body:
+            continue
+        results.append({
+            "offset": int(offset_str),
+            "定位": _outline_field(body, "定位"),
+            "核心事件": _outline_field(body, "核心事件"),
+            "冲突转折": _outline_field(body, "冲突/转折") or _outline_field(body, "冲突"),
+            "章末钩子": _outline_field(body, "章末钩子"),
+            "伏笔动向": _outline_field(body, "伏笔动向"),
+            "raw": body,
+        })
+    return results
+
+
+def _scene_title_from_text(text: str, fallback: str, max_len: int = 14) -> str:
+    one_line = re.sub(r"\s+", " ", (text or "").strip())
+    if not one_line:
+        return fallback
+    return one_line[:max_len] + ("…" if len(one_line) > max_len else "")
+
+
+def derive_chapter_title_from_suggestion(suggestion: dict, *, max_len: int = 48) -> str:
+    """从续章建议提炼 Plan 章节标题（用户可事后在规划里改）。"""
+    for key in ("定位", "核心事件", "章末钩子"):
+        text = (suggestion.get(key) or "").strip()
+        if not text:
+            continue
+        one_line = re.sub(r"\s+", " ", text)
+        for sep in ("。", "；", ";", "，", ",", "、"):
+            if sep in one_line:
+                one_line = one_line.split(sep, 1)[0].strip()
+                break
+        if len(one_line) > max_len:
+            one_line = one_line[: max_len - 1] + "…"
+        return one_line
+    return ""
+
+
+def apply_outline_suggestion_to_chapter(
+    latest_chapter: int,
+    suggestion: dict,
+    *,
+    replace: bool = False,
+) -> dict:
+    """将一条续章建议写入 Plan 对应章节的场景 Beat。"""
+    offset = int(suggestion.get("offset", 1))
+    chapter_num = latest_chapter + offset
+    chapter_title = derive_chapter_title_from_suggestion(suggestion) or f"第{chapter_num}章"
+    ensure_chapter_plan(chapter_num, title=chapter_title)
+
+    scenes_spec: list[tuple[str, str]] = []
+    core = suggestion.get("核心事件", "").strip()
+    dingwei = suggestion.get("定位", "").strip()
+    if dingwei or core:
+        beat = dingwei
+        if dingwei and core:
+            beat = f"{dingwei}\n\n{core}"
+        elif core:
+            beat = core
+        scenes_spec.append((_scene_title_from_text(core or dingwei, "核心推进"), beat))
+
+    conflict = suggestion.get("冲突转折", "").strip()
+    if conflict:
+        scenes_spec.append(("冲突升级", conflict))
+
+    hook = suggestion.get("章末钩子", "").strip()
+    foreshadow = suggestion.get("伏笔动向", "").strip()
+    if hook or foreshadow:
+        beat = hook
+        if hook and foreshadow:
+            beat = f"{hook}\n\n伏笔动向：{foreshadow}"
+        elif foreshadow:
+            beat = f"伏笔动向：{foreshadow}"
+        scenes_spec.append((_scene_title_from_text(hook or foreshadow, "章末钩子"), beat))
+
+    if not scenes_spec:
+        return {"ok": False, "error": "该条建议没有可写入的 Beat 内容"}
+
+    plan = load_plan()
+    key = str(chapter_num)
+    existing = plan.get("chapters", {}).get(key, {}).get("scenes", [])
+    has_content = any((s.get("beat") or "").strip() for s in existing)
+    if existing and has_content and not replace:
+        return {
+            "ok": False,
+            "error": f"第{chapter_num}章已有 {len(existing)} 个场景且含 Beat，需确认覆盖",
+            "need_replace": True,
+            "chapter_num": chapter_num,
+        }
+
+    update_chapter_title(chapter_num, chapter_title)
+
+    def edit(plan: dict) -> list[dict]:
+        ch = plan["chapters"][key]
+        if replace or not ch.get("scenes"):
+            ch["scenes"] = []
+        created: list[dict] = []
+        for title, beat in scenes_spec:
+            scene = {
+                "id": _new_scene_id(chapter_num),
+                "title": title,
+                "beat": beat,
+                "summary": "",
+                "done": False,
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            }
+            ch["scenes"].append(scene)
+            created.append(scene)
+        if created:
+            plan["active_scene_id"] = created[0]["id"]
+        return created
+
+    created = _mutate_plan(edit)
+    return {
+        "ok": True,
+        "chapter_num": chapter_num,
+        "chapter_title": chapter_title,
+        "scene_count": len(created),
+        "scenes": created,
+        "offset": offset,
     }

@@ -3,20 +3,21 @@
 // ── State ───────────────────────────────────────
 const state = {
   mode: 'write',
-  sidebar: 'codex',
+  sidebar: 'toc',
   currentChapter: null,
   currentSceneId: null,
   editTarget: null,
   chapters: [],
   writingProvider: 'kie',
   chatFocusTurn: null,
+  activePromptId: null,
 };
 
 const dataCache = {
   chapters: [],
   planByNum: {},
   codex: { entries: [], active: [] },
-  chat: { messages: [], appended: [], turns: [] },
+  chat: { messages: [], appended: [], turns: [], prompts: [] },
 };
 
 const API_TIMEOUT_MS = 120000;
@@ -41,11 +42,13 @@ const GLOBAL_LABELS = {
 const SIDEBAR_CONFIG = {
   plan: [{ id: 'scenes', label: '场景' }],
   write: [
+    { id: 'toc', label: '目录' },
     { id: 'codex', label: '设定库' },
     { id: 'chats', label: '写书记录' },
     { id: 'global', label: '全局文件' },
   ],
   chat: [
+    { id: 'toc', label: '目录' },
     { id: 'chats', label: '写书记录' },
     { id: 'codex', label: '设定库' },
   ],
@@ -127,6 +130,8 @@ async function renderMainView() {
       break;
     case 'chat':
       await loadChat(false);
+      await loadChatPrompts();
+      renderPromptLibrary();
       break;
     case 'free':
       await loadFreeChat();
@@ -155,14 +160,30 @@ function clearEl(el) {
   if (el) el.replaceChildren();
 }
 
+function mergeChapterList(fileChapters, planChapters) {
+  const nums = new Set([
+    ...fileChapters.map(c => c.num),
+    ...planChapters.map(p => p.num),
+  ]);
+  return [...nums].sort((a, b) => a - b).map(num => {
+    const file = fileChapters.find(c => c.num === num);
+    return file || {
+      num,
+      file: `ch${String(num).padStart(3, '0')}.md`,
+      planned_only: true,
+    };
+  });
+}
+
 function fillSelect(sel, chapters, planByNum) {
   clearEl(sel);
   for (const c of chapters) {
     const opt = document.createElement('option');
     opt.value = String(c.num);
     const title = planByNum[c.num]?.title;
-    opt.textContent =
+    const label =
       title && title !== `第${c.num}章` ? `第${c.num}章 · ${title}` : `第${c.num}章`;
+    opt.textContent = c.planned_only ? `${label}（规划中）` : label;
     sel.appendChild(opt);
   }
 }
@@ -170,10 +191,11 @@ function fillSelect(sel, chapters, planByNum) {
 // ── Data cache ──────────────────────────────────
 async function ensurePlanData(force = false) {
   if (force || !dataCache.chapters.length) {
-    const [{ chapters }, { chapters: planChapters }] = await Promise.all([
+    const [{ chapters: fileChapters }, { chapters: planChapters }] = await Promise.all([
       api('/chapters'),
       api('/plan/full'),
     ]);
+    const chapters = mergeChapterList(fileChapters, planChapters);
     dataCache.chapters = chapters;
     dataCache.planByNum = Object.fromEntries(planChapters.map(p => [p.num, p]));
     state.chapters = chapters;
@@ -412,9 +434,9 @@ function setSidebar(tab) {
 
 function updateSidebarAddBtn() {
   const btn = document.getElementById('sidebarAddBtn');
-  const labels = { scenes: '场景', codex: '条目', chats: '', global: '', plan: '场景' };
+  const labels = { scenes: '场景', codex: '条目', chats: '', global: '', toc: '', plan: '场景' };
   const key = state.sidebar;
-  if (key === 'chats' || key === 'global') {
+  if (key === 'chats' || key === 'global' || key === 'toc') {
     btn.style.display = 'none';
     return;
   }
@@ -437,7 +459,8 @@ function toggleSettings() {
 async function refreshSidebarFull() {
   const body = document.getElementById('sidebarBody');
   const q = (document.getElementById('sidebarSearch').value || '').toLowerCase();
-  if (state.sidebar === 'scenes') await renderScenesSidebar(body, q);
+  if (state.sidebar === 'toc') await renderTocSidebar(body, q);
+  else if (state.sidebar === 'scenes') await renderScenesSidebar(body, q);
   else if (state.sidebar === 'codex') await renderCodexSidebar(body, q);
   else if (state.sidebar === 'chats') await renderChatsSidebar(body);
   else if (state.sidebar === 'freechats') await renderFreeChatsSidebar(body);
@@ -582,29 +605,364 @@ function pairChatTurns(messages) {
   return turns;
 }
 
+const TOC_COLLAPSE_KEY = 'novel_toc_collapsed';
+
+function loadTocCollapsed() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(TOC_COLLAPSE_KEY) || '{}');
+    return { worlds: raw.worlds || {}, chapters: raw.chapters || {}, chatWorlds: raw.chatWorlds || {}, chatChapters: raw.chatChapters || {} };
+  } catch {
+    return { worlds: {}, chapters: {}, chatWorlds: {}, chatChapters: {} };
+  }
+}
+
+function saveTocCollapsed(data) {
+  localStorage.setItem(TOC_COLLAPSE_KEY, JSON.stringify(data));
+}
+
+function isTocCollapsed(bucket, key, { forceOpen = false } = {}) {
+  if (forceOpen || qForceExpand) return false;
+  const data = loadTocCollapsed();
+  if (data[bucket][key] === undefined) {
+    return bucket === 'chapters' || bucket === 'chatChapters';
+  }
+  return !!data[bucket][key];
+}
+
+let qForceExpand = false;
+
+function toggleTocCollapsed(bucket, key) {
+  const data = loadTocCollapsed();
+  data[bucket][key] = !isTocCollapsed(bucket, key);
+  saveTocCollapsed(data);
+  scheduleRender({ sidebar: true });
+}
+
+function parseChapterWorld(chapterTitle, defaultWorld = '本书') {
+  const t = (chapterTitle || '').trim();
+  const m = t.match(/^(世界[一二三四五六七八九十百千万\d]+)[·・\s]+(.+)$/);
+  if (m) return { world: m[1], shortTitle: m[2].trim() };
+  const stripped = t.replace(/^第\d+章[·・\s]*/, '').trim();
+  return { world: defaultWorld || '本书', shortTitle: stripped || t || '未命名' };
+}
+
+function codexSubtitleForWorld(worldKey, entries = []) {
+  const needle = (worldKey || '').replace(/世界/, '');
+  const hit = entries.find(e => e.name && (e.name.includes(worldKey) || (needle && e.name.includes(needle))));
+  if (!hit) return '';
+  const name = hit.name.replace(/_/g, '·');
+  const parts = name.split('·').slice(1);
+  return parts.join('·') || '';
+}
+
+function buildWorldChapterTree(chapters, planByNum, defaultWorld) {
+  const worlds = new Map();
+  for (const ch of chapters) {
+    const plan = planByNum[ch.num] || {};
+    const fullTitle = plan.title || `第${ch.num}章`;
+    const { world, shortTitle } = parseChapterWorld(fullTitle, defaultWorld);
+    if (!worlds.has(world)) worlds.set(world, []);
+    worlds.get(world).push({ ...ch, plan, fullTitle, shortTitle });
+  }
+  return [...worlds.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh'));
+}
+
+function extractTurnChapterNum(userText) {
+  const m = (userText || '').match(/【当前章节：第(\d+)章】/);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+function extractInstructionText(userText) {
+  let text = userText || '';
+  const idx = text.indexOf('【写作指令】');
+  if (idx >= 0) text = text.slice(idx + '【写作指令】'.length);
+  text = text.replace(/^[\s\n]+/, '');
+  const beatBlock = /【场景指令 Scene Beat】\s*\n[\s\S]*?(?:\n\n|$)/;
+  const beatMatch = text.match(/【场景指令 Scene Beat】\s*\n([^\n]+)/);
+  const beatLine = beatMatch ? beatMatch[1].trim() : '';
+  text = text.replace(beatBlock, '').trim();
+  const firstLine = text.split('\n').map(l => l.trim()).find(Boolean) || '';
+  return { instruction: firstLine, beatLine };
+}
+
+function deriveChatTurnLabel(turn, turnIndex) {
+  const chapterNum = extractTurnChapterNum(turn.user);
+  const { instruction, beatLine } = extractInstructionText(turn.user);
+  let title = instruction;
+  if (!title || title.length > 36) {
+    title = instruction ? instruction.slice(0, 34) + '…' : `写作指令 ${turnIndex + 1}`;
+  }
+  const metaParts = [];
+  if (chapterNum) metaParts.push(`第 ${chapterNum} 章`);
+  if (beatLine) metaParts.push(beatLine.slice(0, 28) + (beatLine.length > 28 ? '…' : ''));
+  if (turn.aiIdx != null) metaParts.push('已有 AI 回复');
+  return {
+    title,
+    meta: metaParts.join(' · ') || '写书对话',
+    chapterNum: chapterNum || 1,
+  };
+}
+
+function makeFoldRow({ level, label, collapsed, active, bucket, foldKey, onActivate }) {
+  const row = document.createElement('div');
+  row.className = `toc-fold-head toc-level-${level}${active ? ' active' : ''}`;
+  const chevron = document.createElement('button');
+  chevron.type = 'button';
+  chevron.className = 'toc-chevron';
+  chevron.setAttribute('aria-label', collapsed ? '展开' : '折叠');
+  chevron.textContent = collapsed ? '▶' : '▼';
+  chevron.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleTocCollapsed(bucket, foldKey);
+  });
+  const labelEl = document.createElement('span');
+  labelEl.className = 'toc-fold-label';
+  labelEl.textContent = label;
+  if (onActivate) {
+    labelEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onActivate();
+    });
+  }
+  row.appendChild(chevron);
+  row.appendChild(labelEl);
+  return row;
+}
+
+async function renderTocSidebar(body, q = '') {
+  qForceExpand = !!q;
+  await ensurePlanData();
+  const { chapters, planByNum } = dataCache;
+  let defaultWorld = '本书';
+  let codexEntries = [];
+  const statsByNum = {};
+  try {
+    const [st, proj, codex] = await Promise.all([
+      api('/stats'),
+      api('/project'),
+      api('/codex-entries'),
+    ]);
+    defaultWorld = proj.world_label || defaultWorld;
+    codexEntries = codex.entries || [];
+    for (const c of st.chapters || []) statsByNum[c.num] = c.chars;
+  } catch {
+    /* ignore */
+  }
+
+  clearEl(body);
+  if (!chapters.length) {
+    const empty = cloneTplEl('tpl-empty-inline');
+    empty.innerHTML = '尚无章节<br><button type="button" class="btn btn-sm btn-primary" style="margin-top:8px">+ 创建第一章</button>';
+    empty.querySelector('button')?.addEventListener('click', newChapter);
+    body.appendChild(empty);
+    qForceExpand = false;
+    return;
+  }
+
+  const editingChapter =
+    state.mode === 'write' &&
+    (!state.editTarget || state.editTarget.type === 'chapter');
+  const worldTree = buildWorldChapterTree(chapters, planByNum, defaultWorld);
+
+  for (const [worldKey, worldChapters] of worldTree) {
+    const sub = codexSubtitleForWorld(worldKey, codexEntries);
+    const worldLabel = sub ? `${worldKey} · ${sub}` : worldKey;
+    const worldFoldKey = worldKey;
+    const worldCollapsed = isTocCollapsed('worlds', worldFoldKey, {
+      forceOpen: worldChapters.some(c => c.num === state.currentChapter),
+    });
+
+    const worldMatches = !q || worldLabel.toLowerCase().includes(q.toLowerCase());
+    const chapterMatches = worldChapters.some(ch => {
+      const blob = `${ch.shortTitle} ${ch.fullTitle}`.toLowerCase();
+      return blob.includes(q.toLowerCase()) || (ch.plan.scenes || []).some(s =>
+        `${s.title} ${s.beat || ''}`.toLowerCase().includes(q.toLowerCase()));
+    });
+    if (q && !worldMatches && !chapterMatches) continue;
+
+    body.appendChild(makeFoldRow({
+      level: 0,
+      label: worldLabel,
+      collapsed: worldCollapsed,
+      active: worldChapters.some(c => c.num === state.currentChapter),
+      bucket: 'worlds',
+      foldKey: worldFoldKey,
+    }));
+
+    if (worldCollapsed) continue;
+
+    for (const ch of worldChapters) {
+      const chars = statsByNum[ch.num] || 0;
+      const planned = ch.planned_only;
+      const scenes = ch.plan.scenes || [];
+      const chapterFoldKey = `${worldKey}:${ch.num}`;
+      const chapterLabel = planned
+        ? `第 ${ch.num} 章 · ${ch.shortTitle}（规划中）`
+        : `第 ${ch.num} 章 · ${ch.shortTitle}（${chars.toLocaleString()} 字）`;
+
+      const sceneHits = scenes.filter(s => {
+        if (!q) return true;
+        const blob = `${s.title} ${s.beat || ''}`.toLowerCase();
+        return blob.includes(q.toLowerCase());
+      });
+      if (q && !chapterLabel.toLowerCase().includes(q.toLowerCase()) && !sceneHits.length) continue;
+
+      const chapterCollapsed = isTocCollapsed('chapters', chapterFoldKey, {
+        forceOpen: ch.num === state.currentChapter,
+      });
+
+      body.appendChild(makeFoldRow({
+        level: 1,
+        label: chapterLabel,
+        collapsed: chapterCollapsed,
+        active: editingChapter && state.currentChapter === ch.num,
+        bucket: 'chapters',
+        foldKey: chapterFoldKey,
+        onActivate: () => openChapterFromToc(ch.num, planned),
+      }));
+
+      if (chapterCollapsed) continue;
+
+      const list = scenes.filter(s => !q || sceneHits.includes(s));
+      for (const scene of list) {
+        const el = cloneTplEl('tpl-scene-sidebar-item');
+        el.classList.add('toc-scene-item');
+        el.dataset.sceneId = scene.id;
+        if (state.mode === 'plan' && state.currentSceneId === scene.id) el.classList.add('active');
+        el.querySelector('.title').textContent = `${scene.done ? '✓ ' : ''}${scene.title}`;
+        el.querySelector('.meta').textContent = '';
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openSceneFromToc(ch.num, scene.id);
+        });
+        body.appendChild(el);
+      }
+      if (!list.length && !planned) {
+        const hint = document.createElement('div');
+        hint.className = 'toc-empty-hint';
+        hint.textContent = '（无场景，去规划添加）';
+        body.appendChild(hint);
+      }
+    }
+  }
+  qForceExpand = false;
+}
+
+async function openChapterFromToc(num, planned) {
+  if (planned) {
+    setState({ mode: 'plan', currentChapter: num, sidebar: 'toc' }, 'full');
+    toast(`第 ${num} 章尚在规划，已打开场景看板`);
+    return;
+  }
+  if (state.mode !== 'write') setState({ mode: 'write', sidebar: 'toc' }, 'chrome');
+  await openChapter(num);
+  if (state.sidebar === 'toc') scheduleRender({ sidebar: true });
+}
+
+async function openSceneFromToc(chapterNum, sceneId) {
+  setState({ mode: 'plan', currentChapter: chapterNum, sidebar: 'toc' }, 'chrome');
+  await selectScene(sceneId, chapterNum);
+  scheduleRender({ main: true, sidebar: true });
+}
+
 async function renderChatsSidebar(body) {
-  const { messages, appended_indices: appended = [] } = await api('/chat/history');
+  let { messages, appended_indices: appended = [] } = await api('/chat/history');
+  if (!messages.length) {
+    const st = await api('/status');
+    if (st.session_on_disk) {
+      const r = await api('/chat/restore', { method: 'POST' });
+      if (r.ok) {
+        toast(`已恢复写书对话（${r.message_count} 条，${r.saved_at || ''}）`);
+        const again = await api('/chat/history');
+        messages = again.messages;
+        appended = again.appended_indices || [];
+      }
+    }
+  }
   const turns = pairChatTurns(messages);
   dataCache.chat = { messages, appended, turns };
   clearEl(body);
   if (!turns.length) {
     const empty = cloneTplEl('tpl-empty-inline');
-    empty.innerHTML = '写书对话为空<br>在「写书对话」模式发送指令';
+    const st = await api('/status');
+    if (st.session_on_disk) {
+      empty.innerHTML = '写书对话未加载<br>点击下方恢复';
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-sm btn-primary';
+      btn.style.marginTop = '8px';
+      btn.textContent = '恢复写书记录';
+      btn.addEventListener('click', async () => {
+        await restoreChatSession();
+        scheduleRender({ sidebar: true });
+        if (state.mode === 'chat') await loadChat(true);
+      });
+      empty.appendChild(btn);
+    } else {
+      empty.innerHTML = '写书对话为空<br>在「写书对话」模式发送指令';
+    }
     body.appendChild(empty);
     return;
   }
+  await ensurePlanData();
+  let defaultWorld = '本书';
+  try {
+    const proj = await api('/project');
+    defaultWorld = proj.world_label || defaultWorld;
+  } catch {
+    /* ignore */
+  }
+  const { planByNum } = dataCache;
+
+  const byWorld = new Map();
   turns.forEach((turn, t) => {
-    const el = cloneTplEl('tpl-sidebar-list-item');
-    el.dataset.chatTurn = String(t);
-    el.classList.toggle('active', state.chatFocusTurn === t);
-    const saved = turn.aiIdx != null && appended.includes(turn.aiIdx);
-    el.querySelector('.title').textContent = `第 ${t + 1} 轮${saved ? ' · ✓已写入' : ''}`;
-    const u = (turn.user || '').replace(/\s+/g, ' ').slice(0, 36);
-    const a = (turn.ai || '（无回复）').replace(/\s+/g, ' ').slice(0, 36);
-    el.querySelector('.meta').textContent = `你：${u} ｜ AI：${a}`;
-    el.addEventListener('click', () => openChatTurnCompare(t));
-    body.appendChild(el);
+    const label = deriveChatTurnLabel(turn, t);
+    const chNum = label.chapterNum;
+    const plan = planByNum[chNum] || {};
+    const { world, shortTitle } = parseChapterWorld(plan.title || `第${chNum}章`, defaultWorld);
+    if (!byWorld.has(world)) byWorld.set(world, new Map());
+    const byCh = byWorld.get(world);
+    if (!byCh.has(chNum)) byCh.set(chNum, { shortTitle, items: [] });
+    byCh.get(chNum).items.push({ turn, t, label, saved: turn.aiIdx != null && appended.includes(turn.aiIdx) });
   });
+
+  for (const [worldKey, byCh] of [...byWorld.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh'))) {
+    const wFold = `chat:${worldKey}`;
+    const wCollapsed = isTocCollapsed('chatWorlds', wFold);
+    body.appendChild(makeFoldRow({
+      level: 0,
+      label: worldKey,
+      collapsed: wCollapsed,
+      active: false,
+      bucket: 'chatWorlds',
+      foldKey: wFold,
+    }));
+    if (wCollapsed) continue;
+
+    for (const [chNum, group] of [...byCh.entries()].sort((a, b) => a[0] - b[0])) {
+      const cFold = `chat:${worldKey}:${chNum}`;
+      const cCollapsed = isTocCollapsed('chatChapters', cFold, { forceOpen: chNum === state.currentChapter });
+      body.appendChild(makeFoldRow({
+        level: 1,
+        label: `第 ${chNum} 章 · ${group.shortTitle}`,
+        collapsed: cCollapsed,
+        active: false,
+        bucket: 'chatChapters',
+        foldKey: cFold,
+      }));
+      if (cCollapsed) continue;
+
+      for (const { turn, t, label, saved } of group.items) {
+        const el = cloneTplEl('tpl-sidebar-list-item');
+        el.classList.add('toc-chat-turn');
+        el.dataset.chatTurn = String(t);
+        el.classList.toggle('active', state.chatFocusTurn === t);
+        el.querySelector('.title').textContent = `${label.title}${saved ? ' · ✓已写入' : ''}`;
+        el.querySelector('.meta').textContent = label.meta;
+        el.addEventListener('click', () => openChatTurnCompare(t));
+        body.appendChild(el);
+      }
+    }
+  }
 }
 
 async function renderFreeChatsSidebar(body) {
@@ -919,6 +1277,12 @@ async function flushAutosave() {
 async function openChapter(num) {
   const switching = state.editTarget?.type !== 'chapter' || state.editTarget?.num !== num;
   if (switching && state.editTarget) await flushAutosave();
+  const meta = dataCache.chapters.find(c => c.num === num);
+  if (meta?.planned_only) {
+    toast(`第 ${num} 章尚在规划，请先在「概览」或「规划」查看；写入续章灵感可自动建章`);
+    setState({ mode: 'plan', currentChapter: num }, 'full');
+    return;
+  }
   const ch = await api(`/chapters/${num}`);
   setState(
     { currentChapter: num, editTarget: { type: 'chapter', num } },
@@ -930,6 +1294,7 @@ async function openChapter(num) {
   document.getElementById('writeChapterSel').value = num;
   updateWriteToolbar();
   updateWordCount();
+  if (state.sidebar === 'toc') scheduleRender({ sidebar: true });
 }
 
 function onWriteChapterChange() {
@@ -1099,6 +1464,9 @@ function renderChatMessages(messages, { highlight = [], scrollTo = null } = {}) 
     log.appendChild(empty);
     return;
   }
+  const turns = pairChatTurns(messages);
+  const userTurnByIdx = new Map(turns.map((t, ti) => [t.userIdx, ti]));
+
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     const el = cloneTplEl('tpl-chat-msg');
@@ -1106,6 +1474,10 @@ function renderChatMessages(messages, { highlight = [], scrollTo = null } = {}) 
     el.dataset.msgIndex = String(i);
     if (highlight.includes(i)) el.classList.add('highlight');
     let label = m.role === 'user' ? '你的指令' : 'AI 回复';
+    if (m.role === 'user' && userTurnByIdx.has(i)) {
+      const ti = userTurnByIdx.get(i);
+      label = deriveChatTurnLabel(turns[ti], ti).title;
+    }
     if (m.role === 'assistant' && appended.includes(i)) label += ' · ✓ 已写入章节';
     el.querySelector('.label').textContent = label;
     let text = m.content || '';
@@ -1132,7 +1504,47 @@ function showChatCompare(turn, turnNum) {
   const savedEl = document.getElementById('chatCompareSaved');
   const saved = turn.aiIdx != null && (dataCache.chat.appended || []).includes(turn.aiIdx);
   savedEl.classList.toggle('hidden', !saved);
+  const btnAi = document.getElementById('btnApplyAiTurn');
+  const btnDraft = document.getElementById('btnApplyDraftTurn');
+  if (btnAi) btnAi.disabled = turn.aiIdx == null;
+  if (btnDraft) {
+    const hasDraft = /^【当前章节：第\d+章】/.test((turn.user || '').trim());
+    btnDraft.disabled = !hasDraft;
+    btnDraft.title = hasDraft ? '' : '仅首轮附带全文章节时可用';
+  }
+  panel.dataset.turnNum = String(turnNum);
   panel.classList.remove('hidden');
+}
+
+async function applyChatTurnAsChapter(source) {
+  const turnNum = parseInt(document.getElementById('chatComparePanel')?.dataset.turnNum ?? '', 10);
+  const turn = dataCache.chat.turns?.[turnNum];
+  if (!turn) return toast('请先选择一轮对照');
+  const msgIndex = source === 'user_draft' ? turn.userIdx : turn.aiIdx;
+  if (msgIndex == null) return toast(source === 'user_draft' ? '该轮没有可替换的章节草稿' : '该轮没有 AI 回复');
+
+  await ensurePlanData();
+  const num = state.currentChapter || dataCache.chapters[dataCache.chapters.length - 1]?.num;
+  if (!num) return toast('请先在规划模式创建章节');
+
+  const label = source === 'user_draft' ? '指令中的章节正文' : 'AI 回复';
+  const preview = (source === 'user_draft' ? turn.user : turn.ai || '').slice(0, 80);
+  const msg =
+    `用第 ${turnNum + 1} 轮的${label}替换第 ${num} 章全文？\n\n` +
+    `当前章节文件会被整章覆盖（旧稿备份在 data/backups/）。\n\n` +
+    `预览：${preview}…`;
+  if (!confirm(msg)) return;
+
+  const r = await api(`/chapters/${num}/apply-turn`, {
+    method: 'POST',
+    body: JSON.stringify({ msg_index: msgIndex, source }),
+  });
+  if (!r.ok) return toast(r.error || '替换失败');
+  invalidateCache(['chapters']);
+  await loadChat(false);
+  showChatCompare(dataCache.chat.turns[turnNum], turnNum);
+  scheduleRender({ sidebar: state.sidebar === 'chats' });
+  toast(`第 ${num} 章已替换为第 ${turnNum + 1} 轮${label}（${r.chars} 字）`);
 }
 
 function closeChatCompare() {
@@ -1200,6 +1612,148 @@ function appendStreamBubble(containerId) {
   log.appendChild(el);
   log.scrollTop = log.scrollHeight;
   return el.querySelector('.stream-body');
+}
+
+async function loadChatPrompts() {
+  const data = await api('/chat/prompts');
+  dataCache.chat.prompts = data.prompts || [];
+  if (!state.activePromptId && dataCache.chat.prompts.length) {
+    state.activePromptId = dataCache.chat.prompts[0].id;
+  }
+  return dataCache.chat.prompts;
+}
+
+function renderPromptLibrary() {
+  const host = document.getElementById('promptChips');
+  if (!host) return;
+  clearEl(host);
+  const prompts = dataCache.chat.prompts || [];
+  if (!prompts.length) {
+    host.textContent = '暂无模板，点「+ 新建」添加常用指令';
+    return;
+  }
+  for (const p of prompts) {
+    const chip = document.createElement('div');
+    chip.className = 'prompt-chip';
+    if (p.id === state.activePromptId) chip.classList.add('active');
+
+    const titleBtn = document.createElement('button');
+    titleBtn.type = 'button';
+    titleBtn.className = 'prompt-chip-title';
+    titleBtn.textContent = p.title;
+    titleBtn.title = p.title;
+    titleBtn.addEventListener('click', () => selectChatPrompt(p.id));
+
+    const sendBtn = document.createElement('button');
+    sendBtn.type = 'button';
+    sendBtn.className = 'prompt-chip-send';
+    sendBtn.textContent = '▶';
+    sendBtn.title = '填入并直接发送';
+    sendBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sendChatPromptDirect(p.id);
+    });
+
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'prompt-chip-edit';
+    editBtn.textContent = '✎';
+    editBtn.title = '重命名';
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      renameChatPrompt(p.id);
+    });
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'prompt-chip-del';
+    delBtn.textContent = '×';
+    delBtn.title = '删除模板';
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      deleteChatPrompt(p.id);
+    });
+
+    chip.appendChild(titleBtn);
+    chip.appendChild(sendBtn);
+    chip.appendChild(editBtn);
+    chip.appendChild(delBtn);
+    host.appendChild(chip);
+  }
+}
+
+function selectChatPrompt(id) {
+  const p = (dataCache.chat.prompts || []).find(x => x.id === id);
+  if (!p) return;
+  state.activePromptId = id;
+  const ta = document.getElementById('chatInstruction');
+  if (ta) ta.value = p.content || '';
+  renderPromptLibrary();
+}
+
+async function persistChatPrompts() {
+  const r = await api('/chat/prompts', {
+    method: 'PUT',
+    body: JSON.stringify({ prompts: dataCache.chat.prompts }),
+  });
+  dataCache.chat.prompts = r.prompts || dataCache.chat.prompts;
+  renderPromptLibrary();
+}
+
+async function saveActiveChatPrompt() {
+  const id = state.activePromptId;
+  const content = document.getElementById('chatInstruction')?.value ?? '';
+  if (!id) {
+    return toast('请先选择或新建一个模板');
+  }
+  const p = dataCache.chat.prompts.find(x => x.id === id);
+  if (!p) return;
+  p.content = content;
+  await persistChatPrompts();
+  toast(`已保存模板「${p.title}」`);
+}
+
+async function newChatPrompt() {
+  const title = prompt('模板名称', '新指令')?.trim();
+  if (!title) return;
+  const content = document.getElementById('chatInstruction')?.value.trim()
+    || '在此填写常用写作指令…';
+  const id = `p_${Date.now().toString(36)}`;
+  dataCache.chat.prompts.push({ id, title, content });
+  state.activePromptId = id;
+  await persistChatPrompts();
+  selectChatPrompt(id);
+  toast(`已创建「${title}」`);
+}
+
+async function renameChatPrompt(id) {
+  const p = dataCache.chat.prompts.find(x => x.id === id);
+  if (!p) return;
+  const title = prompt('模板名称', p.title)?.trim();
+  if (!title) return;
+  p.title = title;
+  await persistChatPrompts();
+  toast('已重命名');
+}
+
+async function deleteChatPrompt(id) {
+  const p = dataCache.chat.prompts.find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`删除指令模板「${p.title}」？`)) return;
+  dataCache.chat.prompts = dataCache.chat.prompts.filter(x => x.id !== id);
+  if (state.activePromptId === id) {
+    state.activePromptId = dataCache.chat.prompts[0]?.id || null;
+    const ta = document.getElementById('chatInstruction');
+    if (ta && state.activePromptId) {
+      ta.value = dataCache.chat.prompts[0].content || '';
+    } else if (ta) ta.value = '';
+  }
+  await persistChatPrompts();
+}
+
+async function sendChatPromptDirect(id) {
+  selectChatPrompt(id);
+  await sendChat();
 }
 
 async function sendChatStream(body) {
@@ -1338,8 +1892,17 @@ async function sendChat() {
   }
 }
 
+async function restoreChatSession() {
+  const r = await api('/chat/restore', { method: 'POST' });
+  if (!r.ok) return toast(r.error || '恢复失败');
+  toast(`已恢复写书对话（${r.message_count} 条）`);
+  state.chatFocusTurn = null;
+  await loadChat(true);
+  return r;
+}
+
 async function clearChat() {
-  if (!confirm('清空写书对话？（章节文件保留）')) return;
+  if (!confirm('清空写书对话？（章节文件保留；备份在 data/backups/）')) return;
   await api('/chat/clear', { method: 'POST' });
   state.chatFocusTurn = null;
   closeChatCompare();
@@ -1416,9 +1979,9 @@ async function runSummary() {
   if (!confirm('为最新章节生成概述并追加到 summaries.md？\n\n（只追加不覆盖；可撤销需从 backups 恢复）')) return;
   await runWithLoading(async () => {
     const r = await api('/summary', { method: 'POST' });
-    toast('概述已追加到 summaries.md');
+    toast('概述已写入 summaries.md；请到「全局文件」更新当前状态与伏笔，并点保存');
     invalidateCache(['plan']);
-    alert(r.reply);
+    alert(r.reply + '\n\n──\n提示：当前状态、伏笔线索不会自动更新，请写作→全局文件→编辑→保存。');
   }, { btnId: 'runSummaryBtn', loadingText: '生成中…' });
 }
 
@@ -1427,6 +1990,84 @@ async function runCheck() {
     const r = await api('/check', { method: 'POST' });
     alert(r.reply);
   }, { btnId: 'runCheckBtn', loadingText: '检查中…' });
+}
+
+let _outlineLatestReply = '';
+
+function showOutlinePanel(r) {
+  _outlineLatestReply = r.reply || '';
+  const panel = document.getElementById('outlineResultPanel');
+  if (!panel) return;
+  const latest = r.chapter_num || state.currentChapter || 1;
+  const target = latest + 1;
+  document.getElementById('outlineResultTitle').textContent = '续章灵感';
+  const hint = document.getElementById('outlineResultHint');
+  if (hint) {
+    hint.textContent = `已保存 · 可写入第 ${target} 章 Plan · ${r.saved_to || 'data/outline_latest.md'}`;
+  }
+  const body = document.getElementById('outlineResultBody');
+  if (body) body.textContent = r.reply || '';
+  const btn = document.getElementById('btnApplyOutlineNext');
+  if (btn) {
+    const n = (r.suggestions || []).length;
+    btn.textContent = n ? `写入第 ${target} 章场景 Beat（约 ${Math.min(3, n > 0 ? 3 : 0)} 场）` : '写入下一章场景 Beat';
+  }
+  panel.classList.remove('hidden');
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeOutlinePanel() {
+  document.getElementById('outlineResultPanel')?.classList.add('hidden');
+}
+
+async function applyOutlineToPlan(offset = 1) {
+  const latest = state.currentChapter || dataCache.chapters[dataCache.chapters.length - 1]?.num || 1;
+  const target = latest + offset;
+  const msg =
+    `把「后续第 ${offset} 章」建议写入第 ${target} 章？\n\n` +
+    '将自动：① 新建 ch' + String(target).padStart(3, '0') + '.md（若尚无）\n' +
+    '② 用建议「定位」生成章节标题（规划里可改）\n' +
+    '③ 拆成 2～3 个场景 Beat\n' +
+    '（已有 Beat 需确认覆盖）';
+  if (!confirm(msg)) return;
+
+  const payload = { offset, replace: false };
+  if (_outlineLatestReply) payload.reply = _outlineLatestReply;
+
+  try {
+    const r = await api('/outline/apply', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    invalidateCache(['plan', 'chapters']);
+    const title = r.chapter_title ? `「${r.chapter_title}」` : '';
+    const created = r.chapter_file_created ? '，已创建正文文件' : '';
+    toast(`第 ${r.target_chapter || target} 章 ${title}：${r.scene_count} 个场景 Beat${created}`);
+    closeOutlinePanel();
+    setState({ mode: 'plan', currentChapter: r.target_chapter || target }, 'full');
+  } catch (e) {
+    const errMsg = e.message || '';
+    if (errMsg.includes('已有') || errMsg.includes('覆盖')) {
+      if (!confirm(`${errMsg}\n\n确定覆盖第 ${target} 章现有场景 Beat？`)) return;
+      const r2 = await api('/outline/apply', {
+        method: 'POST',
+        body: JSON.stringify({ ...payload, replace: true }),
+      });
+      invalidateCache(['plan', 'chapters']);
+      const t2 = r2.chapter_title ? `「${r2.chapter_title}」` : '';
+      toast(`已覆盖第 ${r2.target_chapter || target} 章 ${t2}，${r2.scene_count} 个场景`);
+      closeOutlinePanel();
+      setState({ mode: 'plan', currentChapter: r2.target_chapter || target }, 'full');
+      return;
+    }
+    toast(errMsg || '写入失败');
+  }
+}
+
+function openPlanFromOutline() {
+  const latest = state.currentChapter || dataCache.chapters[dataCache.chapters.length - 1]?.num || 1;
+  closeOutlinePanel();
+  setState({ mode: 'plan', currentChapter: latest + 1 }, 'full');
 }
 
 async function runOutline() {
@@ -1441,9 +2082,32 @@ async function runOutline() {
       method: 'POST',
       body: JSON.stringify({ next_count: nextCount }),
     });
-    alert(r.reply);
+    showOutlinePanel(r);
+    toast('续章灵感已保存，可点「写入下一章场景 Beat」');
     await loadStatus();
   }, { btnId: 'runOutlineBtn', loadingText: '生成中…' });
+}
+
+async function loadOutlineLatestIfAny() {
+  try {
+    const r = await api('/outline/latest');
+    if (r.body?.trim()) {
+      _outlineLatestReply = r.body;
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+async function viewOutlineLatest() {
+  const r = await api('/outline/latest');
+  if (!r.body?.trim()) return toast('尚无保存的续章灵感，请先点「续章灵感」生成');
+  showOutlinePanel({
+    reply: r.body,
+    chapter_num: state.currentChapter || dataCache.chapters[dataCache.chapters.length - 1]?.num,
+    saved_to: 'data/outline_latest.md',
+    suggestions: r.suggestions || [],
+  });
 }
 
 async function undoChapterWrite() {
@@ -1572,12 +2236,20 @@ async function renderOverview() {
     btn.className = 'overview-toc-item';
     btn.dataset.num = String(ch.num);
     btn.classList.toggle('active', _overviewReadChapter === ch.num);
-    btn.textContent = `第 ${ch.num} 章 · ${ch.title}（${(ch.chars || 0).toLocaleString()} 字）`;
-    btn.addEventListener('click', () => loadOverviewChapter(ch.num));
+    const status = ch.has_body === false ? ' · 规划中' : `（${(ch.chars || 0).toLocaleString()} 字）`;
+    btn.textContent = `第 ${ch.num} 章 · ${ch.title}${status}`;
+    if (ch.has_body === false) {
+      btn.addEventListener('click', () => {
+        setState({ mode: 'plan', currentChapter: ch.num }, 'full');
+        toast(`第 ${ch.num} 章尚未开写，已打开规划看板`);
+      });
+    } else {
+      btn.addEventListener('click', () => loadOverviewChapter(ch.num));
+    }
     toc.appendChild(btn);
   }
   if (!o.outline?.length) {
-    toc.textContent = '还没有章节正文';
+    toc.textContent = '还没有章节，请先在规划或写作模式创建第一章';
   }
   tocSec.querySelector('.overview-body').appendChild(toc);
   const reader = document.createElement('pre');
@@ -1659,7 +2331,7 @@ async function editProjectMeta(current) {
 async function loadStatus() {
   const s = await api('/status');
   updateApiKeyBanner(s);
-  const titleEl = document.querySelector('.brand-title');
+  const titleEl = document.getElementById('brandTitle');
   if (titleEl && s.project_title) titleEl.textContent = s.project_title;
   const sub = [
     s.world_label || '单书',
@@ -1732,6 +2404,12 @@ async function switchProvider() {
 // ── Init ───────────────────────────────────────
 async function init() {
   await loadStatus();
+  await loadOutlineLatestIfAny();
+  const st = await api('/status');
+  if (st.session_on_disk && !(st.history_len > 0)) {
+    await restoreChatSession();
+    await loadStatus();
+  }
   const { chapters } = await api('/chapters');
   setState(
     { chapters, currentChapter: chapters.length ? chapters[chapters.length - 1].num : null },
@@ -1742,6 +2420,7 @@ async function init() {
 
 document.getElementById('mainEditor')?.addEventListener('input', scheduleAutosave);
 document.getElementById('sidebarSearch').addEventListener('input', () => scheduleRender({ sidebar: true }));
+document.getElementById('brandTitle')?.addEventListener('click', () => setMode('overview'));
 
 window.addEventListener('beforeunload', (e) => {
   if ((_autosaveTimer && state.editTarget) || (state.editTarget?.type === 'global' && isEditorDirty())) {

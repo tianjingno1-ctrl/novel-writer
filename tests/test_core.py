@@ -98,6 +98,90 @@ class CodexTests(unittest.TestCase):
         self.assertEqual(novel_data._sanitize_codex_name("a/b"), "a_b")
         self.assertEqual(novel_data._sanitize_codex_name('x:y'), "x_y")
 
+
+class ApplyTurnTests(unittest.TestCase):
+    def test_extract_chapter_body_from_user_message(self) -> None:
+        text = (
+            "【当前章节：第1章】\n\n# 第一章\n\n开头段落。\n\n"
+            "【写作指令】\n续写 500 字"
+        )
+        body = main.extract_chapter_body_from_user_message(text)
+        self.assertIn("开头段落", body or "")
+        self.assertNotIn("写作指令", body or "")
+
+    def test_extract_returns_none_without_block(self) -> None:
+        self.assertIsNone(main.extract_chapter_body_from_user_message("续写吧"))
+
+    def test_format_chapter_file_adds_header(self) -> None:
+        out = main.format_chapter_file(2, "正文一段。")
+        self.assertTrue(out.startswith("# 第2章"))
+
+    def test_derive_chapter_title(self) -> None:
+        import novel_data
+
+        title = novel_data.derive_chapter_title_from_suggestion({
+            "定位": "试探升级，关系进入拉锯",
+            "核心事件": "女主换打法",
+        })
+        self.assertIn("试探升级", title)
+
+    def test_ensure_chapter_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            ch_dir = base / "chapters"
+            ch_dir.mkdir()
+            main.CHAPTERS_DIR = ch_dir
+            r = main.ensure_chapter_file(2, "换一套打法")
+            self.assertTrue(r["created"])
+            text = (ch_dir / "ch002.md").read_text(encoding="utf-8")
+            self.assertIn("第二章", text)
+            self.assertIn("换一套打法", text)
+            r2 = main.ensure_chapter_file(2, "x")
+            self.assertFalse(r2["created"])
+
+    def test_parse_outline_suggestions(self) -> None:
+        import novel_data
+
+        text = """【后续第1章（建议）】
+定位：试探升级
+核心事件：女主换非示弱打法
+冲突/转折：林珩反将一军
+章末钩子：发布会预告
+伏笔动向：回收【三次接触】
+
+【整体节奏提示】：张弛有度。"""
+        items = novel_data.parse_outline_suggestions(text)
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["offset"], 1)
+        self.assertIn("示弱", items[0]["核心事件"])
+
+    def test_restore_chat_session(self) -> None:
+        from app_state import state
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            main.SESSION_FILE = base / "session_autosave.json"
+            main.SESSION_MD_FILE = base / "session_autosave.md"
+            main.SESSION_FILE.write_text(
+                json.dumps(
+                    {
+                        "saved_at": "2026-01-01 12:00:00",
+                        "conversation_history": [
+                            {"role": "user", "content": "写一段"},
+                            {"role": "assistant", "content": "夜风从窗缝里渗进来，带着潮气。" * 3},
+                        ],
+                        "appended_indices": [1],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            state.conversation_history.clear()
+            state.appended_indices.clear()
+            r = main.restore_chat_session()
+            self.assertTrue(r["ok"])
+            self.assertEqual(len(state.conversation_history), 2)
+            self.assertIn(1, state.appended_indices)
+
     def test_delete_codex_entry(self) -> None:
         import novel_data
 

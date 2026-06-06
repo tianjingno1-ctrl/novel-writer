@@ -19,7 +19,7 @@
   <div class="brand">
     <div class="brand-icon">✦</div>
     <div>
-      <div class="brand-title">小说写作助手</div>
+      <div class="brand-title" id="brandTitle" title="点击查看书目与章节目录">小说写作助手</div>
       <div class="brand-sub" id="projectSub">单项目 · 本地</div>
     </div>
   </div>
@@ -109,6 +109,18 @@
         <button class="btn btn-sm btn-ghost" onclick="openChapterFromChat()">查看本章正文</button>
         <button class="btn btn-sm btn-ghost" onclick="clearChat()">清空</button>
       </div>
+      <div id="outlineResultPanel" class="chat-compare hidden">
+        <div class="chat-compare-head">
+          <span id="outlineResultTitle">续章灵感</span>
+          <span class="thread-hint" id="outlineResultHint">已保存到 data/outline_latest.md</span>
+          <button class="btn btn-sm btn-ghost" onclick="closeOutlinePanel()">关闭</button>
+        </div>
+        <pre id="outlineResultBody" class="outline-result-body"></pre>
+        <div class="chat-compare-actions">
+          <button class="btn btn-sm btn-primary" id="btnApplyOutlineNext" onclick="applyOutlineToPlan(1)">写入下一章场景 Beat</button>
+          <button class="btn btn-sm" onclick="openPlanFromOutline()">去规划模式查看</button>
+        </div>
+      </div>
       <div id="chatComparePanel" class="chat-compare hidden">
         <div class="chat-compare-head">
           <span id="chatCompareTitle">第 1 轮对照</span>
@@ -126,7 +138,9 @@
           </div>
         </div>
         <div class="chat-compare-actions">
-          <button class="btn btn-sm" onclick="openChapterFromChat()">去写作模式核对章节</button>
+          <button class="btn btn-sm btn-primary" id="btnApplyAiTurn" onclick="applyChatTurnAsChapter('assistant')">用此轮 AI 回复替换本章</button>
+          <button class="btn btn-sm" id="btnApplyDraftTurn" onclick="applyChatTurnAsChapter('user_draft')">用此轮指令中的正文替换本章</button>
+          <button class="btn btn-sm btn-ghost" onclick="openChapterFromChat()">去写作模式核对</button>
         </div>
       </div>
       <div class="chat-messages" id="chatMessages"></div>
@@ -142,12 +156,22 @@
             <option value="deepseek">DeepSeek V4 Pro</option>
           </select>
         </div>
-        <textarea id="chatInstruction" rows="4" placeholder="写作指令：续写 1500 字，番茄风格，章末留悬念…"></textarea>
+        <div class="prompt-library" id="promptLibrary">
+          <div class="prompt-library-head">
+            <span class="prompt-library-label">指令库</span>
+            <span class="prompt-library-hint">点模板填入下方，改完可保存；▶ 直接发送</span>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="newChatPrompt()">+ 新建</button>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="saveActiveChatPrompt()">保存模板</button>
+          </div>
+          <div class="prompt-chips" id="promptChips"></div>
+        </div>
+        <textarea id="chatInstruction" rows="4" placeholder="写作指令：续写 1500 字，番茄风格，章末留悬念…（可从上方指令库填入）"></textarea>
         <div class="compose-actions">
           <button id="sendChatBtn" class="btn btn-primary" onclick="sendChat()">发送</button>
           <button id="runSummaryBtn" class="btn btn-sm" onclick="runSummary()">生成概述</button>
           <button id="runCheckBtn" class="btn btn-sm" onclick="runCheck()">连续性检查</button>
           <button id="runOutlineBtn" class="btn btn-sm" onclick="runOutline()">续章灵感</button>
+          <button class="btn btn-sm btn-ghost" onclick="viewOutlineLatest()">上次灵感</button>
           <button id="undoChapterBtn" class="btn btn-sm btn-ghost" onclick="undoChapterWrite()">撤销写入</button>
         </div>
         <span id="chatError" class="error-text"></span>

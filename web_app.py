@@ -44,6 +44,8 @@ async def lifespan(app: FastAPI):
     config.load_runtime_settings()
     core.set_total_cost(core.load_total_cost())
     core.load_free_chat()
+    if core.auto_restore_session_if_needed():
+        print("✅ 已从磁盘恢复写书对话（session_autosave.json）")
     if config.WEB_TOKEN:
         print("🔐 Web API 已启用令牌鉴权（请求头 X-Novel-Token）")
     yield
@@ -239,6 +241,19 @@ class OutlineRequest(BaseModel):
     def validate_next_count(cls, v: int) -> int:
         if v < 1 or v > 10:
             raise ValueError("章节数须在 1-10 之间")
+        return v
+
+
+class OutlineApplyRequest(BaseModel):
+    offset: int = 1
+    replace: bool = False
+    reply: str | None = None
+
+    @field_validator("offset")
+    @classmethod
+    def validate_offset(cls, v: int) -> int:
+        if v < 1 or v > 10:
+            raise ValueError("offset 须在 1-10 之间")
         return v
 
 
@@ -508,6 +523,32 @@ def chat_clear() -> dict:
     return {"ok": True}
 
 
+@app.post("/api/chat/restore")
+def chat_restore() -> dict:
+    return _require_ok(core.restore_chat_session(), "恢复失败")
+
+
+class ChatPromptItem(BaseModel):
+    id: str
+    title: str
+    content: str = ""
+
+
+class ChatPromptsBody(BaseModel):
+    prompts: list[ChatPromptItem]
+
+
+@app.get("/api/chat/prompts")
+def get_chat_prompts() -> dict:
+    return core.load_chat_prompts()
+
+
+@app.put("/api/chat/prompts")
+def put_chat_prompts(body: ChatPromptsBody) -> dict:
+    prompts = [p.model_dump() for p in body.prompts]
+    return core.save_chat_prompts(prompts)
+
+
 @app.get("/api/free-chat/history")
 def free_chat_history() -> dict:
     return {
@@ -552,6 +593,23 @@ def run_outline(body: OutlineRequest) -> dict:
     return _require_ok(core.api_run_outline(body.next_count), "续章灵感生成失败")
 
 
+@app.get("/api/outline/latest")
+def outline_latest() -> dict:
+    return core.get_outline_latest()
+
+
+@app.post("/api/outline/apply")
+def outline_apply(body: OutlineApplyRequest) -> dict:
+    result = core.api_apply_outline(
+        body.offset,
+        replace=body.replace,
+        reply=body.reply,
+    )
+    if result.get("need_replace"):
+        raise HTTPException(409, result.get("error", "需要确认覆盖"))
+    return _require_ok(result, "写入 Plan 失败")
+
+
 @app.put("/api/config/context")
 def set_context(cfg: ContextConfig) -> dict:
     if cfg.turns is not None:
@@ -588,6 +646,29 @@ app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 @app.post("/api/chapters/undo-last")
 def undo_last_chapter_write() -> dict:
     return _require_ok(core.undo_last_chapter_append(), "撤销失败")
+
+
+class ApplyTurnBody(BaseModel):
+    msg_index: int
+    source: str = "assistant"  # assistant | user_draft
+
+    @field_validator("msg_index")
+    @classmethod
+    def non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("msg_index 不能为负")
+        return v
+
+
+@app.post("/api/chapters/{num}/apply-turn")
+def apply_chapter_turn(num: int, body: ApplyTurnBody) -> dict:
+    if body.source == "user_draft":
+        result = core.apply_user_draft_turn_to_chapter(num, body.msg_index)
+    elif body.source == "assistant":
+        result = core.apply_assistant_turn_to_chapter(num, body.msg_index)
+    else:
+        raise HTTPException(400, "source 必须是 assistant 或 user_draft")
+    return _require_ok(result, "替换章节失败")
 
 
 def run(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:

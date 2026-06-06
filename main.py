@@ -9,6 +9,7 @@ import re
 import signal
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -42,6 +43,28 @@ CHARACTERS_FILE = DATA_DIR / "characters.md"
 CHAR_CURRENT_FILE = DATA_DIR / "char_current.md"
 SUMMARIES_FILE = DATA_DIR / "summaries.md"
 PLOT_THREADS_FILE = DATA_DIR / "plot_threads.md"
+OUTLINE_LATEST_FILE = DATA_DIR / "outline_latest.md"
+CHAT_PROMPTS_FILE = DATA_DIR / "chat_prompts.json"
+
+DEFAULT_CHAT_PROMPTS = {
+    "prompts": [
+        {
+            "id": "continue",
+            "title": "续写",
+            "content": "续写 1500 字，保持上一段语气与人称，对话要有潜台词，章末留悬念。",
+        },
+        {
+            "id": "polish",
+            "title": "润色",
+            "content": "润色上一段 AI 回复：减少空话和 AI 腔，增加具体动作、感官细节，不改剧情走向。",
+        },
+        {
+            "id": "dialogue",
+            "title": "加强对话",
+            "content": "重写上段，加强人物对话与博弈感，动作描写精简，用对话推进关系变化。",
+        },
+    ],
+}
 
 INITIAL_FILES = {
     WORLD_FILE: "# 世界观设定\n\n（在此填写世界观、魔法体系、地图等，几乎不变的内容）\n",
@@ -87,6 +110,11 @@ def init_data_dirs() -> None:
     for path, content in INITIAL_FILES.items():
         if not path.exists():
             path.write_text(content, encoding="utf-8")
+    if not CHAT_PROMPTS_FILE.exists():
+        file_utils.atomic_write_text(
+            CHAT_PROMPTS_FILE,
+            json.dumps(DEFAULT_CHAT_PROMPTS, ensure_ascii=False, indent=2),
+        )
     novel_data.load_plan()
 
 
@@ -469,6 +497,95 @@ def undo_last_chapter_append() -> dict:
     return {"ok": True, "file": path.name}
 
 
+_USER_CHAPTER_BLOCK_RE = re.compile(
+    r"^【当前章节：第(\d+)章】\s*\n+(.*?)(?:\n+【写作指令】|\Z)",
+    re.DOTALL,
+)
+
+
+def extract_chapter_body_from_user_message(content: str) -> str | None:
+    """从首轮用户消息中取出附带的章节正文（不含写作指令）。"""
+    m = _USER_CHAPTER_BLOCK_RE.match((content or "").strip())
+    if not m:
+        return None
+    body = m.group(2).strip()
+    return body or None
+
+
+def format_chapter_file(chapter_num: int, body: str) -> str:
+    body = body.strip()
+    if not body:
+        return ""
+    if body.startswith("#"):
+        return f"{body}\n"
+    return f"# 第{chapter_num}章\n\n{body}\n"
+
+
+def _clear_assistant_appended_indices() -> None:
+    for i, msg in enumerate(state.conversation_history):
+        if msg["role"] == "assistant":
+            state.appended_indices.discard(i)
+
+
+def apply_assistant_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
+    """用某条 AI 回复**替换**整章正文（非追加）。"""
+    path = CHAPTERS_DIR / f"ch{chapter_num:03d}.md"
+    if not path.exists():
+        return {"ok": False, "error": f"章节 ch{chapter_num:03d} 不存在"}
+
+    if msg_index < 0 or msg_index >= len(state.conversation_history):
+        return {"ok": False, "error": "无效的消息序号"}
+    msg = state.conversation_history[msg_index]
+    if msg["role"] != "assistant":
+        return {"ok": False, "error": "只能选用 AI 回复替换章节"}
+    content = msg["content"].strip()
+    if not should_append_to_chapter(content):
+        return {"ok": False, "error": "该条为讨论/说明，不能作为章节正文"}
+
+    chapter_text = format_chapter_file(chapter_num, content)
+    write_text(path, chapter_text, append=False)
+    state.last_append_undo = None
+    _clear_assistant_appended_indices()
+    state.appended_indices.add(msg_index)
+    save_session("apply_turn", silent=True)
+    return {
+        "ok": True,
+        "num": chapter_num,
+        "msg_index": msg_index,
+        "chars": len(chapter_text),
+        "source": "assistant",
+    }
+
+
+def apply_user_draft_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
+    """用首轮用户消息里附带的章节草稿替换整章正文。"""
+    path = CHAPTERS_DIR / f"ch{chapter_num:03d}.md"
+    if not path.exists():
+        return {"ok": False, "error": f"章节 ch{chapter_num:03d} 不存在"}
+
+    if msg_index < 0 or msg_index >= len(state.conversation_history):
+        return {"ok": False, "error": "无效的消息序号"}
+    msg = state.conversation_history[msg_index]
+    if msg["role"] != "user":
+        return {"ok": False, "error": "只能选用用户消息中的章节草稿"}
+    body = extract_chapter_body_from_user_message(msg["content"])
+    if not body:
+        return {"ok": False, "error": "该轮指令里没有附带章节正文（仅首轮带全文时可用）"}
+
+    chapter_text = format_chapter_file(chapter_num, body)
+    write_text(path, chapter_text, append=False)
+    state.last_append_undo = None
+    _clear_assistant_appended_indices()
+    save_session("apply_turn", silent=True)
+    return {
+        "ok": True,
+        "num": chapter_num,
+        "msg_index": msg_index,
+        "chars": len(chapter_text),
+        "source": "user_draft",
+    }
+
+
 def do_undo() -> None:
     result = undo_last_chapter_append()
     if result.get("ok"):
@@ -646,12 +763,12 @@ def remind_pending_session_on_startup() -> None:
     print("   → 输入 /restore 恢复对话，或 /new 丢弃并开始新会话")
 
 
-def do_restore() -> None:
+def restore_chat_session() -> dict:
+    """从 session_autosave.json 恢复写书对话到内存。"""
     data = load_session_from_disk()
     history = _session_history(data) if data else None
     if not data or not history:
-        print("没有可恢复的会话备份")
-        return
+        return {"ok": False, "error": "没有可恢复的会话备份"}
 
     state.conversation_history.clear()
     state.conversation_history.extend(history)
@@ -665,8 +782,34 @@ def do_restore() -> None:
         state.appended_indices.update(int(i) for i in saved_indices)
     sync_appended_indices_with_chapter()
     pending = count_unsaved_chapter_turns()
-    print(f"✅ 已恢复会话（{data.get('saved_at', '')}，{len(state.conversation_history)} 条消息）")
+    return {
+        "ok": True,
+        "saved_at": data.get("saved_at", ""),
+        "message_count": len(state.conversation_history),
+        "pending_writes": pending,
+    }
+
+
+def auto_restore_session_if_needed() -> bool:
+    """进程内对话为空但磁盘有备份时自动恢复（Web 重启场景）。"""
+    if state.conversation_history:
+        return False
+    if not has_pending_session():
+        return False
+    return restore_chat_session().get("ok", False)
+
+
+def do_restore() -> None:
+    result = restore_chat_session()
+    if not result.get("ok"):
+        print(result.get("error", "没有可恢复的会话备份"))
+        return
+    print(
+        f"✅ 已恢复会话（{result.get('saved_at', '')}，"
+        f"{result.get('message_count', 0)} 条消息）"
+    )
     print(f"   详细内容见：{SESSION_MD_FILE}")
+    pending = result.get("pending_writes", 0)
     if pending:
         print(f"💡 仍有 {pending} 条正文可能未写入章节，建议输入 /save 补存")
 
@@ -929,6 +1072,45 @@ def get_chat_history() -> list[dict]:
     return list(state.conversation_history)
 
 
+def load_chat_prompts() -> dict:
+    if not CHAT_PROMPTS_FILE.exists():
+        return dict(DEFAULT_CHAT_PROMPTS)
+    try:
+        data = json.loads(CHAT_PROMPTS_FILE.read_text(encoding="utf-8"))
+        prompts = data.get("prompts")
+        if isinstance(prompts, list):
+            return {"prompts": prompts}
+    except (json.JSONDecodeError, OSError):
+        pass
+    return dict(DEFAULT_CHAT_PROMPTS)
+
+
+def save_chat_prompts(prompts: list[dict]) -> dict:
+    cleaned: list[dict] = []
+    seen: set[str] = set()
+    for item in prompts:
+        if not isinstance(item, dict):
+            continue
+        pid = str(item.get("id", "")).strip()
+        title = str(item.get("title", "")).strip()
+        content = str(item.get("content", "")).strip()
+        if not pid or pid in seen:
+            pid = uuid.uuid4().hex[:10]
+        while pid in seen:
+            pid = uuid.uuid4().hex[:10]
+        seen.add(pid)
+        if not title:
+            title = "未命名指令"
+        cleaned.append({"id": pid, "title": title, "content": content})
+    payload = {"prompts": cleaned}
+    write_text(
+        CHAT_PROMPTS_FILE,
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        append=False,
+    )
+    return {"ok": True, **payload}
+
+
 def get_appended_indices() -> list[int]:
     return sorted(state.appended_indices)
 
@@ -1052,6 +1234,12 @@ def get_app_status() -> dict:
         "chapter_num": latest[0] if latest else None,
         "summary_count": count_summaries(),
         "history_len": len(state.conversation_history),
+        "session_on_disk": has_pending_session(),
+        "session_saved_at": (
+            load_session_from_disk() or {}
+        ).get("saved_at")
+        if has_pending_session()
+        else None,
         "active_scene_id": novel_data.load_plan().get("active_scene_id"),
         "active_codex": novel_data.get_active_codex_ids(),
         "codex_count": len(novel_data.list_codex_entries()),
@@ -1145,13 +1333,87 @@ def api_run_outline(next_count: int = 3) -> dict:
         return {"ok": False, "error": get_last_call_info().get("error", "生成失败")}
     latest = get_latest_chapter()
     chapter_num = latest[0] if latest else None
+    saved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    write_text(
+        OUTLINE_LATEST_FILE,
+        f"# 续章灵感\n\n生成时间：{saved_at}\n当前章节：第{chapter_num or '?'}章\n\n{reply.strip()}\n",
+        append=False,
+    )
+    suggestions = novel_data.parse_outline_suggestions(reply)
     return {
         "ok": True,
         "reply": reply,
+        "saved_at": saved_at,
+        "saved_to": str(OUTLINE_LATEST_FILE.relative_to(BASE_DIR)),
         "next_count": n,
         "chapter_num": chapter_num,
+        "suggestions": suggestions,
         **get_last_call_info(),
     }
+
+
+def get_outline_latest() -> dict:
+    if not OUTLINE_LATEST_FILE.exists():
+        return {"ok": True, "content": "", "saved_at": None, "suggestions": []}
+    text = read_text(OUTLINE_LATEST_FILE)
+    body = text
+    if text.startswith("# 续章灵感"):
+        body = re.sub(r"^# 续章灵感\s*\n+(?:生成时间：.*\n)?(?:当前章节：.*\n)?\n?", "", text, count=1)
+    return {
+        "ok": True,
+        "content": text,
+        "body": body.strip(),
+        "saved_at": None,
+        "suggestions": novel_data.parse_outline_suggestions(body),
+    }
+
+
+def api_apply_outline(
+    offset: int = 1,
+    *,
+    replace: bool = False,
+    reply: str | None = None,
+) -> dict:
+    text = (reply or "").strip() or read_text(OUTLINE_LATEST_FILE)
+    if not text.strip():
+        return {"ok": False, "error": "没有续章灵感，请先在写书对话点「续章灵感」生成"}
+    if text.startswith("# 续章灵感"):
+        text = re.sub(
+            r"^# 续章灵感\s*\n+(?:生成时间：.*\n)?(?:当前章节：.*\n)?\n?",
+            "",
+            text,
+            count=1,
+        )
+    suggestions = novel_data.parse_outline_suggestions(text)
+    if not suggestions:
+        return {"ok": False, "error": "无法解析续章建议，请检查 AI 输出格式或重新生成"}
+
+    suggestion = next((s for s in suggestions if s["offset"] == offset), None)
+    if suggestion is None:
+        suggestion = suggestions[0]
+        offset = suggestion["offset"]
+
+    latest = get_latest_chapter()
+    if latest is None:
+        return {"ok": False, "error": "没有找到章节文件"}
+    base_chapter = latest[0]
+    target = base_chapter + offset
+
+    result = novel_data.apply_outline_suggestion_to_chapter(
+        base_chapter,
+        suggestion,
+        replace=replace,
+    )
+    if result.get("ok"):
+        result["target_chapter"] = target
+        result["offset"] = offset
+        ch_file = ensure_chapter_file(
+            result["chapter_num"],
+            result.get("chapter_title", ""),
+        )
+        result["chapter_file_created"] = ch_file.get("created", False)
+        result["chapter_file"] = ch_file.get("file")
+    return result
 
 
 def get_chapter_by_num(num: int) -> dict | None:
@@ -1167,14 +1429,41 @@ def save_chapter_by_num(num: int, content: str) -> dict:
     return {"ok": True, "num": num}
 
 
+def _chapter_cn(n: int) -> str:
+    """1–99 章中文序数（用于正文文件标题行）。"""
+    if n <= 0:
+        return str(n)
+    if n < 10:
+        return "一二三四五六七八九"[n - 1]
+    if n == 10:
+        return "十"
+    if n < 20:
+        return "十" + _chapter_cn(n - 10)
+    if n % 10 == 0:
+        return _chapter_cn(n // 10) + "十"
+    return _chapter_cn(n // 10) + "十" + _chapter_cn(n % 10)
+
+
+def ensure_chapter_file(chapter_num: int, title: str = "") -> dict:
+    """若章节正文文件不存在则创建，并写入可编辑的标题行。"""
+    path = CHAPTERS_DIR / f"ch{chapter_num:03d}.md"
+    if path.exists():
+        return {"ok": True, "num": chapter_num, "created": False, "file": path.name}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = f"# 第{_chapter_cn(chapter_num)}章"
+    title = (title or "").strip()
+    if title and title != f"第{chapter_num}章":
+        header = f"{header} · {title}"
+    file_utils.atomic_write_text(path, f"{header}\n\n")
+    return {"ok": True, "num": chapter_num, "created": True, "file": path.name}
+
+
 def create_next_chapter() -> dict:
     chapters = list_chapters()
     next_num = (chapters[-1][0] + 1) if chapters else 1
-    path = CHAPTERS_DIR / f"ch{next_num:03d}.md"
-    if not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("", encoding="utf-8")
-    return {"ok": True, "num": next_num}
+    plan = novel_data.get_chapter_plan(next_num)
+    title = (plan or {}).get("title", "") if plan else ""
+    return ensure_chapter_file(next_num, title)
 
 
 def get_codex(name: str) -> dict | None:
