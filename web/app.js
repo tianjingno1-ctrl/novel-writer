@@ -1221,6 +1221,15 @@ async function runOutline() {
   }, { btnId: 'runOutlineBtn', loadingText: '生成中…' });
 }
 
+async function undoChapterWrite() {
+  await runWithLoading(async () => {
+    const r = await api('/chapters/undo-last', { method: 'POST' });
+    toast(`已撤销写入（${r.file}）`);
+    invalidateCache(['plan']);
+    await loadStatus();
+  }, { btnId: 'undoChapterBtn', loadingText: '撤销中…' });
+}
+
 // ── Review ─────────────────────────────────────
 function makeStatCard(title, num, desc, wide = false) {
   const el = cloneTplEl('tpl-stat-card');

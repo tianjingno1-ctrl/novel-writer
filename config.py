@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 from pathlib import Path
@@ -98,6 +99,25 @@ PROVIDERS = {
         },
     },
 }
+
+_PRICES_FILE = _CONFIG_DIR / "prices.json"
+
+
+def _load_prices_from_file() -> None:
+    if not _PRICES_FILE.exists():
+        return
+    try:
+        data = json.loads(_PRICES_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("无法读取 prices.json，使用内置价格: %s", e)
+        return
+    for key, prices in data.items():
+        if key.startswith("_") or not isinstance(prices, dict) or key not in PROVIDERS:
+            continue
+        PROVIDERS[key]["price"].update(prices)
+
+
+_load_prices_from_file()
 
 
 def resolve_provider(provider: str | None = None) -> str:

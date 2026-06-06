@@ -1,0 +1,17 @@
+{
+  "_note": "USD per 1M tokens, 2025-06 estimates. Edit here to update cost display without touching config.py.",
+  "kie": {
+    "cache_read": 0.30,
+    "cache_write_5m": 3.75,
+    "cache_write_1h": 6.00,
+    "input": 3.00,
+    "output": 15.00
+  },
+  "deepseek": {
+    "cache_read": 0.014,
+    "cache_write_5m": 0.0,
+    "cache_write_1h": 0.0,
+    "input": 0.27,
+    "output": 1.10
+  }
+}

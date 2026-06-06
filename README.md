@@ -10,14 +10,11 @@
 ## 安装
 
 ```bash
-pip install anthropic
-```
-
-或使用 requirements.txt：
-
-```bash
+cd novel_writer
 pip install -r requirements.txt
 ```
+
+（Web 界面需 `fastapi` / `uvicorn`，CLI 至少需 `anthropic`；以 `requirements.txt` 为准。）
 
 ## 配置 API 提供商
 
@@ -74,6 +71,8 @@ copy .env.example .env    # 填入 API Key
 
 浏览器打开 http://127.0.0.1:8765 ，支持规划、写作、写书对话、自由聊、统计。
 
+> **Web 使用限制**：进程内共享**同一份**写作会话与费用统计，适合**本地单人**使用；多标签页会互相干扰。服务**无鉴权**，请勿绑定 `0.0.0.0` 或对公网暴露。
+
 ### CLI
 
 ```bash
@@ -101,7 +100,7 @@ python main.py
 | `data/plot_threads.md` | 伏笔/线索清单（手动维护） |
 | `data/chapters/ch001.md` | 各章正文，命名 `ch001.md`、`ch002.md` … |
 | `data/backups/` | 每次写入 `.md` 前自动备份（带时间戳） |
-| `cost_log.txt` | API 费用记录（运行后自动生成） |
+| `cost_log.jsonl` | API 费用记录（JSON Lines，运行后自动生成；旧版 `cost_log.txt` 仍可读） |
 
 ## 命令一览
 
@@ -115,7 +114,10 @@ python main.py
 | `/heartbeat` | 开关智能心跳（续命 Prompt Cache，仅 kie） |
 | `/provider` | 切换主力写作提供商（辅助任务见 config.py） |
 | `/cost` | 显示累计 API 费用 |
+| `/save` | 将未写入的 AI 正文补存到章节 + 保存会话 |
+| `/undo` | 撤销上一次自动写入章节的正文 |
 | `/new` | 清空对话历史（文档缓存保留） |
+| `/restore` | 恢复上次自动保存的会话 |
 | `/help` | 显示帮助 |
 | `/quit` | 退出 |
 
@@ -148,4 +150,4 @@ System prompt 按「稳定 → 变化」分三层，均带 `cache_control`，利
 
 ## 费用说明
 
-每次 API 请求后会打印 Token 统计与预估费用，并追加到 `cost_log.txt`。心跳请求标记为 `[心跳]`，普通请求标记为 `[请求]`。
+每次 API 请求后会打印 Token 统计与**预估**费用，并追加到 `cost_log.jsonl`（兼容读取旧版 `cost_log.txt`）。单价可在 `prices.json` 调整；实际账单以提供商后台为准。心跳请求标记为 `[心跳]`，普通请求标记为 `[请求]`。

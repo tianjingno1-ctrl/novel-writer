@@ -31,7 +31,7 @@ def backup_file(path: Path) -> None:
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     backup_file(path)
-    path.write_text(content, encoding="utf-8")
+    file_utils.atomic_write_text(path, content)
 
 DEFAULT_PLAN = {"active_scene_id": None, "chapters": {}}
 

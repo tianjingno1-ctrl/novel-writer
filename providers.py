@@ -8,6 +8,13 @@ from dataclasses import dataclass, field
 import config
 
 
+def _or_zero(obj: object | None, attr: str) -> int:
+    if obj is None:
+        return 0
+    val = getattr(obj, attr, None)
+    return int(val) if val else 0
+
+
 @dataclass
 class TokenUsage:
     cache_read_input_tokens: int = 0
@@ -148,10 +155,10 @@ class APIClient:
             final = stream.get_final_message()
         usage_obj = final.usage
         self._last_stream_usage = TokenUsage(
-            cache_read_input_tokens=getattr(usage_obj, "cache_read_input_tokens", None) or 0,
-            cache_creation_input_tokens=getattr(usage_obj, "cache_creation_input_tokens", None) or 0,
-            input_tokens=getattr(usage_obj, "input_tokens", None) or 0,
-            output_tokens=getattr(usage_obj, "output_tokens", None) or 0,
+            cache_read_input_tokens=_or_zero(usage_obj, "cache_read_input_tokens"),
+            cache_creation_input_tokens=_or_zero(usage_obj, "cache_creation_input_tokens"),
+            input_tokens=_or_zero(usage_obj, "input_tokens"),
+            output_tokens=_or_zero(usage_obj, "output_tokens"),
         )
 
     def _iter_openai(
@@ -184,11 +191,11 @@ class APIClient:
                     yield delta
             usage_obj = getattr(chunk, "usage", None)
             if usage_obj is not None:
-                prompt_tokens = getattr(usage_obj, "prompt_tokens", None) or 0
-                completion_tokens = getattr(usage_obj, "completion_tokens", None) or 0
+                prompt_tokens = _or_zero(usage_obj, "prompt_tokens")
+                completion_tokens = _or_zero(usage_obj, "completion_tokens")
                 prompt_details = getattr(usage_obj, "prompt_tokens_details", None)
                 if prompt_details is not None:
-                    cached = getattr(prompt_details, "cached_tokens", None) or 0
+                    cached = _or_zero(prompt_details, "cached_tokens")
         self._last_stream_usage = TokenUsage(
             cache_read_input_tokens=cached,
             input_tokens=max(prompt_tokens - cached, 0),
@@ -220,10 +227,10 @@ class APIClient:
 
         usage_obj = response.usage
         usage = TokenUsage(
-            cache_read_input_tokens=getattr(usage_obj, "cache_read_input_tokens", None) or 0,
-            cache_creation_input_tokens=getattr(usage_obj, "cache_creation_input_tokens", None) or 0,
-            input_tokens=getattr(usage_obj, "input_tokens", None) or 0,
-            output_tokens=getattr(usage_obj, "output_tokens", None) or 0,
+            cache_read_input_tokens=_or_zero(usage_obj, "cache_read_input_tokens"),
+            cache_creation_input_tokens=_or_zero(usage_obj, "cache_creation_input_tokens"),
+            input_tokens=_or_zero(usage_obj, "input_tokens"),
+            output_tokens=_or_zero(usage_obj, "output_tokens"),
         )
         return text, usage
 
@@ -249,12 +256,12 @@ class APIClient:
 
         text = response.choices[0].message.content or ""
         usage_obj = response.usage
-        prompt_tokens = getattr(usage_obj, "prompt_tokens", None) or 0
-        completion_tokens = getattr(usage_obj, "completion_tokens", None) or 0
+        prompt_tokens = _or_zero(usage_obj, "prompt_tokens")
+        completion_tokens = _or_zero(usage_obj, "completion_tokens")
         cached = 0
         prompt_details = getattr(usage_obj, "prompt_tokens_details", None)
         if prompt_details is not None:
-            cached = getattr(prompt_details, "cached_tokens", None) or 0
+            cached = _or_zero(prompt_details, "cached_tokens")
 
         usage = TokenUsage(
             cache_read_input_tokens=cached,

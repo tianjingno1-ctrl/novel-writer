@@ -6,9 +6,7 @@ from __future__ import annotations
 import atexit
 import json
 import re
-import shutil
 import signal
-import sys
 import threading
 import time
 from datetime import datetime
@@ -17,6 +15,7 @@ from pathlib import Path
 import config
 import file_utils
 import novel_data
+from app_state import state
 from providers import TokenUsage, get_client, reset_client
 from summarizer import (
     CHECK_SYSTEM,
@@ -33,6 +32,7 @@ DATA_DIR = BASE_DIR / "data"
 CHAPTERS_DIR = DATA_DIR / "chapters"
 BACKUPS_DIR = DATA_DIR / "backups"
 COST_LOG = BASE_DIR / "cost_log.txt"
+COST_LOG_JSONL = BASE_DIR / "cost_log.jsonl"
 SESSION_FILE = DATA_DIR / "session_autosave.json"
 SESSION_MD_FILE = DATA_DIR / "session_autosave.md"
 FREE_CHAT_FILE = DATA_DIR / "free_chat.json"
@@ -51,23 +51,24 @@ INITIAL_FILES = {
     PLOT_THREADS_FILE: "# 伏笔/线索清单\n\n（手动维护伏笔与线索）\n",
 }
 
-DISCUSSION_PREFIXES = ("[讨论]", "[问答]", "[建议]")
+DISCUSSION_PREFIXES = ("[讨论]", "[问答]", "[建议]", "[说明]", "[分析]")
+META_LINE_PREFIXES = ("以下是", "我建议", "可以考虑", "总结：", "分析：", "注意：", "说明：")
 
-# ── 全局状态 ──────────────────────────────────────────────
-conversation_history: list[dict] = []
-free_chat_history: list[dict] = []
-free_chat_provider: str = config.FREE_CHAT_PROVIDER
-session_includes_chapter = False
-appended_indices: set[int] = set()
-last_request_time = 0.0
-last_user_active = time.time()
-total_cost = 0.0
+state.free_chat_provider = config.FREE_CHAT_PROVIDER
 _cost_lock = threading.Lock()
 # 串行化 LLM 请求（call_api / writing_chat_stream），避免并发写会话与费用统计
 _request_lock = threading.Lock()
 _heartbeat_stop = threading.Event()
 _exiting = False
-_last_call_info: dict = {}
+
+
+def get_total_cost() -> float:
+    return state.total_cost
+
+
+def set_total_cost(value: float) -> None:
+    state.total_cost = value
+
 
 CODEX_FILES = {
     "world": WORLD_FILE,
@@ -102,14 +103,31 @@ def backup_file(path: Path) -> None:
 def write_text(path: Path, content: str, *, append: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if append:
-        with path.open("a", encoding="utf-8") as f:
-            f.write(content)
+        existing = read_text(path)
+        backup_file(path)
+        file_utils.atomic_write_text(path, f"{existing}{content}")
     else:
         backup_file(path)
-        path.write_text(content, encoding="utf-8")
+        file_utils.atomic_write_text(path, content)
+
+
+def load_total_cost_from_jsonl(path: Path) -> float:
+    total = 0.0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+            total += float(record.get("cost", 0))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return total
 
 
 def load_total_cost() -> float:
+    if COST_LOG_JSONL.exists():
+        return load_total_cost_from_jsonl(COST_LOG_JSONL)
     if not COST_LOG.exists():
         return 0.0
     total = 0.0
@@ -134,23 +152,36 @@ def log_cost(
     provider: str | None = None,
     silent: bool = False,
 ) -> None:
-    global total_cost
     cache_read = usage.cache_read_input_tokens
     cache_creation = usage.cache_creation_input_tokens
     input_tokens = usage.input_tokens
     output_tokens = usage.output_tokens
+    pid = config.resolve_provider(provider)
 
     with _cost_lock:
-        total_cost += cost
+        state.total_cost += cost
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        line = (
+        record = {
+            "ts": ts,
+            "tag": tag,
+            "provider": pid,
+            "cache_read": cache_read,
+            "cache_write": cache_creation,
+            "input": input_tokens,
+            "output": output_tokens,
+            "cost": round(cost, 6),
+            "total_cost": round(state.total_cost, 6),
+        }
+        with COST_LOG_JSONL.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        legacy_line = (
             f"[{ts}] [{tag}] "
             f"cache_read={cache_read} cache_write={cache_creation} "
             f"input={input_tokens} output={output_tokens} "
-            f"费用: ${cost:.6f} 累计: ${total_cost:.6f}\n"
+            f"费用: ${cost:.6f} 累计: ${state.total_cost:.6f}\n"
         )
         with COST_LOG.open("a", encoding="utf-8") as f:
-            f.write(line)
+            f.write(legacy_line)
 
     if not silent:
         cfg = config.get_provider_config(provider)
@@ -163,7 +194,7 @@ def log_cost(
         print(f"  input（未缓存输入）:    {input_tokens}")
         print(f"  output（输出）:         {output_tokens}")
         print(f"  本次预估费用: ${cost:.6f}")
-        print(f"  累计总费用:   ${total_cost:.6f}")
+        print(f"  累计总费用:   ${state.total_cost:.6f}")
 
 
 def calc_cost(usage: TokenUsage, provider: str | None = None) -> float:
@@ -251,7 +282,7 @@ def trim_history(history: list[dict], max_turns: int | None = None) -> list[dict
 
 
 def get_last_call_info() -> dict:
-    return dict(_last_call_info)
+    return dict(state.last_call_info)
 
 
 def call_api(
@@ -263,15 +294,13 @@ def call_api(
     provider: str | None = None,
     silent: bool = False,
 ) -> str | None:
-    global last_request_time, _last_call_info
-
     pid = config.resolve_provider(provider)
     if not config.is_api_key_configured(pid):
         cfg = config.get_provider_config(pid)
         err = (
             f"请设置 {cfg['api_key_env']}，或在 .env / config.py 中填写 API Key"
         )
-        _last_call_info = {"ok": False, "error": err, "provider": pid}
+        state.last_call_info = {"ok": False, "error": err, "provider": pid}
         if not silent:
             print(f"错误：{err}")
         return None
@@ -284,17 +313,17 @@ def call_api(
                 max_tokens=max_tokens or config.MAX_TOKENS,
                 provider=pid,
             )
-            last_request_time = time.time()
+            state.last_request_time = time.time()
 
         cost = calc_cost(usage, provider=pid)
         log_cost(usage, cost, tag, provider=pid, silent=silent)
         cfg = config.get_provider_config(pid)
-        _last_call_info = {
+        state.last_call_info = {
             "ok": True,
             "provider": pid,
             "provider_name": cfg["name"],
             "cost": cost,
-            "total_cost": total_cost,
+            "total_cost": state.total_cost,
             "usage": {
                 "cache_read": usage.cache_read_input_tokens,
                 "cache_write": usage.cache_creation_input_tokens,
@@ -304,12 +333,12 @@ def call_api(
         }
         return text
     except ImportError as e:
-        _last_call_info = {"ok": False, "error": str(e)}
+        state.last_call_info = {"ok": False, "error": str(e)}
         if not silent:
             print(f"依赖缺失：{e}")
         return None
     except Exception as e:
-        _last_call_info = {"ok": False, "error": str(e)}
+        state.last_call_info = {"ok": False, "error": str(e)}
         if not silent:
             print(f"API 错误：{e}")
         return None
@@ -351,28 +380,83 @@ def should_append_to_chapter(reply: str) -> bool:
         return False
     if any(stripped.startswith(p) for p in DISCUSSION_PREFIXES):
         return False
+    if any(stripped.startswith(p) for p in META_LINE_PREFIXES):
+        return False
     if stripped.startswith("✅"):
+        return False
+    first_line = stripped.split("\n", 1)[0].strip()
+    if first_line.endswith("：") and len(first_line) < 24:
         return False
     return True
 
 
-def append_to_chapter(text: str, chapter_path: Path) -> int:
+def append_to_chapter(
+    text: str,
+    chapter_path: Path,
+    *,
+    msg_index: int | None = None,
+) -> int:
     """将正文追加到章节文件，返回写入字数。"""
     content = text.strip()
     if not content:
         return 0
     existing = read_text(chapter_path)
     separator = "\n\n" if existing.strip() else ""
+    state.last_append_undo = {
+        "path": str(chapter_path),
+        "content": existing,
+        "msg_index": msg_index,
+    }
     write_text(chapter_path, f"{separator}{content}\n", append=True)
     return len(content)
+
+
+def sync_appended_indices_with_chapter() -> None:
+    """若章节中已含某条助手正文，则标记为已写入，避免 /restore 后重复追加。"""
+    if not state.conversation_history:
+        return
+    _, chapter_path = get_or_create_write_chapter()
+    chapter_text = read_text(chapter_path)
+    if not chapter_text.strip():
+        return
+    for i, msg in enumerate(state.conversation_history):
+        if msg["role"] != "assistant" or i in state.appended_indices:
+            continue
+        if not should_append_to_chapter(msg["content"]):
+            continue
+        content = msg["content"].strip()
+        if content and content in chapter_text:
+            state.appended_indices.add(i)
+
+
+def undo_last_chapter_append() -> dict:
+    if state.last_append_undo is None:
+        return {"ok": False, "error": "没有可撤销的章节写入"}
+    undo = state.last_append_undo
+    path = Path(undo["path"])
+    backup_file(path)
+    file_utils.atomic_write_text(path, undo["content"])
+    msg_index = undo.get("msg_index")
+    if msg_index is not None:
+        state.appended_indices.discard(msg_index)
+    state.last_append_undo = None
+    return {"ok": True, "file": path.name}
+
+
+def do_undo() -> None:
+    result = undo_last_chapter_append()
+    if result.get("ok"):
+        print(f"↩️  已撤销上次章节写入（{result['file']}）")
+    else:
+        print(result.get("error", "撤销失败"))
 
 
 def count_unsaved_chapter_turns() -> int:
     return sum(
         1
-        for i, msg in enumerate(conversation_history)
+        for i, msg in enumerate(state.conversation_history)
         if msg["role"] == "assistant"
-        and i not in appended_indices
+        and i not in state.appended_indices
         and should_append_to_chapter(msg["content"])
     )
 
@@ -383,14 +467,14 @@ def flush_chapter_writes(*, silent: bool = False) -> int:
     total_chars = 0
     count = 0
 
-    for i, msg in enumerate(conversation_history):
-        if msg["role"] != "assistant" or i in appended_indices:
+    for i, msg in enumerate(state.conversation_history):
+        if msg["role"] != "assistant" or i in state.appended_indices:
             continue
         if not should_append_to_chapter(msg["content"]):
             continue
-        chars = append_to_chapter(msg["content"], chapter_path)
+        chars = append_to_chapter(msg["content"], chapter_path, msg_index=i)
         if chars:
-            appended_indices.add(i)
+            state.appended_indices.add(i)
             total_chars += chars
             count += 1
 
@@ -412,8 +496,8 @@ def save_chapter_after_reply(reply: str, msg_index: int) -> None:
 
     if config.AUTO_APPEND_CHAPTER:
         chapter_num, chapter_path = get_or_create_write_chapter()
-        chars = append_to_chapter(reply, chapter_path)
-        appended_indices.add(msg_index)
+        chars = append_to_chapter(reply, chapter_path, msg_index=msg_index)
+        state.appended_indices.add(msg_index)
         print(
             f"💾 已自动保存到 data/chapters/ch{chapter_num:03d}.md（+{chars} 字）"
         )
@@ -428,8 +512,7 @@ def count_summaries() -> int:
 
 
 def touch_user_active() -> None:
-    global last_user_active
-    last_user_active = time.time()
+    state.last_user_active = time.time()
 
 
 def _session_chapter_num() -> int:
@@ -445,7 +528,7 @@ def format_session_markdown(saved_at: str, reason: str) -> str:
         f"当前章节：第{_session_chapter_num()}章\n\n",
         "---\n\n",
     ]
-    for i, msg in enumerate(conversation_history, 1):
+    for i, msg in enumerate(state.conversation_history, 1):
         role = "用户" if msg["role"] == "user" else "助手"
         lines.append(f"## [{i}] {role}\n\n{msg['content']}\n\n")
     lines.append(
@@ -458,7 +541,7 @@ def format_session_markdown(saved_at: str, reason: str) -> str:
 
 def save_session(reason: str = "auto", *, silent: bool = False) -> bool:
     """将会话对话写入磁盘，异常退出时可恢复。"""
-    if not conversation_history:
+    if not state.conversation_history:
         return False
 
     saved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -466,17 +549,18 @@ def save_session(reason: str = "auto", *, silent: bool = False) -> bool:
         "saved_at": saved_at,
         "reason": reason,
         "chapter_num": _session_chapter_num(),
-        "session_includes_chapter": session_includes_chapter,
-        "conversation_history": conversation_history,
+        "session_includes_chapter": state.session_includes_chapter,
+        "conversation_history": state.conversation_history,
+        "appended_indices": sorted(state.appended_indices),
     }
 
-    SESSION_FILE.write_text(
+    file_utils.atomic_write_text(
+        SESSION_FILE,
         json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
     )
-    SESSION_MD_FILE.write_text(
+    file_utils.atomic_write_text(
+        SESSION_MD_FILE,
         format_session_markdown(saved_at, reason),
-        encoding="utf-8",
     )
 
     if not silent:
@@ -500,22 +584,32 @@ def load_session_from_disk() -> dict | None:
         return None
 
 
+def _session_history(data: dict) -> list | None:
+    """兼容旧版 session 字段名。"""
+    history = data.get("conversation_history")
+    if history is None:
+        history = data.get("state.conversation_history")
+    return history
+
+
 def has_pending_session() -> bool:
     data = load_session_from_disk()
-    return bool(data and data.get("conversation_history"))
+    history = _session_history(data) if data else None
+    return bool(history)
 
 
 def remind_pending_session_on_startup() -> None:
     data = load_session_from_disk()
-    if not data or not data.get("conversation_history"):
+    history = _session_history(data) if data else None
+    if not data or not history:
         return
 
     saved_at = data.get("saved_at", "未知")
     reason = data.get("reason", "未知")
-    turns = len(data["conversation_history"])
+    turns = len(history)
     chapter = data.get("chapter_num", "?")
 
-    if conversation_history:
+    if state.conversation_history:
         return
 
     print()
@@ -527,22 +621,28 @@ def remind_pending_session_on_startup() -> None:
 
 
 def do_restore() -> None:
-    global session_includes_chapter
-
     data = load_session_from_disk()
-    if not data or not data.get("conversation_history"):
+    history = _session_history(data) if data else None
+    if not data or not history:
         print("没有可恢复的会话备份")
         return
 
-    conversation_history.clear()
-    conversation_history.extend(data["conversation_history"])
-    session_includes_chapter = data.get("session_includes_chapter", False)
-    appended_indices.clear()
+    state.conversation_history.clear()
+    state.conversation_history.extend(history)
+    state.session_includes_chapter = data.get(
+        "session_includes_chapter",
+        data.get("state.session_includes_chapter", False),
+    )
+    state.appended_indices.clear()
+    saved_indices = data.get("appended_indices")
+    if saved_indices is not None:
+        state.appended_indices.update(int(i) for i in saved_indices)
+    sync_appended_indices_with_chapter()
     pending = count_unsaved_chapter_turns()
-    print(f"✅ 已恢复会话（{data.get('saved_at', '')}，{len(conversation_history)} 条消息）")
+    print(f"✅ 已恢复会话（{data.get('saved_at', '')}，{len(state.conversation_history)} 条消息）")
     print(f"   详细内容见：{SESSION_MD_FILE}")
     if pending:
-        print(f"💡 检测到 {pending} 条正文可能未写入章节，建议输入 /save 补存")
+        print(f"💡 仍有 {pending} 条正文可能未写入章节，建议输入 /save 补存")
 
 
 def do_save() -> None:
@@ -556,7 +656,7 @@ def do_save() -> None:
 
 
 def remind_unsaved_on_exit() -> None:
-    if not conversation_history:
+    if not state.conversation_history:
         return
 
     pending = count_unsaved_chapter_turns()
@@ -599,7 +699,7 @@ def _atexit_save() -> None:
         return
     _heartbeat_stop.set()
     save_session("atexit", silent=True)
-    if conversation_history:
+    if state.conversation_history:
         remind_unsaved_on_exit()
 
 
@@ -613,8 +713,6 @@ def setup_exit_handlers() -> None:
 
 
 def do_writing(instruction: str) -> None:
-    global session_includes_chapter
-
     latest = get_latest_chapter()
     if latest is None:
         print("提示：data/chapters/ 中尚无章节文件，将仅根据指令回复。")
@@ -622,27 +720,27 @@ def do_writing(instruction: str) -> None:
     else:
         chapter_num, _, chapter_content = latest
 
-    if not session_includes_chapter:
+    if not state.session_includes_chapter:
         user_content = (
             f"【当前章节：第{chapter_num}章】\n\n"
             f"{chapter_content}\n\n"
             f"【写作指令】\n{instruction}"
         )
-        session_includes_chapter = True
+        state.session_includes_chapter = True
     else:
         user_content = instruction
 
-    conversation_history.append({"role": "user", "content": user_content})
+    state.conversation_history.append({"role": "user", "content": user_content})
 
     system = build_cached_system(WRITING_INSTRUCTION)
-    reply = call_api(system, prepare_messages_for_context(conversation_history))
+    reply = call_api(system, prepare_messages_for_context(state.conversation_history))
     if reply is None:
-        conversation_history.pop()
+        state.conversation_history.pop()
         return
 
     print(f"\n{reply}\n")
-    conversation_history.append({"role": "assistant", "content": reply})
-    save_chapter_after_reply(reply, len(conversation_history) - 1)
+    state.conversation_history.append({"role": "assistant", "content": reply})
+    save_chapter_after_reply(reply, len(state.conversation_history) - 1)
     save_session("auto", silent=True)
 
 
@@ -654,7 +752,7 @@ def writing_chat(instruction: str, scene_beat: str = "", scene_id: str = "") -> 
 
     reply = call_api(prep["system"], prep["messages"], silent=True)
     if reply is None:
-        conversation_history.pop()
+        state.conversation_history.pop()
         info = get_last_call_info()
         return {"ok": False, "error": info.get("error", "API 调用失败")}
 
@@ -665,8 +763,6 @@ def _prepare_writing_turn(
     instruction: str, scene_beat: str = "", scene_id: str = ""
 ) -> dict:
     """追加用户消息并构建 API 请求上下文。"""
-    global session_includes_chapter
-
     beat_text = scene_beat.strip()
     if not beat_text and scene_id:
         scene = novel_data.get_scene(scene_id)
@@ -691,32 +787,32 @@ def _prepare_writing_turn(
     else:
         chapter_num, _, chapter_content = latest
 
-    if not session_includes_chapter:
+    if not state.session_includes_chapter:
         user_content = (
             f"【当前章节：第{chapter_num}章】\n\n"
             f"{chapter_content}\n\n"
             f"【写作指令】\n{full_instruction}"
         )
-        session_includes_chapter = True
+        state.session_includes_chapter = True
     else:
         user_content = full_instruction
 
-    conversation_history.append({"role": "user", "content": user_content})
+    state.conversation_history.append({"role": "user", "content": user_content})
     return {
         "ok": True,
         "chapter_num": chapter_num,
         "system": build_cached_system(WRITING_INSTRUCTION),
-        "messages": prepare_messages_for_context(conversation_history),
+        "messages": prepare_messages_for_context(state.conversation_history),
     }
 
 
 def _finalize_writing_turn(reply: str, chapter_num: int) -> dict:
-    conversation_history.append({"role": "assistant", "content": reply})
-    msg_index = len(conversation_history) - 1
+    state.conversation_history.append({"role": "assistant", "content": reply})
+    msg_index = len(state.conversation_history) - 1
     save_chapter_after_reply(reply, msg_index)
     save_session("auto", silent=True)
 
-    chapter_saved = msg_index in appended_indices
+    chapter_saved = msg_index in state.appended_indices
     active_scene = novel_data.get_active_scene()
     return {
         "ok": True,
@@ -726,7 +822,7 @@ def _finalize_writing_turn(reply: str, chapter_num: int) -> dict:
         "context_turns": config.CHAT_CONTEXT_TURNS,
         "context_mode": config.CONTEXT_MODE,
         "active_scene_id": active_scene.get("id") if active_scene else None,
-        "history_len": len(conversation_history),
+        "history_len": len(state.conversation_history),
         **get_last_call_info(),
     }
 
@@ -735,8 +831,6 @@ def writing_chat_stream(
     instruction: str, scene_beat: str = "", scene_id: str = ""
 ):
     """流式写作对话，yield JSON 字符串事件。"""
-    global last_request_time, _last_call_info
-
     prep = _prepare_writing_turn(instruction, scene_beat, scene_id)
     if not prep.get("ok"):
         yield json.dumps({"type": "error", "message": prep["error"]}, ensure_ascii=False)
@@ -744,7 +838,7 @@ def writing_chat_stream(
 
     pid = config.resolve_provider(None)
     if not config.is_api_key_configured(pid):
-        conversation_history.pop()
+        state.conversation_history.pop()
         cfg = config.get_provider_config(pid)
         err = f"请设置 {cfg['api_key_env']}，或在 .env / config.py 中填写 API Key"
         yield json.dumps({"type": "error", "message": err}, ensure_ascii=False)
@@ -761,17 +855,17 @@ def writing_chat_stream(
             ):
                 chunks.append(chunk)
                 yield json.dumps({"type": "chunk", "text": chunk}, ensure_ascii=False)
-            last_request_time = time.time()
+            state.last_request_time = time.time()
         usage = get_client().pop_stream_usage()
         cost = calc_cost(usage, provider=pid)
         log_cost(usage, cost, "请求", provider=pid, silent=True)
         cfg = config.get_provider_config(pid)
-        _last_call_info = {
+        state.last_call_info = {
             "ok": True,
             "provider": pid,
             "provider_name": cfg["name"],
             "cost": cost,
-            "total_cost": total_cost,
+            "total_cost": state.total_cost,
             "usage": {
                 "cache_read": usage.cache_read_input_tokens,
                 "cache_write": usage.cache_creation_input_tokens,
@@ -780,7 +874,7 @@ def writing_chat_stream(
             },
         }
     except Exception as e:
-        conversation_history.pop()
+        state.conversation_history.pop()
         yield json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
         return
 
@@ -791,26 +885,26 @@ def writing_chat_stream(
             "type": "done",
             "chapter_num": result["chapter_num"],
             "chapter_saved": result["chapter_saved"],
-            "cost": _last_call_info.get("cost", 0),
-            "total_cost": total_cost,
+            "cost": state.last_call_info.get("cost", 0),
+            "total_cost": state.total_cost,
         },
         ensure_ascii=False,
     )
 
 
 def get_chat_history() -> list[dict]:
-    return list(conversation_history)
+    return list(state.conversation_history)
 
 
 def _trim_free_history() -> list[dict]:
     turns = config.FREE_CHAT_CONTEXT_TURNS
-    if turns <= 0 or len(free_chat_history) <= turns * 2:
-        return list(free_chat_history)
-    return free_chat_history[-(turns * 2) :]
+    if turns <= 0 or len(state.free_chat_history) <= turns * 2:
+        return list(state.free_chat_history)
+    return state.free_chat_history[-(turns * 2) :]
 
 
 def _resolve_free_provider(provider: str | None = None) -> str:
-    pid = provider or free_chat_provider
+    pid = provider or state.free_chat_provider
     if pid not in config.PROVIDERS:
         return config.FREE_CHAT_PROVIDER
     return pid
@@ -820,8 +914,8 @@ def save_free_chat() -> None:
     FREE_CHAT_FILE.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "provider": free_chat_provider,
-        "messages": free_chat_history,
+        "provider": state.free_chat_provider,
+        "messages": state.free_chat_history,
     }
     FREE_CHAT_FILE.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -829,38 +923,36 @@ def save_free_chat() -> None:
 
 
 def load_free_chat() -> None:
-    global free_chat_history, free_chat_provider
     if not FREE_CHAT_FILE.exists():
         return
     try:
         data = json.loads(FREE_CHAT_FILE.read_text(encoding="utf-8"))
-        free_chat_history = list(data.get("messages", []))
+        state.free_chat_history = list(data.get("messages", []))
         saved_provider = data.get("provider")
         if saved_provider in config.PROVIDERS:
-            free_chat_provider = saved_provider
+            state.free_chat_provider = saved_provider
     except (json.JSONDecodeError, OSError):
-        free_chat_history = []
+        state.free_chat_history = []
 
 
 def get_free_chat_provider() -> str:
-    return free_chat_provider
+    return state.free_chat_provider
 
 
 def set_free_chat_provider(provider: str) -> dict:
-    global free_chat_provider
     if provider not in config.PROVIDERS:
         return {"ok": False, "error": f"未知提供商: {provider}"}
-    free_chat_provider = provider
+    state.free_chat_provider = provider
     save_free_chat()
     return {"ok": True, "provider": provider}
 
 
 def get_free_chat_history() -> list[dict]:
-    return list(free_chat_history)
+    return list(state.free_chat_history)
 
 
 def clear_free_chat() -> None:
-    free_chat_history.clear()
+    state.free_chat_history.clear()
     save_free_chat()
 
 
@@ -870,12 +962,11 @@ def free_chat(message: str, provider: str | None = None) -> dict:
     if not text:
         return {"ok": False, "error": "消息不能为空"}
 
-    global free_chat_provider
     pid = _resolve_free_provider(provider)
-    if provider and pid != free_chat_provider:
-        free_chat_provider = pid
+    if provider and pid != state.free_chat_provider:
+        state.free_chat_provider = pid
 
-    free_chat_history.append({"role": "user", "content": text})
+    state.free_chat_history.append({"role": "user", "content": text})
     reply = call_api(
         None,
         _trim_free_history(),
@@ -884,10 +975,10 @@ def free_chat(message: str, provider: str | None = None) -> dict:
         silent=True,
     )
     if reply is None:
-        free_chat_history.pop()
+        state.free_chat_history.pop()
         return {"ok": False, "error": get_last_call_info().get("error", "发送失败")}
 
-    free_chat_history.append({"role": "assistant", "content": reply})
+    state.free_chat_history.append({"role": "assistant", "content": reply})
     save_free_chat()
     return {
         "ok": True,
@@ -898,11 +989,10 @@ def free_chat(message: str, provider: str | None = None) -> dict:
 
 
 def clear_chat_session() -> None:
-    global session_includes_chapter
     backup_session_before_clear()
-    conversation_history.clear()
-    session_includes_chapter = False
-    appended_indices.clear()
+    state.conversation_history.clear()
+    state.session_includes_chapter = False
+    state.appended_indices.clear()
     clear_session_files()
 
 
@@ -918,15 +1008,15 @@ def get_app_status() -> dict:
         "outline_provider": config.OUTLINE_PROVIDER,
         "context_turns": config.CHAT_CONTEXT_TURNS,
         "context_mode": config.CONTEXT_MODE,
-        "total_cost": total_cost,
+        "total_cost": state.total_cost,
         "chapter_num": latest[0] if latest else None,
         "summary_count": count_summaries(),
-        "history_len": len(conversation_history),
+        "history_len": len(state.conversation_history),
         "active_scene_id": novel_data.load_plan().get("active_scene_id"),
         "active_codex": novel_data.get_active_codex_ids(),
         "codex_count": len(novel_data.list_codex_entries()),
-        "free_chat_provider": free_chat_provider,
-        "free_chat_len": len(free_chat_history),
+        "free_chat_provider": state.free_chat_provider,
+        "free_chat_len": len(state.free_chat_history),
         "api_key_ok": config.is_api_key_configured(),
         "api_keys": {
             key: config.is_api_key_configured(key) for key in config.PROVIDERS
@@ -1195,13 +1285,15 @@ def do_provider(arg: str) -> None:
 
 
 def do_cost() -> None:
-    print(f"累计总费用：${total_cost:.6f}")
-    if COST_LOG.exists():
-        print(f"详细记录见：{COST_LOG}")
+    print(f"累计总费用（预估）：${state.total_cost:.6f}")
+    if COST_LOG_JSONL.exists():
+        print(f"详细记录见：{COST_LOG_JSONL}")
+    elif COST_LOG.exists():
+        print(f"详细记录见：{COST_LOG}（旧格式）")
 
 
 def backup_session_before_clear() -> None:
-    if not conversation_history:
+    if not state.conversation_history:
         return
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     dest = BACKUPS_DIR / f"session_{ts}.md"
@@ -1211,15 +1303,14 @@ def backup_session_before_clear() -> None:
 
 
 def do_new() -> None:
-    global session_includes_chapter
     pending = count_unsaved_chapter_turns()
     if pending:
         print(f"⚠️  还有 {pending} 条正文未写入章节，正在补存…")
         flush_chapter_writes()
     backup_session_before_clear()
-    conversation_history.clear()
-    session_includes_chapter = False
-    appended_indices.clear()
+    state.conversation_history.clear()
+    state.session_includes_chapter = False
+    state.appended_indices.clear()
     clear_session_files()
     print("对话历史已清空（文档缓存保留）")
 
@@ -1236,6 +1327,7 @@ def print_help() -> None:
   /cost      — 显示累计 API 费用
   /new       — 清空对话历史（保留文档缓存）
   /save      — 将未写入的 AI 正文补存到章节 + 保存会话
+  /undo      — 撤销上一次自动写入章节的正文
   /restore   — 恢复上次自动保存的会话
   /help      — 显示此帮助
   /quit      — 退出程序
@@ -1295,14 +1387,14 @@ def heartbeat_loop() -> None:
             continue
 
         now = time.time()
-        idle = now - last_user_active
-        since_request = now - last_request_time if last_request_time > 0 else float("inf")
+        idle = now - state.last_user_active
+        since_request = now - state.last_request_time if state.last_request_time > 0 else float("inf")
 
         if idle > config.HEARTBEAT_IDLE_STOP:
             continue
         if since_request < config.HEARTBEAT_REFRESH_AFTER:
             continue
-        if last_request_time == 0:
+        if state.last_request_time == 0:
             continue
 
         send_heartbeat()
@@ -1315,10 +1407,8 @@ def start_heartbeat_thread() -> threading.Thread:
 
 
 def main() -> None:
-    global total_cost, last_request_time
-
     init_data_dirs()
-    total_cost = load_total_cost()
+    state.total_cost = load_total_cost()
     setup_exit_handlers()
 
     print_startup_banner()
@@ -1366,6 +1456,8 @@ def main() -> None:
                 do_new()
             elif cmd == "/save":
                 do_save()
+            elif cmd == "/undo":
+                do_undo()
             elif cmd == "/restore":
                 do_restore()
             else:

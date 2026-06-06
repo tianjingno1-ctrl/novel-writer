@@ -24,7 +24,7 @@ VALID_CODEX_NAMES = frozenset(core.CODEX_FILES.keys())
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     core.init_data_dirs()
-    core.total_cost = core.load_total_cost()
+    core.set_total_cost(core.load_total_cost())
     core.load_free_chat()
     yield
 
@@ -56,7 +56,7 @@ def _build_stats_sig(chapters: list[tuple[int, object]]) -> tuple:
         for p in sorted(codex_dir.glob("*.md")):
             st = p.stat()
             sig_parts.append((p.name, st.st_mtime_ns, st.st_size))
-    for extra in (core.SUMMARIES_FILE, core.COST_LOG):
+    for extra in (core.SUMMARIES_FILE, core.COST_LOG, core.COST_LOG_JSONL):
         if extra.exists():
             st = extra.stat()
             sig_parts.append((extra.name, st.st_mtime_ns, st.st_size))
@@ -84,7 +84,7 @@ def _compute_stats(chapters: list[tuple[int, object]]) -> dict:
         "scene_count": scene_count,
         "codex_count": codex_count,
         "summary_count": core.count_summaries(),
-        "total_cost": core.total_cost,
+        "total_cost": core.get_total_cost(),
         "chapters": chapter_stats,
     }
 
@@ -498,12 +498,23 @@ def set_provider(body: ProviderSwitch) -> dict:
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
+@app.post("/api/chapters/undo-last")
+def undo_last_chapter_write() -> dict:
+    return _require_ok(core.undo_last_chapter_append(), "撤销失败")
+
+
 def run(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:
     import threading
     import time
     import webbrowser
 
     import uvicorn
+
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "⚠️  警告：Web 服务正在非本地地址监听，且无鉴权。"
+            "任何人可调用你的 API Key 并读写小说文件，请勿对公网暴露。"
+        )
 
     if open_browser:
         def _open() -> None:

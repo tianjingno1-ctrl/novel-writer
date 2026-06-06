@@ -19,8 +19,10 @@ python main.py         # CLI
 | 路径 | 说明 |
 |------|------|
 | `main.py` | 核心业务：写作对话、/summary、/check、自由聊、会话持久化 |
+| `app_state.py` | 进程内单例状态（CLI/Web 共享；多用户需按 session 隔离） |
 | `web_app.py` | FastAPI 后端，挂载 `web/` 静态前端 |
 | `config.py` | 提供商、上下文策略、从 `.env` 读 Key |
+| `prices.json` | 可选：覆盖各模型 token 单价（费用为预估） |
 | `providers.py` | kie(Anthropic) + DeepSeek(OpenAI 兼容) 统一调用 |
 | `summarizer.py` | 概述/检查的系统提示词 |
 | `novel_data.py` | Plan 场景、Codex 设定条目 |
@@ -37,11 +39,20 @@ python main.py         # CLI
 
 ## 改 bug 时注意
 
-1. **不要提交 `.env`**，只改 `.env.example` 占位说明。
-2. 写书与自由聊**模型选择独立**；自由聊 provider 存在 `data/free_chat.json`（已 gitignore）。
-3. `providers.py`：system 为空时不传 Anthropic `system` 参数。
-4. DeepSeek 不支持 Prompt Cache；kie 写作走 `build_cached_system()`。
-5. 保持中文 UI 文案与现有浅色主题风格。
+1. **不要提交 `.env`**，只改 `.env.example` 占位说明。系统环境变量优先于 `.env`。
+2. **Web 无鉴权、单进程单会话**：默认仅 `127.0.0.1`，勿对公网暴露。
+3. 写书与自由聊**模型选择独立**；自由聊 provider 存在 `data/free_chat.json`（已 gitignore）。
+4. `providers.py`：system 为空时不传 Anthropic `system` 参数。
+5. DeepSeek 不支持 Prompt Cache；kie 写作走 `build_cached_system()`。
+6. 章节/会话写入用 `file_utils.atomic_write_text`；费用日志为 `cost_log.jsonl`。
+7. 保持中文 UI 文案与现有浅色主题风格。
+
+## 测试
+
+```bash
+cd novel_writer
+python -m unittest discover -s tests -v
+```
 
 ## 常见排查
 

@@ -10,6 +10,7 @@ venv/
 
 # 运行时生成 / 个人数据
 cost_log.txt
+cost_log.jsonl
 data/session_autosave.json
 data/session_autosave.md
 data/free_chat.json
