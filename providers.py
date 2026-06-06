@@ -15,6 +15,31 @@ def _or_zero(obj: object | None, attr: str) -> int:
     return int(val) if val else 0
 
 
+class APIError(Exception):
+    """Provider 调用失败，kind 便于上层给出可操作建议。"""
+
+    def __init__(self, message: str, *, kind: str = "unknown") -> None:
+        super().__init__(message)
+        self.kind = kind
+
+
+def _classify_api_error(exc: Exception) -> APIError:
+    if isinstance(exc, APIError):
+        return exc
+    msg = str(exc).strip() or type(exc).__name__
+    lower = msg.lower()
+    name = type(exc).__name__.lower()
+    if isinstance(exc, TimeoutError) or "timeout" in lower or "timed out" in lower:
+        return APIError(msg, kind="timeout")
+    if "401" in msg or "403" in msg or "authentication" in name or "permission" in lower:
+        return APIError(msg, kind="auth")
+    if "429" in msg or "rate" in lower or "quota" in lower:
+        return APIError(msg, kind="rate_limit")
+    if "connection" in lower or "connect" in name:
+        return APIError(msg, kind="network")
+    return APIError(msg, kind="unknown")
+
+
 @dataclass
 class TokenUsage:
     cache_read_input_tokens: int = 0
@@ -150,9 +175,12 @@ class APIClient:
         }
         if _has_system(system):
             kwargs["system"] = system
-        with self._get_anthropic(provider).messages.stream(**kwargs) as stream:
-            yield from stream.text_stream
-            final = stream.get_final_message()
+        try:
+            with self._get_anthropic(provider).messages.stream(**kwargs) as stream:
+                yield from stream.text_stream
+                final = stream.get_final_message()
+        except Exception as e:
+            raise _classify_api_error(e) from e
         usage_obj = final.usage
         self._last_stream_usage = TokenUsage(
             cache_read_input_tokens=_or_zero(usage_obj, "cache_read_input_tokens"),
@@ -174,13 +202,16 @@ class APIClient:
         if system_text.strip():
             openai_messages.append({"role": "system", "content": system_text})
         openai_messages.extend(messages)
-        stream = self._get_openai(provider).chat.completions.create(
-            model=config.get_model(provider),
-            max_tokens=max_tokens,
-            messages=openai_messages,
-            stream=True,
-            stream_options={"include_usage": True},
-        )
+        try:
+            stream = self._get_openai(provider).chat.completions.create(
+                model=config.get_model(provider),
+                max_tokens=max_tokens,
+                messages=openai_messages,
+                stream=True,
+                stream_options={"include_usage": True},
+            )
+        except Exception as e:
+            raise _classify_api_error(e) from e
         prompt_tokens = 0
         completion_tokens = 0
         cached = 0
@@ -217,7 +248,10 @@ class APIClient:
         }
         if _has_system(system):
             kwargs["system"] = system
-        response = self._get_anthropic(provider).messages.create(**kwargs)
+        try:
+            response = self._get_anthropic(provider).messages.create(**kwargs)
+        except Exception as e:
+            raise _classify_api_error(e) from e
 
         text_parts = []
         for block in response.content:
@@ -248,11 +282,14 @@ class APIClient:
             openai_messages.append({"role": "system", "content": system_text})
         openai_messages.extend(messages)
 
-        response = self._get_openai(provider).chat.completions.create(
-            model=config.get_model(provider),
-            max_tokens=max_tokens,
-            messages=openai_messages,
-        )
+        try:
+            response = self._get_openai(provider).chat.completions.create(
+                model=config.get_model(provider),
+                max_tokens=max_tokens,
+                messages=openai_messages,
+            )
+        except Exception as e:
+            raise _classify_api_error(e) from e
 
         text = response.choices[0].message.content or ""
         usage_obj = response.usage

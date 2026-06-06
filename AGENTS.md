@@ -40,7 +40,7 @@ python main.py         # CLI
 ## 改 bug 时注意
 
 1. **不要提交 `.env`**，只改 `.env.example` 占位说明。系统环境变量优先于 `.env`。
-2. **Web 无鉴权、单进程单会话**：默认仅 `127.0.0.1`，勿对公网暴露。
+2. **Web 无鉴权、单进程单会话**：默认仅 `127.0.0.1`；可设 `NOVEL_WEB_TOKEN` 启用最小鉴权。Provider/上下文变更写入 `data/runtime.json` 持久化。
 3. 写书与自由聊**模型选择独立**；自由聊 provider 存在 `data/free_chat.json`（已 gitignore）。
 4. `providers.py`：system 为空时不传 Anthropic `system` 参数。
 5. DeepSeek 不支持 Prompt Cache；kie 写作走 `build_cached_system()`。

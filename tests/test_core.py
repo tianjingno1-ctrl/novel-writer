@@ -82,5 +82,31 @@ class ConfigTests(unittest.TestCase):
         self.assertGreater(price["input"], 0)
 
 
+class PlanLockTests(unittest.TestCase):
+    def test_mutate_plan_serializes(self) -> None:
+        import novel_data
+
+        novel_data._mutate_plan(lambda p: p.setdefault("chapters", {}))
+        plan = novel_data.load_plan()
+        self.assertIn("chapters", plan)
+
+
+class CodexTests(unittest.TestCase):
+    def test_sanitize_codex_name(self) -> None:
+        import novel_data
+
+        self.assertEqual(novel_data._sanitize_codex_name("a/b"), "a_b")
+        self.assertEqual(novel_data._sanitize_codex_name('x:y'), "x_y")
+
+
+class APIErrorTests(unittest.TestCase):
+    def test_classify_auth(self) -> None:
+        from providers import APIError, _classify_api_error
+
+        err = _classify_api_error(Exception("401 Unauthorized"))
+        self.assertEqual(err.kind, "auth")
+        self.assertIsInstance(err, APIError)
+
+
 if __name__ == "__main__":
     unittest.main()

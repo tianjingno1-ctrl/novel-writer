@@ -16,7 +16,7 @@ import config
 import file_utils
 import novel_data
 from app_state import state
-from providers import TokenUsage, get_client, reset_client
+from providers import APIError, TokenUsage, get_client, reset_client
 from summarizer import (
     CHECK_SYSTEM,
     OUTLINE_SYSTEM,
@@ -285,6 +285,19 @@ def get_last_call_info() -> dict:
     return dict(state.last_call_info)
 
 
+def _api_error_message(exc: Exception) -> str:
+    if isinstance(exc, APIError):
+        hints = {
+            "auth": "请检查 .env 中的 API Key 是否正确",
+            "rate_limit": "请求过于频繁，请稍后重试",
+            "timeout": "请求超时，请检查网络或稍后重试",
+            "network": "网络连接失败，请检查网络",
+        }
+        hint = hints.get(exc.kind)
+        return f"{exc} — {hint}" if hint else str(exc)
+    return str(exc)
+
+
 def call_api(
     system: list[dict] | str | None,
     messages: list[dict],
@@ -337,10 +350,17 @@ def call_api(
         if not silent:
             print(f"依赖缺失：{e}")
         return None
-    except Exception as e:
-        state.last_call_info = {"ok": False, "error": str(e)}
+    except APIError as e:
+        err = _api_error_message(e)
+        state.last_call_info = {"ok": False, "error": err, "kind": e.kind}
         if not silent:
-            print(f"API 错误：{e}")
+            print(f"API 错误：{err}")
+        return None
+    except Exception as e:
+        err = _api_error_message(e)
+        state.last_call_info = {"ok": False, "error": err}
+        if not silent:
+            print(f"API 错误：{err}")
         return None
 
 
@@ -856,23 +876,30 @@ def writing_chat_stream(
                 chunks.append(chunk)
                 yield json.dumps({"type": "chunk", "text": chunk}, ensure_ascii=False)
             state.last_request_time = time.time()
-        usage = get_client().pop_stream_usage()
-        cost = calc_cost(usage, provider=pid)
-        log_cost(usage, cost, "请求", provider=pid, silent=True)
-        cfg = config.get_provider_config(pid)
-        state.last_call_info = {
-            "ok": True,
-            "provider": pid,
-            "provider_name": cfg["name"],
-            "cost": cost,
-            "total_cost": state.total_cost,
-            "usage": {
-                "cache_read": usage.cache_read_input_tokens,
-                "cache_write": usage.cache_creation_input_tokens,
-                "input": usage.input_tokens,
-                "output": usage.output_tokens,
-            },
-        }
+            usage = get_client().pop_stream_usage()
+            cost = calc_cost(usage, provider=pid)
+            log_cost(usage, cost, "请求", provider=pid, silent=True)
+            cfg = config.get_provider_config(pid)
+            state.last_call_info = {
+                "ok": True,
+                "provider": pid,
+                "provider_name": cfg["name"],
+                "cost": cost,
+                "total_cost": state.total_cost,
+                "usage": {
+                    "cache_read": usage.cache_read_input_tokens,
+                    "cache_write": usage.cache_creation_input_tokens,
+                    "input": usage.input_tokens,
+                    "output": usage.output_tokens,
+                },
+            }
+    except APIError as e:
+        state.conversation_history.pop()
+        yield json.dumps(
+            {"type": "error", "message": _api_error_message(e)},
+            ensure_ascii=False,
+        )
+        return
     except Exception as e:
         state.conversation_history.pop()
         yield json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)

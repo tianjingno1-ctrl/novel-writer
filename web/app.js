@@ -249,13 +249,24 @@ async function api(path, opts = {}, timeoutMs = API_TIMEOUT_MS) {
     userSignal.addEventListener('abort', () => controller.abort(), { once: true });
   }
   const { signal: _ignored, ...fetchOpts } = opts;
+  const headers = { 'Content-Type': 'application/json', ...(fetchOpts.headers || {}) };
+  const token = sessionStorage.getItem('novel_web_token');
+  if (token) headers['X-Novel-Token'] = token;
   try {
     const r = await fetch('/api' + path, {
-      headers: { 'Content-Type': 'application/json' },
       ...fetchOpts,
+      headers,
       signal: controller.signal,
     });
     const data = await r.json().catch(() => ({}));
+    if (r.status === 401) {
+      const entered = prompt('Web API 需要访问令牌（.env 中的 NOVEL_WEB_TOKEN）');
+      if (entered) {
+        sessionStorage.setItem('novel_web_token', entered.trim());
+        return api(path, opts, timeoutMs);
+      }
+      throw new Error(data.detail || '未授权');
+    }
     if (!r.ok) throw new Error(data.detail || data.error || r.statusText);
     return data;
   } catch (e) {
@@ -1009,12 +1020,23 @@ async function sendChatStream(body) {
   };
 
   try {
+    const streamHeaders = { 'Content-Type': 'application/json' };
+    const token = sessionStorage.getItem('novel_web_token');
+    if (token) streamHeaders['X-Novel-Token'] = token;
     const resp = await fetch('/api/chat/stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: streamHeaders,
       body: JSON.stringify(body),
       signal: controller.signal,
     });
+    if (resp.status === 401) {
+      const entered = prompt('Web API 需要访问令牌（.env 中的 NOVEL_WEB_TOKEN）');
+      if (entered) {
+        sessionStorage.setItem('novel_web_token', entered.trim());
+        return sendChatStream(body);
+      }
+      throw new Error('未授权');
+    }
     if (!resp.ok) {
       const data = await resp.json().catch(() => ({}));
       throw new Error(data.detail || data.error || resp.statusText);

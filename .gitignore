@@ -14,4 +14,5 @@ cost_log.jsonl
 data/session_autosave.json
 data/session_autosave.md
 data/free_chat.json
+data/runtime.json
 data/backups/

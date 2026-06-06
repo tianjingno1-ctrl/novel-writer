@@ -10,8 +10,8 @@ from pathlib import Path
 import config
 import main as core
 import novel_data
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
@@ -19,17 +19,47 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 MAX_CONTENT_BYTES = 2 * 1024 * 1024  # 2MB，章节/Codex 文件
 MAX_API_TEXT_CHARS = 50_000  # 对话/指令等 API 文本
 VALID_CODEX_NAMES = frozenset(core.CODEX_FILES.keys())
+_LOCAL_CLIENTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     core.init_data_dirs()
+    config.load_runtime_settings()
     core.set_total_cost(core.load_total_cost())
     core.load_free_chat()
+    if config.WEB_TOKEN:
+        print("🔐 Web API 已启用令牌鉴权（请求头 X-Novel-Token）")
     yield
 
 
 app = FastAPI(title="小说写作助手", lifespan=lifespan)
+
+
+@app.middleware("http")
+async def web_auth_middleware(request: Request, call_next):
+    path = request.url.path
+    if not path.startswith("/api/"):
+        return await call_next(request)
+
+    client_host = request.client.host if request.client else ""
+    if config.WEB_TOKEN:
+        token = request.headers.get("X-Novel-Token", "")
+        if token != config.WEB_TOKEN:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "需要有效的 X-Novel-Token（与 .env 中 NOVEL_WEB_TOKEN 一致）"},
+            )
+    elif client_host and client_host not in _LOCAL_CLIENTS:
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": "非本地访问被拒绝。请设置 NOVEL_WEB_TOKEN 并通过 X-Novel-Token 鉴权，"
+                "或仅在 127.0.0.1 上使用。"
+            },
+        )
+
+    return await call_next(request)
 
 _stats_cache: dict | None = None
 _stats_sig: tuple | None = None
@@ -477,6 +507,7 @@ def set_context(cfg: ContextConfig) -> dict:
         if cfg.mode not in ("turns", "summaries", "beats", "codex"):
             raise HTTPException(400, "mode 必须是 turns/summaries/beats/codex")
         config.CONTEXT_MODE = cfg.mode
+    config.save_runtime_settings()
     return {
         "ok": True,
         "context_turns": config.CHAT_CONTEXT_TURNS,
@@ -489,6 +520,7 @@ def set_provider(body: ProviderSwitch) -> dict:
     if body.provider not in config.PROVIDERS:
         raise HTTPException(400, f"未知提供商: {body.provider}")
     config.PROVIDER = body.provider
+    config.save_runtime_settings()
     from providers import reset_client
 
     reset_client(body.provider)
@@ -510,11 +542,19 @@ def run(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) ->
 
     import uvicorn
 
-    if host not in ("127.0.0.1", "localhost", "::1"):
-        print(
-            "⚠️  警告：Web 服务正在非本地地址监听，且无鉴权。"
-            "任何人可调用你的 API Key 并读写小说文件，请勿对公网暴露。"
-        )
+    safe_hosts = ("127.0.0.1", "localhost", "::1")
+    if host not in safe_hosts:
+        if not config.WEB_TOKEN:
+            print(
+                "⚠️  非本地监听必须设置 NOVEL_WEB_TOKEN；"
+                "已强制回退到 127.0.0.1"
+            )
+            host = "127.0.0.1"
+        else:
+            print(
+                "⚠️  警告：Web 服务正在非本地地址监听。"
+                "已启用 NOVEL_WEB_TOKEN 鉴权，仍请勿对不可信网络暴露。"
+            )
 
     if open_browser:
         def _open() -> None:

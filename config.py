@@ -3,10 +3,13 @@ import logging
 import os
 from pathlib import Path
 
+import file_utils
+
 logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path(__file__).resolve().parent
 _ENV_CANDIDATES = (_CONFIG_DIR / ".env", _CONFIG_DIR / ".evn")
+RUNTIME_FILE = _CONFIG_DIR / "data" / "runtime.json"
 
 
 def _load_env_file() -> None:
@@ -60,6 +63,9 @@ CONTEXT_MODE = os.environ.get("NOVEL_CONTEXT_MODE", "beats")
 # 自由聊天（与写作分离，默认 DeepSeek 省钱）
 FREE_CHAT_PROVIDER = os.environ.get("NOVEL_FREE_CHAT_PROVIDER", "deepseek")
 FREE_CHAT_CONTEXT_TURNS = int(os.environ.get("NOVEL_FREE_CHAT_TURNS", "20"))
+
+# Web 最小鉴权：设置后所有 /api/* 须带请求头 X-Novel-Token
+WEB_TOKEN = os.environ.get("NOVEL_WEB_TOKEN", "").strip()
 
 PLACEHOLDER_PREFIX = "在这里填"
 
@@ -118,6 +124,40 @@ def _load_prices_from_file() -> None:
 
 
 _load_prices_from_file()
+
+
+def load_runtime_settings() -> None:
+    """从 data/runtime.json 恢复 Web 端修改过的 provider / 上下文配置。"""
+    global PROVIDER, CONTEXT_MODE, CHAT_CONTEXT_TURNS
+    if not RUNTIME_FILE.exists():
+        return
+    try:
+        data = json.loads(RUNTIME_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("无法读取 runtime.json: %s", e)
+        return
+    provider = data.get("provider")
+    if isinstance(provider, str) and provider in PROVIDERS:
+        PROVIDER = provider
+    mode = data.get("context_mode")
+    if isinstance(mode, str) and mode in ("turns", "summaries", "beats", "codex"):
+        CONTEXT_MODE = mode
+    turns = data.get("context_turns")
+    if isinstance(turns, int) and 0 <= turns <= 100:
+        CHAT_CONTEXT_TURNS = turns
+
+
+def save_runtime_settings() -> None:
+    payload = {
+        "provider": PROVIDER,
+        "context_mode": CONTEXT_MODE,
+        "context_turns": CHAT_CONTEXT_TURNS,
+    }
+    RUNTIME_FILE.parent.mkdir(parents=True, exist_ok=True)
+    file_utils.atomic_write_text(
+        RUNTIME_FILE,
+        json.dumps(payload, ensure_ascii=False, indent=2),
+    )
 
 
 def resolve_provider(provider: str | None = None) -> str:
@@ -187,3 +227,6 @@ def list_providers() -> str:
     )
     lines.append("  （辅助任务提供商在 config.py 修改，/provider 只切换主力）")
     return "\n".join(lines)
+
+
+load_runtime_settings()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,8 @@ BACKUPS_DIR = DATA_DIR / "backups"
 PLAN_FILE = DATA_DIR / "plan.json"
 CODEX_DIR = DATA_DIR / "codex" / "entries"
 CODEX_ACTIVE_FILE = DATA_DIR / "codex" / "active.json"
+
+_plan_lock = threading.RLock()
 
 
 def read_text(path: Path) -> str:
@@ -56,15 +59,30 @@ def _save_json(path: Path, data: dict) -> None:
     )
 
 
-def load_plan() -> dict:
+def _read_plan_unlocked() -> dict:
     _ensure_dirs()
     if not PLAN_FILE.exists():
         _save_json(PLAN_FILE, DEFAULT_PLAN)
     return _load_json(PLAN_FILE, DEFAULT_PLAN)
 
 
+def load_plan() -> dict:
+    with _plan_lock:
+        return _read_plan_unlocked()
+
+
 def save_plan(plan: dict) -> None:
-    _save_json(PLAN_FILE, plan)
+    with _plan_lock:
+        _save_json(PLAN_FILE, plan)
+
+
+def _mutate_plan(editor):
+    """在锁内 load → 改 → save，避免 plan.json 并发 lost update。"""
+    with _plan_lock:
+        plan = _read_plan_unlocked()
+        result = editor(plan)
+        _save_json(PLAN_FILE, plan)
+        return result
 
 
 def _new_scene_id(chapter_num: int) -> str:
@@ -72,12 +90,13 @@ def _new_scene_id(chapter_num: int) -> str:
 
 
 def ensure_chapter_plan(chapter_num: int, title: str = "") -> dict:
-    plan = load_plan()
-    key = str(chapter_num)
-    if key not in plan["chapters"]:
-        plan["chapters"][key] = {"title": title or f"第{chapter_num}章", "scenes": []}
-        save_plan(plan)
-    return plan
+    def edit(plan: dict) -> None:
+        key = str(chapter_num)
+        if key not in plan["chapters"]:
+            plan["chapters"][key] = {"title": title or f"第{chapter_num}章", "scenes": []}
+
+    _mutate_plan(edit)
+    return load_plan()
 
 
 def list_plan_chapters() -> list[dict]:
@@ -115,57 +134,62 @@ def get_chapter_plan(chapter_num: int) -> dict | None:
 
 
 def add_scene(chapter_num: int, title: str = "新场景", beat: str = "") -> dict:
-    plan = ensure_chapter_plan(chapter_num)
-    key = str(chapter_num)
-    scene = {
-        "id": _new_scene_id(chapter_num),
-        "title": title.strip() or "新场景",
-        "beat": beat,
-        "summary": "",
-        "done": False,
-        "updated_at": datetime.now().isoformat(timespec="seconds"),
-    }
-    plan["chapters"][key]["scenes"].append(scene)
-    plan["active_scene_id"] = scene["id"]
-    save_plan(plan)
-    return scene
+    ensure_chapter_plan(chapter_num)
+
+    def edit(plan: dict) -> dict:
+        key = str(chapter_num)
+        scene = {
+            "id": _new_scene_id(chapter_num),
+            "title": title.strip() or "新场景",
+            "beat": beat,
+            "summary": "",
+            "done": False,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        plan["chapters"][key]["scenes"].append(scene)
+        plan["active_scene_id"] = scene["id"]
+        return scene
+
+    return _mutate_plan(edit)
 
 
 def update_scene(scene_id: str, **fields) -> dict | None:
-    plan = load_plan()
-    for ch in plan.get("chapters", {}).values():
-        for scene in ch.get("scenes", []):
-            if scene["id"] == scene_id:
-                for k, v in fields.items():
-                    if k in ("title", "beat", "summary", "done"):
-                        scene[k] = v
-                scene["updated_at"] = datetime.now().isoformat(timespec="seconds")
-                save_plan(plan)
-                return scene
-    return None
+    def edit(plan: dict) -> dict | None:
+        for ch in plan.get("chapters", {}).values():
+            for scene in ch.get("scenes", []):
+                if scene["id"] == scene_id:
+                    for k, v in fields.items():
+                        if k in ("title", "beat", "summary", "done"):
+                            scene[k] = v
+                    scene["updated_at"] = datetime.now().isoformat(timespec="seconds")
+                    return scene
+        return None
+
+    return _mutate_plan(edit)
 
 
 def delete_scene(scene_id: str) -> bool:
-    plan = load_plan()
-    for key, ch in plan.get("chapters", {}).items():
-        scenes = ch.get("scenes", [])
-        for i, scene in enumerate(scenes):
-            if scene["id"] == scene_id:
-                scenes.pop(i)
-                if plan.get("active_scene_id") == scene_id:
-                    if scenes:
-                        plan["active_scene_id"] = scenes[-1]["id"]
-                    else:
-                        fallback = None
-                        for key in sorted(plan.get("chapters", {}), key=lambda x: int(x)):
-                            ch2 = plan["chapters"][key]
-                            if ch2.get("scenes"):
-                                fallback = ch2["scenes"][0]["id"]
-                                break
-                        plan["active_scene_id"] = fallback
-                save_plan(plan)
-                return True
-    return False
+    def edit(plan: dict) -> bool:
+        for key, ch in plan.get("chapters", {}).items():
+            scenes = ch.get("scenes", [])
+            for i, scene in enumerate(scenes):
+                if scene["id"] == scene_id:
+                    scenes.pop(i)
+                    if plan.get("active_scene_id") == scene_id:
+                        if scenes:
+                            plan["active_scene_id"] = scenes[-1]["id"]
+                        else:
+                            fallback = None
+                            for k in sorted(plan.get("chapters", {}), key=lambda x: int(x)):
+                                ch2 = plan["chapters"][k]
+                                if ch2.get("scenes"):
+                                    fallback = ch2["scenes"][0]["id"]
+                                    break
+                            plan["active_scene_id"] = fallback
+                    return True
+        return False
+
+    return _mutate_plan(edit)
 
 
 def get_scene(scene_id: str) -> dict | None:
@@ -178,35 +202,38 @@ def get_scene(scene_id: str) -> dict | None:
 
 
 def set_active_scene(scene_id: str | None) -> dict:
-    plan = load_plan()
-    plan["active_scene_id"] = scene_id
-    save_plan(plan)
-    return {"active_scene_id": scene_id}
+    def edit(plan: dict) -> dict:
+        plan["active_scene_id"] = scene_id
+        return {"active_scene_id": scene_id}
+
+    return _mutate_plan(edit)
 
 
 def update_chapter_title(chapter_num: int, title: str) -> dict | None:
-    plan = load_plan()
-    key = str(chapter_num)
-    if key not in plan["chapters"]:
-        return None
-    plan["chapters"][key]["title"] = title.strip()
-    save_plan(plan)
-    return plan["chapters"][key]
+    def edit(plan: dict) -> dict | None:
+        key = str(chapter_num)
+        if key not in plan["chapters"]:
+            return None
+        plan["chapters"][key]["title"] = title.strip()
+        return plan["chapters"][key]
+
+    return _mutate_plan(edit)
 
 
 def reorder_scenes(chapter_num: int, scene_ids: list[str]) -> bool:
-    plan = load_plan()
-    key = str(chapter_num)
-    if key not in plan["chapters"]:
-        return False
-    scenes = plan["chapters"][key]["scenes"]
-    id_map = {s["id"]: s for s in scenes}
-    ordered = [id_map[sid] for sid in scene_ids if sid in id_map]
-    seen = {s["id"] for s in ordered}
-    ordered.extend(s for s in scenes if s["id"] not in seen)
-    plan["chapters"][key]["scenes"] = ordered
-    save_plan(plan)
-    return True
+    def edit(plan: dict) -> bool:
+        key = str(chapter_num)
+        if key not in plan["chapters"]:
+            return False
+        scenes = plan["chapters"][key]["scenes"]
+        id_map = {s["id"]: s for s in scenes}
+        ordered = [id_map[sid] for sid in scene_ids if sid in id_map]
+        seen = {s["id"] for s in ordered}
+        ordered.extend(s for s in scenes if s["id"] not in seen)
+        plan["chapters"][key]["scenes"] = ordered
+        return True
+
+    return _mutate_plan(edit)
 
 
 def get_active_scene() -> dict | None:
