@@ -11,9 +11,10 @@ import novel_data
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
+MAX_CONTENT_BYTES = 2 * 1024 * 1024  # 2MB
 
 
 @asynccontextmanager
@@ -26,6 +27,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="小说写作助手", lifespan=lifespan)
 
+_stats_cache: dict | None = None
+_stats_sig: tuple | None = None
+
 
 class ChatRequest(BaseModel):
     instruction: str = ""
@@ -35,6 +39,14 @@ class ChatRequest(BaseModel):
 
 class ContentBody(BaseModel):
     content: str
+
+    @field_validator("content")
+    @classmethod
+    def check_size(cls, v: str) -> str:
+        if len(v.encode("utf-8")) > MAX_CONTENT_BYTES:
+            mb = MAX_CONTENT_BYTES // 1024 // 1024
+            raise ValueError(f"内容过大（上限 {mb}MB）")
+        return v
 
 
 class FreeChatRequest(BaseModel):
@@ -100,7 +112,28 @@ def status() -> dict:
 def stats() -> dict:
     import re
 
+    global _stats_cache, _stats_sig
+
     chapters = core.list_chapters()
+    sig_parts: list[tuple] = []
+    for num, path in chapters:
+        sig_parts.append((num, path.stat().st_mtime_ns, path.stat().st_size))
+    if novel_data.PLAN_FILE.exists():
+        st = novel_data.PLAN_FILE.stat()
+        sig_parts.append(("plan", st.st_mtime_ns, st.st_size))
+    codex_dir = novel_data.CODEX_DIR
+    if codex_dir.exists():
+        for p in sorted(codex_dir.glob("*.md")):
+            st = p.stat()
+            sig_parts.append((p.name, st.st_mtime_ns, st.st_size))
+    for extra in (core.SUMMARIES_FILE, core.COST_LOG):
+        if extra.exists():
+            st = extra.stat()
+            sig_parts.append((extra.name, st.st_mtime_ns, st.st_size))
+    sig = tuple(sig_parts)
+    if _stats_cache is not None and _stats_sig == sig:
+        return _stats_cache
+
     chapter_stats = []
     total_chars = 0
     for num, path in chapters:
@@ -115,7 +148,7 @@ def stats() -> dict:
     )
     codex_count = len(novel_data.list_codex_entries())
 
-    return {
+    result = {
         "total_chars": total_chars,
         "chapter_count": len(chapters),
         "scene_count": scene_count,
@@ -124,6 +157,9 @@ def stats() -> dict:
         "total_cost": core.total_cost,
         "chapters": chapter_stats,
     }
+    _stats_cache = result
+    _stats_sig = sig
+    return result
 
 
 # ── 章节 ──────────────────────────────────────────

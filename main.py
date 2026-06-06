@@ -98,11 +98,11 @@ def backup_file(path: Path) -> None:
 
 def write_text(path: Path, content: str, *, append: bool = False) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    backup_file(path)
     if append:
         with path.open("a", encoding="utf-8") as f:
             f.write(content)
     else:
+        backup_file(path)
         path.write_text(content, encoding="utf-8")
 
 
@@ -588,6 +588,7 @@ def _handle_exit_signal(signum, frame) -> None:
 def _atexit_save() -> None:
     if _exiting:
         return
+    _heartbeat_stop.set()
     save_session("atexit", silent=True)
     if conversation_history:
         remind_unsaved_on_exit()

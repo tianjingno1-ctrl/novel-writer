@@ -50,9 +50,10 @@ def _load_json(path: Path, default: dict) -> dict:
 
 
 def _save_json(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     backup_file(path)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    file_utils.atomic_write_text(
+        path, json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 def load_plan() -> dict:
@@ -118,7 +119,7 @@ def add_scene(chapter_num: int, title: str = "新场景", beat: str = "") -> dic
     key = str(chapter_num)
     scene = {
         "id": _new_scene_id(chapter_num),
-        "title": title,
+        "title": title.strip() or "新场景",
         "beat": beat,
         "summary": "",
         "done": False,

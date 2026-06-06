@@ -126,11 +126,14 @@ const SIDEBAR_CONFIG = {
   write: [{ id: 'codex', label: '设定库' }, { id: 'chats', label: '写书记录' }, { id: 'global', label: '全局文件' }],
   chat:  [{ id: 'chats', label: '写书记录' }, { id: 'codex', label: '设定库' }],
   free:  [{ id: 'freechats', label: '聊天记录' }],
-  review: [{ id: 'codex', label: '设定库' }],
 };
 
 function esc(s) {
   return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function jsEsc(s) {
+  return String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 }
 
 function toast(msg) {
@@ -155,6 +158,7 @@ function countChars(text) {
 function updateWordCount() {
   const ed = document.getElementById('mainEditor');
   const pill = document.getElementById('wordCountPill');
+  if (!pill) return;
   if (state.mode === 'write' && ed && !ed.classList.contains('hidden')) {
     const n = countChars(ed.value);
     pill.textContent = `${n.toLocaleString()} 字`;
@@ -291,7 +295,7 @@ async function renderScenesSidebar(body, q) {
       !q || s.title.toLowerCase().includes(q) || (s.beat||'').toLowerCase().includes(q)
     ).map(s => `
       <div class="list-item ${state.currentSceneId===s.id?'active':''}"
-           onclick="selectScene('${s.id}', ${ch.num})">
+           onclick="selectScene('${jsEsc(s.id)}', ${ch.num})">
         <div class="title">${s.done?'✓ ':''}${esc(s.title)}</div>
         <div class="meta">${esc((s.beat||'').slice(0,60) || '无 beat')}</div>
       </div>`).join('');
@@ -304,8 +308,8 @@ async function renderCodexSidebar(body, q) {
   body.innerHTML = entries.filter(e => !q || e.name.toLowerCase().includes(q)).map(e => `
     <label class="codex-check">
       <input type="checkbox" ${active.includes(e.id)?'checked':''}
-        onchange="toggleCodex('${esc(e.id)}', this.checked)" />
-      <div style="flex:1" onclick="openCodexEntry('${esc(e.id)}')">
+        onchange="toggleCodex('${jsEsc(e.id)}', this.checked)" />
+      <div style="flex:1" onclick="openCodexEntry('${jsEsc(e.id)}')">
         <div class="title">${esc(e.name)}</div>
         <div class="meta">${esc(e.preview||'')}</div>
       </div>
@@ -403,7 +407,7 @@ async function renderPlanBoard() {
   board.innerHTML = `<div id="planSceneList" class="plan-scene-list">${
     scenes.map(s => `
     <div class="scene-card ${state.currentSceneId===s.id?'active':''}" data-id="${esc(s.id)}"
-         onclick="selectScene('${esc(s.id)}', ${num})">
+         onclick="selectScene('${jsEsc(s.id)}', ${num})">
       <h4>
         <input type="checkbox" ${s.done?'checked':''}
           onclick="event.stopPropagation()"

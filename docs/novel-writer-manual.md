@@ -256,7 +256,7 @@ Web 没有单独的「追加 patch」按钮。推荐两种方式：
 | `world.md` | 世界观、魔法体系、地图等（几乎不变） |
 | `characters.md` | 主要人物初始设定（只追加，不修改） |
 | `char_current.md` | 人物当前状态（可随章节更新） |
-| `summaries.md` | 章节概述汇总（Review 自动追加） |
+| `summaries.md` | 章节概述汇总（写书对话「生成概述」自动追加） |
 | `plot_threads.md` | 伏笔与线索清单（手动维护） |
 
 > 💡 编辑后点击「保存」，修改立即生效于下一次 AI 请求。
@@ -395,7 +395,7 @@ A：在 Codex 中为本章人物创建条目并勾选，AI 会只使用勾选的
 - ✅ `POST /api/plan/scenes` 后端增加空标题校验
 
 **已知限制（待后续版本处理）**
-- Free 模式聊天、Review 功能尚未流式化
+- Free 模式聊天、统计页功能尚未流式化
 - ~~流式 120s 总时长超时~~ → v0.4 已修复
 - ~~`_isSending` 流式提前释放~~ → v0.4 已修复
 
@@ -422,7 +422,7 @@ A：在 Codex 中为本章人物创建条目并勾选，AI 会只使用勾选的
 
 ### v0.1 · 初始版本
 
-- 五大模式：Plan / Write / Chat / Free / Review
+- 五大模式：Plan / Write / Chat / Free / 统计
 - Codex 设定库条目化管理
 - Prompt Cache 三层缓存（Claude）
 - 多提供商支持：kie.ai Claude + DeepSeek
