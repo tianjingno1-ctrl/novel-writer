@@ -781,6 +781,8 @@ def writing_chat_stream(
             "type": "done",
             "chapter_num": result["chapter_num"],
             "chapter_saved": result["chapter_saved"],
+            "cost": _last_call_info.get("cost", 0),
+            "total_cost": total_cost,
         },
         ensure_ascii=False,
     )

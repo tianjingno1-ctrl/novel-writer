@@ -11,7 +11,34 @@ const state = {
 };
 
 const API_TIMEOUT_MS = 120000;
+const STREAM_FIRST_BYTE_MS = 90000;
+const STREAM_CHUNK_IDLE_MS = 180000;
 let _isSending = false;
+
+function beginSending(btnId, loadingText = '处理中…') {
+  if (_isSending) {
+    toast('请等待当前请求完成');
+    return null;
+  }
+  _isSending = true;
+  const btn = btnId ? document.getElementById(btnId) : null;
+  const defaultText = btn?.textContent || '';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = loadingText;
+  }
+  return { btn, defaultText };
+}
+
+function endSending(session) {
+  _isSending = false;
+  if (!session) return;
+  const { btn, defaultText } = session;
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = defaultText;
+  }
+}
 
 async function api(path, opts = {}, timeoutMs = API_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -679,21 +706,21 @@ function appendStreamBubble(containerId) {
   return el.querySelector('.stream-body');
 }
 
-async function sendChatStream(body, errEl) {
+async function sendChatStream(body) {
   const controller = new AbortController();
   let timedOut = false;
-  let gotChunk = false;
+  let streamStarted = false;
   let timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
-  }, API_TIMEOUT_MS);
+  }, STREAM_FIRST_BYTE_MS);
 
-  const resetTimer = () => {
+  const touchIdleTimer = () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
       timedOut = true;
       controller.abort();
-    }, API_TIMEOUT_MS);
+    }, STREAM_CHUNK_IDLE_MS);
   };
 
   try {
@@ -707,6 +734,9 @@ async function sendChatStream(body, errEl) {
       const data = await resp.json().catch(() => ({}));
       throw new Error(data.detail || data.error || resp.statusText);
     }
+    if (!resp.body) {
+      throw new Error('AI 连接异常，未收到流式响应');
+    }
 
     removeTypingIndicator();
     const bubble = appendStreamBubble('chatMessages');
@@ -718,22 +748,28 @@ async function sendChatStream(body, errEl) {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      if (!gotChunk) {
-        gotChunk = true;
-        clearTimeout(timer);
+      if (!streamStarted) {
+        streamStarted = true;
+        touchIdleTimer();
+      } else {
+        touchIdleTimer();
       }
-      resetTimer();
       buffer += decoder.decode(value, { stream: true });
       const parts = buffer.split('\n\n');
       buffer = parts.pop() || '';
       for (const part of parts) {
         const line = part.trim();
         if (!line.startsWith('data: ')) continue;
-        const evt = JSON.parse(line.slice(6));
+        let evt;
+        try {
+          evt = JSON.parse(line.slice(6));
+        } catch {
+          continue;
+        }
         if (evt.type === 'chunk' && bubble) {
           bubble.textContent += evt.text;
-          document.getElementById('chatMessages').scrollTop =
-            document.getElementById('chatMessages').scrollHeight;
+          const log = document.getElementById('chatMessages');
+          if (log) log.scrollTop = log.scrollHeight;
         } else if (evt.type === 'done') {
           doneMeta = evt;
         } else if (evt.type === 'error') {
@@ -741,10 +777,16 @@ async function sendChatStream(body, errEl) {
         }
       }
     }
+    if (!doneMeta && !streamStarted) {
+      throw new Error('AI 未返回内容，请检查 API Key 或网络');
+    }
     return doneMeta;
   } catch (e) {
     if (e.name === 'AbortError' && timedOut) {
-      throw new Error('请求超时，请检查网络或稍后重试');
+      const msg = streamStarted
+        ? '生成超时（长时间无新内容），请重试'
+        : '连接超时，请检查网络或 API Key';
+      throw new Error(msg);
     }
     throw e;
   } finally {
@@ -753,33 +795,51 @@ async function sendChatStream(body, errEl) {
   }
 }
 
+function applyStreamDoneMeta(doneMeta) {
+  if (!doneMeta || doneMeta.total_cost == null) return;
+  const footer = document.getElementById('footerStat');
+  if (!footer) return;
+  const text = footer.textContent || '';
+  const prefix = text.split('· $')[0] || text;
+  footer.textContent = `${prefix.trim()} · $${Number(doneMeta.total_cost).toFixed(4)}`;
+}
+
 async function sendChat() {
   const instruction = document.getElementById('chatInstruction').value.trim();
   if (!instruction) return toast('请输入指令');
-  await runWithLoading(async () => {
-    let scene_beat = '';
-    if (state.currentSceneId) {
-      const beatEl = document.getElementById('beatEditor');
-      scene_beat = beatEl?.value || '';
+  const session = beginSending('sendChatBtn', '生成中…');
+  if (!session) return;
+
+  let scene_beat = '';
+  if (state.currentSceneId) {
+    const beatEl = document.getElementById('beatEditor');
+    scene_beat = beatEl?.value || '';
+  }
+  const errEl = document.getElementById('chatError');
+  errEl.textContent = '';
+  showTypingIndicator('chatMessages');
+
+  try {
+    const doneMeta = await sendChatStream({
+      instruction,
+      scene_beat,
+      scene_id: state.currentSceneId || '',
+    });
+    document.getElementById('chatInstruction').value = '';
+    applyStreamDoneMeta(doneMeta);
+    await loadChat();
+    await loadStatus();
+    if (doneMeta?.chapter_saved) toast(`已写入第${doneMeta.chapter_num}章`);
+  } catch (e) {
+    if (!e.cancelled) {
+      const msg = e.message || 'AI 连接异常，请检查 API Key 或网络';
+      errEl.textContent = msg;
+      toast(msg);
     }
-    const errEl = document.getElementById('chatError');
-    errEl.textContent = '';
-    showTypingIndicator('chatMessages');
-    try {
-      const doneMeta = await sendChatStream({
-        instruction,
-        scene_beat,
-        scene_id: state.currentSceneId || '',
-      }, errEl);
-      document.getElementById('chatInstruction').value = '';
-      await loadChat();
-      await loadStatus();
-      if (doneMeta?.chapter_saved) toast(`已写入第${doneMeta.chapter_num}章`);
-    } catch (e) {
-      if (!e.cancelled) errEl.textContent = e.message;
-      removeTypingIndicator();
-    }
-  }, { btnId: 'sendChatBtn', loadingText: '生成中…' });
+    removeTypingIndicator();
+  } finally {
+    endSending(session);
+  }
 }
 
 async function clearChat() {
