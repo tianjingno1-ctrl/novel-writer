@@ -243,8 +243,11 @@ async function api(path, opts = {}, timeoutMs = API_TIMEOUT_MS) {
     controller.abort();
   }, timeoutMs);
   const userSignal = opts.signal;
-  if (userSignal?.aborted) controller.abort();
-  else if (userSignal) userSignal.addEventListener('abort', () => controller.abort(), { once: true });
+  if (userSignal?.aborted) {
+    controller.abort();
+  } else if (userSignal) {
+    userSignal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
   const { signal: _ignored, ...fetchOpts } = opts;
   try {
     const r = await fetch('/api' + path, {
@@ -257,7 +260,8 @@ async function api(path, opts = {}, timeoutMs = API_TIMEOUT_MS) {
     return data;
   } catch (e) {
     if (e.name === 'AbortError') {
-      if (!timedOut && userSignal?.aborted) {
+      // 用户取消（userSignal）与超时（timedOut）分开提示
+      if (!timedOut && (userSignal?.aborted || e.message?.includes('aborted'))) {
         const err = new Error('请求已取消');
         err.cancelled = true;
         throw err;
@@ -906,9 +910,13 @@ async function openGlobal(name) {
 async function createCodexEntry() {
   const name = prompt('Codex 名称（人物/地点/物品）');
   if (!name) return;
-  const r = await api('/codex-entries', { method: 'POST', body: JSON.stringify({ name }) });
+  const trimmed = name.trim();
+  const r = await api('/codex-entries', { method: 'POST', body: JSON.stringify({ name: trimmed }) });
   invalidateCodexCache();
   scheduleRender({ sidebar: state.sidebar === 'codex' });
+  if (r.name && r.name !== trimmed) {
+    toast(`名称已规范为：${r.name}`);
+  }
   openCodexEntry(r.id);
 }
 

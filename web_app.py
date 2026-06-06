@@ -205,10 +205,10 @@ def status() -> dict:
 def stats() -> dict:
     global _stats_cache, _stats_sig
 
-    chapters = core.list_chapters()
-    sig = _build_stats_sig(chapters)
-
+    # 单人工具章节数有限；锁内完成 list + sig + 读取，保证签名与内容一致
     with _stats_lock:
+        chapters = core.list_chapters()
+        sig = _build_stats_sig(chapters)
         if _stats_cache is not None and _stats_sig == sig:
             return _stats_cache
         result = _compute_stats(chapters)

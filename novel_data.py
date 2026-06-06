@@ -242,16 +242,23 @@ def list_codex_entries() -> list[dict]:
     return items
 
 
+def _sanitize_codex_name(name: str) -> str:
+    return re.sub(r'[\\/:*?"<>|]', "_", name.strip())
+
+
 def get_codex_entry(name: str) -> dict | None:
-    path = CODEX_DIR / f"{name}.md"
+    safe = _sanitize_codex_name(name)
+    if not safe:
+        return None
+    path = CODEX_DIR / f"{safe}.md"
     if not path.exists():
         return None
-    return {"id": name, "name": name, "content": read_text(path)}
+    return {"id": safe, "name": safe, "content": read_text(path)}
 
 
 def save_codex_entry(name: str, content: str) -> dict:
     _ensure_dirs()
-    safe = re.sub(r'[\\/:*?"<>|]', "_", name.strip())
+    safe = _sanitize_codex_name(name)
     if not safe:
         return {"ok": False, "error": "名称无效"}
     path = CODEX_DIR / f"{safe}.md"
@@ -260,7 +267,9 @@ def save_codex_entry(name: str, content: str) -> dict:
 
 
 def create_codex_entry(name: str, content: str = "") -> dict:
-    safe = re.sub(r'[\\/:*?"<>|]', "_", name.strip())
+    safe = _sanitize_codex_name(name)
+    if not safe:
+        return {"ok": False, "error": "名称无效"}
     path = CODEX_DIR / f"{safe}.md"
     if path.exists():
         return {"ok": False, "error": "条目已存在"}
