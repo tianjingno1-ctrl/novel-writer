@@ -53,8 +53,11 @@ novel_writer/
 
 ### 8. 一本书的数据怎么存？
 
-- **单书模式**：一个 `data/` = 一本书（`data/project.json` 存书名 / 世界标签）
-- 多书：复制整个 `novel_writer` 文件夹，或 Git 分支隔离各自的 `data/`（Web 内无多书下拉）
+- **书库**：`library/index.json` + `library/books/{book_id}/`（`book_context.py`）
+- **`project.json`**：`title`, `type`（`novel`|`world`|`short`）, `platform`（`tomato`|`qimao`|`jjwxc`）, `world_label`
+- **全局**：`library/runtime.json`（提供商/上下文）；根目录 `cost_log.jsonl`（带 `book_id`）
+- 旧 `data/` 首次启动迁移 → `library/books/default/`
+- 切换书：`POST /api/library/switch`；进程内写书会话随书重置
 
 ### 9. 章节数据结构
 
@@ -300,6 +303,21 @@ CLI：`python main.py`（`/summary` `/check` `/outline` 等）。
 | 重复检查 | `POST /api/check/repetition` | scope: current / recent3 / all |
 | 爽点检查 | `POST /api/check/pacing` | 需先有概述 |
 
+### 27. 质量页（顶栏「质量」）
+
+| 按钮 | API | 说明 |
+|------|-----|------|
+| 女频审阅 | `POST /api/review/female-fiction` | `review_prompts.py` 路由；`rewrite-only` 只出全文预览 |
+| 采纳改稿 | `POST /api/review/female-fiction/accept` | `{ log_id }` → 写章节 + `api_run_archive_sync` |
+| Profile 列表 | `GET /api/review/profiles` | |
+| 批量生成世界 | `POST /api/batch/world/generate` | `batch_generate.py`；Beat 映射 `resolve_beat_for_prose_chapter` |
+| 世界闭环 | `POST /api/batch/world/remediate` | `batch_remediate.py` |
+| 仅诊断 | `POST /api/batch/world/review` | `batch_world.py` |
+| 仅同步档案 | `POST /api/batch/world/finalize` | |
+| 参考拆文 | `POST /api/deconstruct` | 顶栏「参考分析」 |
+
+Prompt 目录：`docs/review-prompts/`（如 `world-tomato.md`，`mode: rewrite-only`）。
+
 ---
 
 ## 五、现有问题与痛点
@@ -309,7 +327,7 @@ CLI：`python main.py`（`/summary` `/check` `/outline` 等）。
 | 27 | **已知限制**：Web 单进程单会话；自由聊等非流式；`chat_prompts.json` 非空时不自动合并新默认模板；无多书 / 多用户 |
 | 28 | 质量风险：文风偏移、人设漂移、细节吃书、重复套话、节奏单一、爽点散乱——已通过 style / world / char 冷热分层 / plot_threads 拆分 / Beat 档位与指令库、六项检查按钮缓解；**章后 char_dynamic 仍须人工维护** |
 | 29 | 上下文：长章正文首轮全量注入 user message；无硬 token 预算器；cache ②③ 已冷热分层，④ 层每章变动属预期 |
-| 30 | **未实现**：单 Web 多书、多用户 session 隔离、Free 流式、细粒度 token 截断 |
+| 30 | **未实现**：多用户 session 隔离、Free 流式、细粒度 token 截断（书库 v0.7 已支持） |
 
 ---
 

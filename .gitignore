@@ -16,7 +16,17 @@ data/session_autosave.json
 data/session_autosave.md
 data/free_chat.json
 data/runtime.json
+library/runtime.json
+library/books/*/context_log.jsonl
+library/books/*/session_autosave.json
+library/books/*/session_autosave.md
+library/books/*/free_chat.json
+library/books/*/quality_log.jsonl
+library/books/*/backups/
+library/books/*/batch_jobs/
 data/quality_log.jsonl
 data/backups/
+data/batch_jobs/
 debug-*.log
+logs/
 .cursor/

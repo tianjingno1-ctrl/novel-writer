@@ -28,6 +28,7 @@
 
   <nav class="mode-tabs">
     <button class="mode-tab" data-mode="overview" onclick="setMode('overview')">概览</button>
+    <button class="mode-tab" data-mode="deconstruct" onclick="setMode('deconstruct')">参考分析</button>
     <button class="mode-tab" data-mode="plan" onclick="setMode('plan')">规划</button>
     <button class="mode-tab active" data-mode="write" onclick="setMode('write')">写作</button>
     <button class="mode-tab" data-mode="chat" onclick="setMode('chat')">写书对话</button>
@@ -70,6 +71,41 @@
     <section class="view view-overview hidden" id="viewOverview">
       <div id="overview-guide-bar" class="guide-host hidden"></div>
       <div class="overview-shell" id="overviewShell"></div>
+    </section>
+
+    <!-- DECONSTRUCT：参考拆文 -->
+    <section class="view view-deconstruct hidden" id="viewDeconstruct">
+      <div class="deconstruct-center">
+        <div class="deconstruct-head">
+          <h2 class="deconstruct-title">参考拆文</h2>
+          <p class="deconstruct-intro muted">粘贴别人的章节或片段，AI 按固定模板拆解结构、节奏与爽点，供你写自己的书时参考。不会写入章节或档案。</p>
+        </div>
+        <label class="deconstruct-field">来源备注（可选）
+          <input type="text" id="deconstructLabel" class="deconstruct-input" placeholder="如：某书第3章 / 竞品开篇" maxlength="200" />
+        </label>
+        <label class="deconstruct-field deconstruct-check">
+          <input type="checkbox" id="deconstructUseBookCtx" checked />
+          对照本书 world.md / style.md 生成「你的书可以怎么用」
+        </label>
+        <label class="deconstruct-field">待拆解正文
+          <textarea id="deconstructInput" class="deconstruct-textarea" rows="14" placeholder="粘贴参考文（至少 80 字）…"></textarea>
+        </label>
+        <div class="deconstruct-actions">
+          <button type="button" class="btn btn-primary" id="deconstructRunBtn" onclick="runDeconstruct()">开始拆解</button>
+          <span id="deconstructCharCount" class="muted deconstruct-char-count">0 字</span>
+        </div>
+        <div id="deconstructResult" class="deconstruct-result hidden">
+          <div class="deconstruct-result-head">
+            <h3>拆解报告</h3>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="copyDeconstructResult()">复制</button>
+          </div>
+          <pre id="deconstructResultBody" class="deconstruct-result-body"></pre>
+        </div>
+        <div class="deconstruct-history">
+          <h3 class="deconstruct-history-title">最近拆解</h3>
+          <div id="deconstructHistoryList" class="deconstruct-history-list"></div>
+        </div>
+      </div>
     </section>
 
     <!-- PLAN：场景看板 -->
@@ -312,7 +348,57 @@
             </select>
           </label>
         </div>
-        <p class="quality-intro">审阅为<strong>只读诊断</strong>，不会自动改档案。改完正文或设定后，请用「本章定稿」写入概述/观察/钉子。</p>
+        <p class="quality-intro"><strong>世界闭环</strong>：AI 自动审阅、改稿、写回章节并同步档案，完成后给你变更报告。下方单章工具用于局部补救。</p>
+        <div class="female-review-panel">
+          <div class="female-review-head">
+            <h3 class="female-review-title">女频核心审阅</h3>
+            <span class="muted female-review-hint" id="femaleReviewProfileHint">加载审阅规则…</span>
+          </div>
+          <div class="female-review-actions">
+            <label class="quality-field">审阅规则
+              <select id="femaleReviewProfile" class="quality-sel" title="默认跟随本书类型与平台；可临时换一套规则">
+                <option value="">跟随本书设定</option>
+              </select>
+            </label>
+            <label class="quality-field">审阅对象
+              <select id="femaleReviewMode" class="quality-sel">
+                <option value="chapter">当前锚点章正文</option>
+                <option value="outline">plan 大纲</option>
+                <option value="characters">人物设定文件</option>
+              </select>
+            </label>
+            <label class="quality-field female-review-opt">
+              <input type="checkbox" id="femaleReviewRevise" />
+              审阅+改稿报告（诊断型 profile）
+            </label>
+            <div id="femaleReviewWriteOpts" class="female-review-write-opts">
+            <label class="quality-field female-review-opt" title="诊断型 profile：写回章节文件">
+              <input type="checkbox" id="femaleReviewWriteBack" />
+              立即写回章节（诊断型）
+            </label>
+            <label class="quality-field female-review-opt" title="写回后更新概述/观察/钉子/伏笔">
+              <input type="checkbox" id="femaleReviewSyncArchive" />
+              写回时同步档案（诊断型）
+            </label>
+            </div>
+            <button type="button" class="btn btn-primary" id="femaleReviewBtn" onclick="runFemaleFictionReview()">女频审阅</button>
+          </div>
+        </div>
+        <div class="world-batch-panel" id="worldBatchPanel">
+          <div class="world-batch-head">
+            <h3 class="world-batch-title">世界闭环</h3>
+            <span id="worldBatchStatusText" class="world-batch-status muted">加载中…</span>
+          </div>
+          <p class="world-batch-hint muted" id="worldBatchHint">
+            <strong>批量生成</strong>：按 plan Beat 一次跑完本世界各章（约 15 章 ≈ 15 次 API）。<strong>世界闭环</strong>：已有正文时诊断→改稿→同步档案。
+          </p>
+          <div class="world-batch-actions">
+            <button type="button" class="btn btn-primary" id="worldGenerateBtn" onclick="runWorldBatchGenerate()">批量生成世界</button>
+            <button type="button" class="btn btn-ghost" id="worldRemediateBtn" onclick="runWorldRemediate()">世界闭环（审阅+修改）</button>
+            <button type="button" class="btn btn-ghost" id="worldBatchReviewBtn" onclick="runWorldBatchReview()" title="只出诊断报告，不改正文">仅诊断</button>
+            <button type="button" class="btn btn-ghost" id="worldBatchFinalizeBtn" onclick="runWorldBatchFinalize()" title="不改正文，只同步概述/观察/钉子">仅同步档案</button>
+          </div>
+        </div>
         <div class="quality-dim-grid">
           <div class="quality-dim">
             <div class="quality-dim__label">文字层</div>

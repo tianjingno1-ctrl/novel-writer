@@ -26,8 +26,11 @@ python main.py         # CLI
 | `providers.py` | kie(Anthropic) + DeepSeek(OpenAI 兼容) 统一调用 |
 | `summarizer.py` | 概述/检查的系统提示词 |
 | `novel_data.py` | Plan 场景、Codex 设定条目 |
+| `book_context.py` | 书库 `library/books/{id}/`、切换书、路径注入 |
+| `review_prompts.py` | 女频审阅 Prompt 路由（`docs/review-prompts/`） |
+| `batch_generate.py` | 按 plan Beat 批量生成世界章节 |
 | `web/` | `index.html` `app.js` `style.css` |
-| `data/` | 小说数据（world、style、characters、chapters、plan.json） |
+| `library/` | 书库 index + `books/{id}/`（world、chapters、plan 等） |
 
 ## 文档
 
@@ -42,6 +45,7 @@ python main.py         # CLI
 - **规划**：Scene Beat + Plan 看板
 - **写作**：章节编辑
 - **写书对话**：带三层 Prompt Cache 的写作 AI（kie Claude）
+- **质量**：女频直改稿、批量生成世界、世界闭环、单章检查
 - **自由聊**：无 system prompt，用户自选模型，不写章节
 - **统计**：字数与 API 费用
 

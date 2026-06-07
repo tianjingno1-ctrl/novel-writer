@@ -24,6 +24,10 @@ DEFAULT_PROJECT = {
     "world_label": "",
     "tagline": "",
     "notes": "",
+    "type": "novel",
+    "platform": "tomato",
+    "created_at": "",
+    "updated_at": "",
 }
 
 _plan_lock = threading.RLock()
@@ -454,6 +458,14 @@ def get_project_meta() -> dict:
 
 def save_project_meta(**fields: str) -> dict:
     meta = get_project_meta()
+    if fields.get("type") is not None:
+        import review_prompts
+
+        fields["type"] = review_prompts.normalize_book_type(str(fields["type"]))
+    if fields.get("platform") is not None:
+        import review_prompts
+
+        fields["platform"] = review_prompts.normalize_platform(str(fields["platform"]))
     for key, value in fields.items():
         if key in DEFAULT_PROJECT and value is not None:
             meta[key] = str(value).strip()

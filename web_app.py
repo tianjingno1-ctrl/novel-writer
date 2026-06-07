@@ -12,36 +12,17 @@ from pathlib import Path
 import config
 import main as core
 import novel_data
+import runtime_log
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
-_DEBUG_LOG = Path(__file__).resolve().parent / "debug-4132c7.log"
 
 
 def _dbg_finalize(location: str, message: str, data: dict, hypothesis_id: str) -> None:
-    # #region agent log
-    try:
-        with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "sessionId": "4132c7",
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "hypothesisId": hypothesis_id,
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
+    runtime_log.log_debug(location, message, data=data, hypothesis_id=hypothesis_id)
 MAX_CONTENT_BYTES = 2 * 1024 * 1024  # 2MB，章节/Codex 文件
 MAX_API_TEXT_CHARS = 50_000  # 对话/指令等 API 文本
 VALID_CODEX_NAMES = frozenset(core.CODEX_FILES.keys())
@@ -66,6 +47,7 @@ def _is_local_client(host: str) -> bool:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    core.bootstrap_library()
     core.init_data_dirs()
     config.load_runtime_settings()
     core.set_total_cost(core.load_total_cost())
@@ -76,6 +58,11 @@ async def lifespan(app: FastAPI):
         print("🔐 Web API 已启用令牌鉴权（请求头 X-Novel-Token）")
     if config.CONTEXT_LOG_ENABLED:
         print("📋 上下文体积日志：data/context_log.jsonl（NOVEL_CONTEXT_LOG=0 可关闭）")
+    rs = runtime_log.get_status()
+    print(
+        f"🐛 运行时日志 [{rs['runtime_env_label']}]：{rs['log_path']}"
+        f"（NOVEL_RUNTIME_LOG=0 可关闭）"
+    )
     yield
 
 
@@ -106,6 +93,38 @@ async def web_auth_middleware(request: Request, call_next):
         )
 
     return await call_next(request)
+
+
+@app.middleware("http")
+async def runtime_error_middleware(request: Request, call_next):
+    path = request.url.path
+    try:
+        response = await call_next(request)
+        if path.startswith("/api/") and response.status_code >= 500:
+            runtime_log.log_error(
+                "web",
+                f"{request.method} {path}",
+                f"HTTP {response.status_code}",
+                data={"status_code": response.status_code},
+            )
+        return response
+    except HTTPException as exc:
+        if exc.status_code >= 500:
+            runtime_log.log_error(
+                "web",
+                f"{request.method} {path}",
+                exc.detail if isinstance(exc.detail, str) else str(exc.detail),
+                data={"status_code": exc.status_code},
+            )
+        raise
+    except Exception as exc:
+        runtime_log.log_error(
+            "web",
+            f"{request.method} {path}",
+            str(exc),
+            exc=exc,
+        )
+        raise
 
 _stats_cache: dict | None = None
 _stats_sig: tuple | None = None
@@ -384,6 +403,23 @@ class QualityFullRequest(QualityScopeRequest):
     run_editor: bool = True
 
 
+class WorldBatchRequest(BaseModel):
+    chapter_from: int | None = None
+    chapter_to: int | None = None
+
+    @field_validator("chapter_from", "chapter_to")
+    @classmethod
+    def check_chapter_num(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError("chapter_num 须 ≥ 1")
+        return v
+
+
+class WorldGenerateRequest(WorldBatchRequest):
+    overwrite: bool = False
+    skip_existing: bool = True
+
+
 class OutlineApplyRequest(BaseModel):
     offset: int = 1
     replace: bool = False
@@ -455,6 +491,8 @@ class ProjectUpdate(BaseModel):
     world_label: str | None = None
     tagline: str | None = None
     notes: str | None = None
+    type: str | None = None
+    platform: str | None = None
 
 
 @app.get("/api/project")
@@ -468,19 +506,74 @@ def put_project(body: ProjectUpdate) -> dict:
     return novel_data.save_project_meta(**fields)
 
 
+class CreateBookBody(BaseModel):
+    title: str = "未命名小说"
+    type: str = "novel"
+    platform: str = "tomato"
+    world_label: str = ""
+    tagline: str = ""
+
+
+class SwitchBookBody(BaseModel):
+    book_id: str
+
+
+@app.get("/api/library")
+def library_list() -> dict:
+    import book_context
+
+    return book_context.list_books()
+
+
+@app.get("/api/library/active")
+def library_active() -> dict:
+    import book_context
+
+    return book_context.get_active_book_meta()
+
+
+@app.post("/api/library/books")
+def library_create_book(body: CreateBookBody) -> dict:
+    import book_context
+
+    result = book_context.create_book(
+        title=body.title,
+        book_type=body.type,
+        platform=body.platform,
+        world_label=body.world_label,
+        tagline=body.tagline,
+    )
+    return _require_ok(result, "新建书籍失败")
+
+
+@app.post("/api/library/switch")
+def library_switch(body: SwitchBookBody) -> dict:
+    import book_context
+
+    if core.is_batch_job_running():
+        raise HTTPException(409, "批量任务进行中，请完成后再切换书籍")
+    result = book_context.switch_book(body.book_id.strip())
+    return _require_ok(result, "切换书籍失败")
+
+
 @app.get("/api/overview")
 def bookshelf_overview() -> dict:
+    import book_context
+
     chapters = core.list_chapters()
     stats = _compute_stats(chapters)
     latest = core.get_latest_chapter()
     current = latest[0] if latest else None
-    return novel_data.build_bookshelf_overview(
+    payload = novel_data.build_bookshelf_overview(
         chapters=chapters,
         chapter_stats=stats.get("chapters", []),
         summaries_text=core.get_summaries_combined(),
         world_text=core.read_text(core.WORLD_FILE),
         current_chapter=current,
     )
+    payload["library"] = book_context.list_books()
+    payload["book_type"] = book_context.get_book_type()
+    return payload
 
 
 @app.get("/api/stats")
@@ -922,6 +1015,87 @@ def quality_editor(body: QualityScopeRequest | None = None) -> dict:
     )
 
 
+class DeconstructRequest(BaseModel):
+    text: str
+    source_label: str = ""
+    include_book_context: bool = True
+
+    _validate_text = field_validator("text")(_check_api_text)
+    _validate_label = field_validator("source_label")(_check_api_text)
+
+
+@app.post("/api/deconstruct")
+def deconstruct_reference(body: DeconstructRequest) -> dict:
+    return _require_ok(
+        core.api_run_deconstruct(
+            body.text,
+            source_label=body.source_label.strip(),
+            include_book_context=body.include_book_context,
+        ),
+        "参考拆文失败",
+    )
+
+
+class FemaleFictionReviewRequest(BaseModel):
+    mode: str = "chapter"
+    text: str = ""
+    chapter_num: int | None = None
+    profile_id: str | None = None
+    revise: bool = False
+    write_back: bool = False
+    sync_archive: bool = True
+
+    @field_validator("text")
+    @classmethod
+    def check_text(cls, v: str) -> str:
+        if not v:
+            return v
+        return _check_api_text(v)
+
+
+class FemaleFictionAcceptRequest(BaseModel):
+    log_id: str
+    sync_archive: bool = True
+
+
+@app.post("/api/review/female-fiction/accept")
+def female_fiction_accept(body: FemaleFictionAcceptRequest) -> dict:
+    return _require_ok(
+        core.api_accept_female_fiction_rewrite(
+            body.log_id,
+            sync_archive=body.sync_archive,
+        ),
+        "采纳改稿失败",
+    )
+
+
+@app.post("/api/review/female-fiction")
+def female_fiction_review(body: FemaleFictionReviewRequest) -> dict:
+    return _require_ok(
+        core.api_run_female_fiction_review(
+            body.mode,
+            text=body.text,
+            chapter_num=body.chapter_num,
+            profile_id=body.profile_id,
+            revise=body.revise,
+            write_back=body.write_back,
+            sync_archive=body.sync_archive,
+        ),
+        "女频审阅失败",
+    )
+
+
+@app.get("/api/review/profiles")
+def review_profiles() -> dict:
+    import review_prompts
+
+    project = novel_data.get_project_meta()
+    return {
+        "profiles": review_prompts.list_profiles(),
+        "active": review_prompts.active_profile_for_project(project),
+    }
+
+
 @app.post("/api/quality/full")
 def quality_full(body: QualityFullRequest | None = None) -> dict:
     body = body or QualityFullRequest()
@@ -934,6 +1108,105 @@ def quality_full(body: QualityFullRequest | None = None) -> dict:
             run_editor=body.run_editor,
         ),
         "质量审阅失败",
+    )
+
+
+@app.get("/api/batch/world/status")
+def batch_world_status() -> dict:
+    return core.api_get_world_batch_status()
+
+
+@app.get("/api/batch/world/review/preview")
+def batch_world_review_preview(
+    chapter_from: int | None = None,
+    chapter_to: int | None = None,
+) -> dict:
+    result = core.api_preview_world_batch_review(chapter_from, chapter_to)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "无法生成预览"))
+    return result
+
+
+@app.post("/api/batch/world/review")
+def batch_world_review(body: WorldBatchRequest | None = None) -> dict:
+    body = body or WorldBatchRequest()
+    result = core.api_run_world_batch_review(
+        body.chapter_from,
+        body.chapter_to,
+    )
+    if not result.get("ok") and not result.get("partial"):
+        raise HTTPException(400, result.get("error", "世界审阅失败"))
+    return result
+
+
+@app.post("/api/batch/world/finalize")
+def batch_world_finalize(body: WorldBatchRequest | None = None) -> dict:
+    body = body or WorldBatchRequest()
+    result = core.api_run_world_batch_finalize(
+        body.chapter_from,
+        body.chapter_to,
+    )
+    if not result.get("ok") and not result.get("partial"):
+        raise HTTPException(400, result.get("error", "世界定稿失败"))
+    return result
+
+
+class BatchJobRevertRequest(BaseModel):
+    chapter_num: int
+
+    @field_validator("chapter_num")
+    @classmethod
+    def check_chapter_num(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("chapter_num 须 ≥ 1")
+        return v
+
+
+@app.post("/api/batch/world/generate")
+def batch_world_generate(body: WorldGenerateRequest | None = None) -> dict:
+    if core.is_batch_job_running():
+        raise HTTPException(409, "已有批次任务正在运行")
+    body = body or WorldGenerateRequest()
+    result = core.api_run_world_batch_generate(
+        body.chapter_from,
+        body.chapter_to,
+        overwrite=body.overwrite,
+        skip_existing=body.skip_existing,
+    )
+    if not result.get("ok") and not result.get("partial"):
+        raise HTTPException(400, result.get("error", "世界批量生成失败"))
+    return result
+
+
+@app.post("/api/batch/world/remediate")
+def batch_world_remediate(body: WorldBatchRequest | None = None) -> dict:
+    if core.is_batch_job_running():
+        raise HTTPException(409, "已有世界闭环任务正在运行")
+    body = body or WorldBatchRequest()
+    result = core.api_run_world_remediate(body.chapter_from, body.chapter_to)
+    if not result.get("ok") and not result.get("partial"):
+        raise HTTPException(400, result.get("error", "世界闭环失败"))
+    return result
+
+
+@app.get("/api/batch/jobs/{job_id}")
+def batch_job_get(job_id: str) -> dict:
+    result = core.api_get_batch_job(job_id)
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error", "任务不存在"))
+    return result
+
+
+@app.post("/api/batch/jobs/{job_id}/accept")
+def batch_job_accept(job_id: str) -> dict:
+    return _require_ok(core.api_accept_batch_job(job_id), "确认失败")
+
+
+@app.post("/api/batch/jobs/{job_id}/revert")
+def batch_job_revert(job_id: str, body: BatchJobRevertRequest) -> dict:
+    return _require_ok(
+        core.api_revert_batch_job_chapter(job_id, body.chapter_num),
+        "撤销失败",
     )
 
 
@@ -1014,6 +1287,22 @@ def quality_log_get(entry_id: str) -> dict:
     row = quality_log.get_entry(entry_id)
     if not row:
         raise HTTPException(404, "记录不存在")
+    return row
+
+
+@app.get("/api/runtime-logs")
+def runtime_logs_list(level: str | None = None, category: str | None = None, limit: int = 80) -> dict:
+    return {
+        "status": runtime_log.get_status(),
+        "entries": runtime_log.list_entries(limit=limit, level=level, category=category),
+    }
+
+
+@app.get("/api/runtime-logs/{entry_id}")
+def runtime_logs_get(entry_id: str) -> dict:
+    row = runtime_log.get_entry(entry_id)
+    if not row:
+        raise HTTPException(404, "日志不存在")
     return row
 
 
@@ -1151,4 +1440,11 @@ def run(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) ->
 
 
 if __name__ == "__main__":
-    run()
+    import os
+
+    _port = 8765
+    try:
+        _port = int(os.environ.get("NOVEL_WEB_PORT", "8765"))
+    except ValueError:
+        pass
+    run(port=_port)

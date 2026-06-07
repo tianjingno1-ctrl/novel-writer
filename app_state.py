@@ -24,6 +24,8 @@ class AppState:
     last_context_debug: dict = field(default_factory=dict)
     cache_write_at: float = 0.0
     last_append_undo: dict | None = None
+    batch_job_running: bool = False
+    batch_job_id: str = ""
 
 
 state = AppState()

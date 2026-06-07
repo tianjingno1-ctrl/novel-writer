@@ -1221,8 +1221,8 @@ class GuideStatusTests(unittest.TestCase):
                 "ACTIVE": main.PLOT_THREADS_ACTIVE_FILE,
             }
             try:
-                tpl_dynamic = main.INITIAL_FILES[orig["DYNAMIC"]]
-                tpl_active = main.INITIAL_FILES[orig["ACTIVE"]]
+                tpl_dynamic = main.INITIAL_FILE_TEMPLATES["char_dynamic"]
+                tpl_active = main.INITIAL_FILE_TEMPLATES["plot_threads_active"]
                 main.CHAPTERS_DIR = ch_dir
                 (ch_dir / "ch001.md").write_text("# 第一章\n正文", encoding="utf-8")
                 main.CHAR_DYNAMIC_FILE = dynamic
@@ -1334,6 +1334,539 @@ class FreeChatThreadTests(unittest.TestCase):
 
             saved = json.loads(main.FREE_CHAT_FILE.read_text(encoding="utf-8"))
             self.assertEqual(len(saved["threads"][0]["messages"]), 2)
+
+
+class BatchWorldTests(unittest.TestCase):
+    def test_parse_chapter_spans(self) -> None:
+        import batch_world
+
+        spans = batch_world.parse_chapter_spans("第1-2章 · 初见 · 第15章")
+        self.assertIn((1, 2), spans)
+        self.assertIn((15, 15), spans)
+
+    def test_iter_chapter_chunks(self) -> None:
+        import batch_world
+
+        chunks = batch_world.iter_chapter_chunks(1, 15, chunk_size=5)
+        self.assertEqual(chunks, [(1, 5), (6, 10), (11, 15)])
+
+    def test_build_chapters_text_block_truncates(self) -> None:
+        import batch_world
+
+        def read_ch(n: int) -> str:
+            return f"第{n}章" + ("正文" * 5000)
+
+        text, truncated, used = batch_world.build_chapters_text_block(
+            [1, 2],
+            read_ch,
+            max_total_chars=8000,
+            max_chapter_chars=3000,
+        )
+        self.assertTrue(truncated)
+        self.assertGreater(len(text), 0)
+        self.assertGreaterEqual(len(used), 1)
+
+    def test_infer_world_range_from_plan(self) -> None:
+        import batch_world
+        import novel_data
+
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "plan.json"
+            plan_path.write_text(
+                json.dumps(
+                    {
+                        "chapters": {
+                            "1": {
+                                "scenes": [
+                                    {"summary": "第1-2章"},
+                                    {"summary": "第15章"},
+                                ]
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            orig = novel_data.PLAN_FILE
+            novel_data.PLAN_FILE = plan_path
+            try:
+                cf, ct = batch_world.infer_world_chapter_range()
+                self.assertEqual(cf, 1)
+                self.assertEqual(ct, 15)
+            finally:
+                novel_data.PLAN_FILE = orig
+
+    def test_world_batch_status_written(self) -> None:
+        import batch_world
+
+        def read_ch(n: int) -> str:
+            return "有正文" if n <= 3 else ""
+
+        status = batch_world.get_world_batch_status(read_chapter=read_ch)
+        self.assertGreaterEqual(status["written_count"], 0)
+
+    def test_review_plan_token_estimate(self) -> None:
+        import batch_world
+        import novel_data
+
+        prose = "正文" * 1600  # 3200 字/章
+
+        def read_ch(n: int) -> str:
+            return f"# 第{n}章\n\n{prose}" if n <= 5 else ""
+
+        def read_text(_path) -> str:
+            return "设定" * 200
+
+        def get_char() -> str:
+            return "人物" * 100
+
+        def build_sys(prompt, **kwargs):
+            return [{"type": "text", "content": prompt[:500]}]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            plan_path = Path(tmp) / "plan.json"
+            plan_path.write_text(
+                json.dumps(
+                    {
+                        "chapters": {
+                            "1": {"scenes": [{"summary": "第1-15章"}]},
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            orig = novel_data.PLAN_FILE
+            novel_data.PLAN_FILE = plan_path
+            try:
+                plan = batch_world.build_world_batch_review_plan(
+                    read_chapter=read_ch,
+                    read_text=read_text,
+                    get_char_context_for_check=get_char,
+                    build_cached_system=build_sys,
+                    summaries_for_scope_fn=lambda _n, _s: "概述" * 50,
+                    cross_chapter_user_message_fn=lambda *a, **k: "跨章" * 80,
+                    world_file=Path("w.md"),
+                    characters_file=Path("c.md"),
+                    plot_locked_file=Path("l.md"),
+                    plot_active_file=Path("a.md"),
+                )
+            finally:
+                novel_data.PLAN_FILE = orig
+
+        self.assertTrue(plan.get("ok"))
+        self.assertGreater(plan["total_prose_chars"], 10000)
+        self.assertGreater(plan["total_est_input_tokens"], 5000)
+        md = batch_world.format_review_plan_markdown(plan)
+        self.assertIn("发送预览", md)
+        self.assertIn("tokens", md)
+
+
+class TestWorldRemediate(unittest.TestCase):
+    def test_parse_remediate_diagnose(self) -> None:
+        from summarizer import parse_remediate_diagnose
+
+        reply = (
+            '说明\n```remediate-diagnose-json\n'
+            '{"num":2,"action":"patch","issues":[{"severity":"must_fix",'
+            '"summary":"钩子弱","location":"开篇"}],"skip_reason":""}\n```'
+        )
+        data, err = parse_remediate_diagnose(reply)
+        self.assertIsNone(err or None)
+        self.assertIsNotNone(data)
+        assert data is not None
+        self.assertEqual(data["action"], "patch")
+        self.assertEqual(len(data["issues"]), 1)
+
+    def test_format_closure_report(self) -> None:
+        from summarizer import format_remediate_closure_report
+
+        md = format_remediate_closure_report(
+            "测试世界",
+            1,
+            2,
+            [
+                {
+                    "num": 1,
+                    "action": "patch",
+                    "changes": [
+                        {
+                            "issue": "钩子弱",
+                            "done": "加入冲突",
+                            "location": "第2段",
+                        }
+                    ],
+                    "skipped": [],
+                },
+                {"num": 2, "action": "skip", "skip_reason": "节奏可保留"},
+            ],
+        )
+        self.assertIn("世界闭环", md)
+        self.assertIn("已改", md)
+        self.assertIn("未改动", md)
+
+    def test_snapshot_and_revert(self) -> None:
+        import batch_remediate
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            job_id = "testjob01"
+            root = batch_remediate.job_path(data, job_id)
+            root.mkdir(parents=True)
+            ch_path = root / "before" / "ch001.md"
+            ch_path.parent.mkdir(parents=True, exist_ok=True)
+            ch_path.write_text("# 第1章\n\n旧正文\n", encoding="utf-8")
+
+            written: dict[int, str] = {}
+
+            def write_ch(n: int, t: str) -> None:
+                written[n] = t
+
+            batch_remediate.save_job(
+                data,
+                {"id": job_id, "status": "completed", "targets": [1]},
+            )
+            r = batch_remediate.revert_chapter_from_job(
+                data,
+                job_id,
+                1,
+                write_chapter=write_ch,
+                sync_title=lambda _n: None,
+            )
+            self.assertTrue(r.get("ok"))
+            self.assertIn("旧正文", written.get(1, ""))
+            self.assertIn("正文", r.get("reverted", []))
+            self.assertIn("档案", r.get("warning", ""))
+
+    def test_parse_bulk_summaries_and_state(self) -> None:
+        from summarizer import parse_bulk_state, parse_bulk_summaries
+
+        sum_reply = (
+            '```bulk-summaries-json\n'
+            '{"summaries":[{"num":1,"text":"【第1章：测】\\n核心事件：a"}]}\n```'
+        )
+        data, err = parse_bulk_summaries(sum_reply)
+        self.assertIsNone(err or None)
+        assert data is not None
+        self.assertEqual(len(data["summaries"]), 1)
+
+        state_reply = (
+            '```bulk-state-json\n'
+            '{"char_dynamic":"# 动态","plot_threads_active":"# 伏笔"}\n```'
+        )
+        sdata, serr = parse_bulk_state(state_reply)
+        self.assertIsNone(serr or None)
+        assert sdata is not None
+        self.assertIn("动态", sdata["char_dynamic"])
+
+    def test_persist_bulk_summaries(self) -> None:
+        import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            recent = data / "summaries_recent.md"
+            compat = data / "summaries.md"
+            recent.write_text("# 近期\n\n", encoding="utf-8")
+            compat.write_text("# 兼容\n\n", encoding="utf-8")
+            orig_r = main.SUMMARIES_RECENT_FILE
+            orig_s = main.SUMMARIES_FILE
+            try:
+                main.SUMMARIES_RECENT_FILE = recent
+                main.SUMMARIES_FILE = compat
+                ok, errors, count = main._persist_bulk_summaries(
+                    {
+                        "summaries": [
+                            {"num": 1, "text": "【第1章：测】\n核心事件：x"},
+                            {"num": 2, "text": "【第2章：测】\n核心事件：y"},
+                        ]
+                    }
+                )
+                self.assertTrue(ok)
+                self.assertEqual(count, 2)
+                self.assertFalse(errors)
+                text = recent.read_text(encoding="utf-8")
+                self.assertIn("【第1章", text)
+                self.assertIn("【第2章", text)
+            finally:
+                main.SUMMARIES_RECENT_FILE = orig_r
+                main.SUMMARIES_FILE = orig_s
+
+    def test_remediate_chapter_standalone_mock(self) -> None:
+        import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ch_dir = Path(tmp) / "chapters"
+            ch_dir.mkdir()
+            ch_file = ch_dir / "ch001.md"
+            ch_file.write_text("# 第1章 · 旧\n\n旧内容。\n", encoding="utf-8")
+
+            orig_chapters = main.CHAPTERS_DIR
+            orig_call = main.call_api
+            orig_info = main.get_last_call_info
+            orig_build = main.build_cached_system
+            main.CHAPTERS_DIR = ch_dir
+            try:
+
+                def fake_api(_sys, _msgs, **kwargs):
+                    return "【章节标题】新标题\n\n新正文段落。\n"
+
+                main.call_api = fake_api
+                main.get_last_call_info = lambda: {"cost": 0.01}
+                main.build_cached_system = lambda p, **k: p
+
+                r = main.remediate_chapter_standalone(
+                    1,
+                    "【文风参考】重写本章",
+                )
+                self.assertTrue(r.get("ok"))
+                text = ch_file.read_text(encoding="utf-8")
+                self.assertIn("新正文", text)
+                self.assertIn("新标题", text)
+            finally:
+                main.CHAPTERS_DIR = orig_chapters
+                main.call_api = orig_call
+                main.get_last_call_info = orig_info
+                main.build_cached_system = orig_build
+
+
+class DeconstructPromptTests(unittest.TestCase):
+    def test_build_deconstruct_user_message(self) -> None:
+        from summarizer import build_deconstruct_user_message
+
+        msg = build_deconstruct_user_message(
+            "她推开门，全场安静了。",
+            source_label="测试章",
+            book_title="我的书",
+            world_excerpt="古代乱世",
+        )
+        self.assertIn("测试章", msg)
+        self.assertIn("我的书", msg)
+        self.assertIn("推开门", msg)
+
+
+class BookContextTests(unittest.TestCase):
+    def test_create_and_switch_book(self) -> None:
+        import book_context
+
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = Path(tmp) / "library"
+            books = lib / "books"
+            books.mkdir(parents=True)
+            index = {
+                "version": 1,
+                "active_book_id": "a",
+                "books": [{"id": "a", "title": "书A", "type": "novel"}],
+            }
+            (lib / "index.json").write_text(
+                json.dumps(index, ensure_ascii=False), encoding="utf-8"
+            )
+            book_a = books / "a"
+            book_a.mkdir()
+            (book_a / "project.json").write_text(
+                json.dumps(
+                    {"title": "书A", "type": "novel", "world_label": "", "tagline": ""},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            orig_lib = book_context.LIBRARY_DIR
+            orig_books = book_context.BOOKS_DIR
+            orig_index = book_context.INDEX_FILE
+            orig_ctx = book_context._context
+            try:
+                book_context.LIBRARY_DIR = lib
+                book_context.BOOKS_DIR = books
+                book_context.INDEX_FILE = lib / "index.json"
+                book_context._context = None
+                book_context.init_library(book_id="a")
+
+                r = book_context.create_book(title="短篇测试", book_type="short")
+                self.assertTrue(r.get("ok"))
+                self.assertEqual(r["book"]["type"], "short")
+                self.assertTrue(book_context.is_short_book(r["book_id"]))
+
+                sw = book_context.switch_book("a")
+                self.assertTrue(sw.get("ok"))
+                self.assertFalse(book_context.is_short_book())
+            finally:
+                book_context.LIBRARY_DIR = orig_lib
+                book_context.BOOKS_DIR = orig_books
+                book_context.INDEX_FILE = orig_index
+                book_context._context = orig_ctx
+
+
+class ReviewPromptTests(unittest.TestCase):
+    def test_resolve_profile_by_type_platform(self) -> None:
+        import review_prompts
+
+        self.assertEqual(
+            review_prompts.resolve_profile_id("world", "tomato"), "world-tomato"
+        )
+        self.assertEqual(
+            review_prompts.resolve_profile_id("short", "jjwxc"), "short-jjwxc"
+        )
+        self.assertEqual(
+            review_prompts.resolve_profile_id("short", "qimao"), "short-general"
+        )
+
+    def test_resolve_beat_for_prose_chapter(self) -> None:
+        import batch_world
+        import novel_data
+
+        plan = {
+            "active_scene_id": None,
+            "chapters": {
+                "1": {
+                    "title": "世界一",
+                    "scenes": [
+                        {
+                            "id": "s1",
+                            "title": "穿入",
+                            "summary": "第1-2章",
+                            "beat": "【场景目的】穿入立人设（第1-2章）",
+                        },
+                        {
+                            "id": "s2",
+                            "title": "初见",
+                            "summary": "第3-4章",
+                            "beat": "【场景目的】遇见男主",
+                        },
+                    ],
+                }
+            },
+        }
+        orig_load = novel_data.load_plan
+        try:
+            novel_data.load_plan = lambda: plan  # type: ignore[method-assign]
+            m1 = batch_world.resolve_beat_for_prose_chapter(1)
+            self.assertIsNotNone(m1)
+            assert m1 is not None
+            self.assertEqual(m1["scene_id"], "s1")
+            self.assertEqual(m1["span_from"], 1)
+            self.assertEqual(m1["span_to"], 2)
+            self.assertEqual(m1["chapter_index_in_span"], 1)
+            m2 = batch_world.resolve_beat_for_prose_chapter(2)
+            assert m2 is not None
+            self.assertEqual(m2["chapter_index_in_span"], 2)
+            m4 = batch_world.resolve_beat_for_prose_chapter(4)
+            assert m4 is not None
+            self.assertEqual(m4["scene_id"], "s2")
+        finally:
+            novel_data.load_plan = orig_load  # type: ignore[method-assign]
+
+    def test_build_chapter_generate_instruction(self) -> None:
+        import batch_generate
+
+        meta = {
+            "scene_title": "穿入",
+            "span_from": 1,
+            "span_to": 2,
+            "chapter_index_in_span": 2,
+            "pace": "快",
+        }
+        text = batch_generate.build_chapter_generate_instruction(2, meta, prev_tail="上一章尾巴")
+        self.assertIn("第 2 章", text)
+        self.assertIn("上一章尾巴", text)
+
+    def test_load_world_tomato_prompt(self) -> None:
+        import review_prompts
+
+        text, pid = review_prompts.load_prompt_text("world-tomato")
+        self.assertEqual(pid, "world-tomato")
+        self.assertTrue(review_prompts.is_rewrite_only_profile(pid))
+        self.assertIn("唯一交付物", text)
+        self.assertIn("番茄/七猫", text)
+
+    def test_active_profile_for_project(self) -> None:
+        import review_prompts
+
+        meta = review_prompts.active_profile_for_project(
+            {"type": "world", "platform": "tomato"}
+        )
+        self.assertEqual(meta["profile_id"], "world-tomato")
+        self.assertEqual(meta["book_type_label"], "快穿")
+        self.assertTrue(meta.get("rewrite_only"))
+
+    def test_world_qimao_includes_tomato_prompt(self) -> None:
+        import review_prompts
+
+        text, pid = review_prompts.load_prompt_text("world-qimao")
+        self.assertEqual(pid, "world-qimao")
+        self.assertIn("唯一交付物", text)
+
+    def test_rewrite_only_skips_revise_appendix(self) -> None:
+        import review_prompts
+
+        text, _pid = review_prompts.load_prompt_text(
+            "world-tomato", include_revise=True
+        )
+        self.assertNotIn("改稿阶段", text)
+
+    def test_load_prompt_with_revise_appendix(self) -> None:
+        import review_prompts
+
+        text, _pid = review_prompts.load_prompt_text(
+            "novel-tomato", include_revise=True
+        )
+        self.assertIn("改稿阶段", text)
+
+    def test_split_female_review_revise_reply(self) -> None:
+        from summarizer import split_female_review_revise_reply
+
+        raw = (
+            "【这个世界值不值得写】\n值得\n\n"
+            "---\n\n"
+            "# 改稿正文\n\n"
+            "【章节标题】测试章\n\n"
+            "正文第一段。"
+        )
+        review, revised = split_female_review_revise_reply(raw)
+        self.assertIn("值得", review)
+        self.assertIn("【章节标题】", revised)
+        self.assertIn("正文第一段", revised)
+
+
+class TestRuntimeLog(unittest.TestCase):
+    def test_env_detection_and_entries(self) -> None:
+        import os
+        import tempfile
+        import runtime_log
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dev_root = Path(tmp) / "novel_writer"
+            write_root = Path(tmp) / "novel_writer_write"
+            dev_root.mkdir()
+            write_root.mkdir()
+
+            os.environ["NOVEL_RUNTIME_LOG"] = "1"
+            os.environ["NOVEL_RUNTIME_LOG_DEBUG"] = "1"
+            try:
+                runtime_log.init_runtime_log(dev_root)
+                self.assertEqual(runtime_log.runtime_env(), "dev")
+                eid = runtime_log.log_error("test", "t", "dev error")
+                self.assertIsNotNone(eid)
+                rows = runtime_log.list_entries(limit=5)
+                self.assertEqual(len(rows), 1)
+                full = runtime_log.get_entry(eid or "")
+                self.assertIsNotNone(full)
+                assert full is not None
+                self.assertIn("dev error", full["message"])
+
+                runtime_log.init_runtime_log(write_root)
+                self.assertEqual(runtime_log.runtime_env(), "write")
+                runtime_log.log_warn("test", "t", "write warn")
+                wrows = runtime_log.list_entries(limit=5)
+                self.assertEqual(len(wrows), 1)
+                self.assertNotEqual(
+                    dev_root / "logs/dev/runtime.jsonl",
+                    write_root / "logs/write/runtime.jsonl",
+                )
+            finally:
+                os.environ.pop("NOVEL_RUNTIME_LOG", None)
+                os.environ.pop("NOVEL_RUNTIME_LOG_DEBUG", None)
 
 
 if __name__ == "__main__":

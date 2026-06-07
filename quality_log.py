@@ -13,6 +13,7 @@ import file_utils
 _lock = threading.Lock()
 _log_path: Path | None = None
 _MAX_BODY_CHARS = 120_000
+_MAX_BODY_CHARS_BATCH = 250_000
 _MAX_ENTRIES = 500
 
 KIND_LABELS: dict[str, str] = {
@@ -27,7 +28,14 @@ KIND_LABELS: dict[str, str] = {
     "pacing": "爽点检查",
     "reader_review": "读者审阅",
     "editor_review": "编辑审阅",
+    "deconstruct": "参考拆文",
+    "female_fiction_review": "女频审阅",
+    "female_fiction_revise": "女频直改稿",
+    "female_fiction_accept": "女频改稿采纳",
     "quality_full": "一键全查",
+    "batch_world_review": "世界审阅",
+    "batch_world_finalize": "世界定稿",
+    "world_remediate": "世界闭环",
 }
 
 
@@ -56,8 +64,9 @@ def append_entry(
     """追加一条记录，返回 entry id。"""
     entry_id = uuid.uuid4().hex[:12]
     text = (body or "").strip()
-    if len(text) > _MAX_BODY_CHARS:
-        text = text[: _MAX_BODY_CHARS] + "\n\n…（已截断）"
+    cap = _MAX_BODY_CHARS_BATCH if kind.startswith("batch_world") else _MAX_BODY_CHARS
+    if len(text) > cap:
+        text = text[:cap] + "\n\n…（报告过长已截断，完整内容请查看各章定稿记录）"
     entry = {
         "id": entry_id,
         "kind": kind,

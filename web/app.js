@@ -9,7 +9,7 @@ const state = {
   currentSceneId: null,
   editTarget: null,
   chapters: [],
-  writingProvider: 'kie',
+  writingProvider: 'deepseek',
   chatFocusTurn: null,
   activePromptId: null, // 最近点选的指令库条目
 };
@@ -225,7 +225,7 @@ function applyChrome() {
   document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
   const viewId = 'view' + mode.charAt(0).toUpperCase() + mode.slice(1);
   document.getElementById(viewId)?.classList.remove('hidden');
-  document.getElementById('sidebar')?.classList.toggle('hidden', mode === 'review' || mode === 'overview' || mode === 'quality');
+  document.getElementById('sidebar')?.classList.toggle('hidden', mode === 'review' || mode === 'overview' || mode === 'quality' || mode === 'deconstruct');
 
   const tabs = SIDEBAR_CONFIG[mode] || SIDEBAR_CONFIG.write;
   let nextSidebar = sidebar;
@@ -243,6 +243,9 @@ async function renderMainView() {
   switch (state.mode) {
     case 'overview':
       await renderOverview();
+      break;
+    case 'deconstruct':
+      await renderDeconstructView();
       break;
     case 'plan':
       await renderPlanBoardFull();
@@ -893,6 +896,41 @@ const QUALITY_RESULT_META = {
     guide: '本报告为只读诊断。改完请点「本章定稿」同步概述/观察/钉子，或到质量页重新全查对比。',
     actions: [],
   },
+  batch_world_review: {
+    match: (t) => t.includes('世界审阅') || t.includes('世界批次审阅'),
+    guide: '按<b>读者连读</b>诊断本世界。改稿后重新「审阅本世界」；确认无误再「定稿本世界」。',
+    actions: [],
+  },
+  batch_world_finalize: {
+    match: (t) => t.includes('世界定稿') || t.includes('世界批次定稿'),
+    guide: '已逐章写入概述/观察/钉子。若报告有 ⚠️ 截断提示，请检查质量记录全文或提高 .env 中的 BATCH token 上限。',
+    actions: ['summaries_recent', 'plot_threads_active'],
+  },
+  world_remediate: {
+    match: (t) => t.includes('世界闭环'),
+    guide: '正文与档案已自动写入。满意可点「全部接受」；不满意可「撤销某章」从快照恢复（不调 API）。',
+    actions: [],
+  },
+  world_batch_generate: {
+    match: (t) => t.includes('世界批量生成') || t.includes('世界生成'),
+    guide: '已按 plan Beat 写入各章。建议通读后跑「女频审阅+改稿」或「世界闭环」，再「仅同步档案」。',
+    actions: ['world'],
+  },
+  deconstruct: {
+    match: (t) => t.includes('参考拆文') || t.includes('拆解报告'),
+    guide: '对照报告调整 Plan Beat 或 world 节拍；可回到规划模式修改下章结构。',
+    actions: ['world'],
+  },
+  female_fiction_review: {
+    match: (t) => t.includes('女频审阅') || t.includes('女频直改稿'),
+    guide: '直改稿：先预览全文，满意后点「采纳并同步档案」写回章节并更新全局文件。',
+    actions: ['summaries_recent', 'char_dynamic', 'plot_threads_locked', 'plot_threads_active'],
+  },
+  female_fiction_accept: {
+    match: (t) => t.includes('女频采纳') || t.includes('女频改稿采纳'),
+    guide: '章节与档案已写入。可在全局文件中核对概述/观察/钉子。',
+    actions: ['summaries_recent', 'char_dynamic', 'plot_threads_locked', 'plot_threads_active'],
+  },
   pacing: {
     match: (t) => t.includes('爽点检查'),
     guide: '节奏/爽点问题对照 <code>world.md</code> 节拍表与 Plan Beat，在规划或写书对话中调整下章走向。',
@@ -910,21 +948,33 @@ function resolveQualityMeta(title, hint = '') {
   };
 }
 
-function renderQualityResultActions(fileKeys) {
+function renderQualityResultActions(fileKeys, customButtons) {
   const host = document.getElementById('qualityResultActions');
   if (!host) return;
   clearEl(host);
-  if (!fileKeys?.length) {
+  const files = fileKeys || [];
+  const extras = customButtons || [];
+  if (!files.length && !extras.length) {
     host.classList.add('hidden');
     return;
   }
   host.classList.remove('hidden');
-  for (const key of fileKeys) {
+  for (const key of files) {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'btn btn-sm';
     btn.textContent = `打开 ${globalFileLabel(key).split(' ')[0]}`;
     btn.addEventListener('click', () => openGlobalFromQuality(key));
+    host.appendChild(btn);
+  }
+  for (const spec of extras) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = spec.className || 'btn btn-sm';
+    btn.textContent = spec.label || '操作';
+    btn.addEventListener('click', () => {
+      if (typeof spec.onClick === 'function') spec.onClick();
+    });
     host.appendChild(btn);
   }
 }
@@ -955,10 +1005,25 @@ function showQualityResult(title, body, hint = '', options = {}) {
     }
   }
   const guideEl = document.getElementById('qualityResultGuide');
-  if (guideEl) guideEl.innerHTML = options.guide || meta.guide;
+  if (guideEl) {
+    let guideHtml = options.guide || meta.guide;
+    const warns = options.warnings || [];
+    if (options.outputTruncated || options.inputTruncated) {
+      warns.unshift('部分 API 回复或输入可能被截断，请对照正文通读；可在 .env 调高 NOVEL_BATCH_REVIEW_* 上限');
+    }
+    if (warns.length) {
+      guideHtml += `<div class="quality-result-trunc-warn">${warns.map((w) => escapeHtml(w)).join('<br>')}</div>`;
+    }
+    if (options.reportChars) {
+      guideHtml += `<div class="muted" style="margin-top:6px;font-size:11px">报告约 ${options.reportChars.toLocaleString()} 字 · 可点「复制报告」或侧栏质量记录回看</div>`;
+    }
+    guideEl.innerHTML = guideHtml;
+  }
   const bodyEl = document.getElementById('qualityResultBody');
   if (bodyEl) bodyEl.textContent = body || '（无内容）';
-  renderQualityResultActions(options.actions || meta.actions);
+  const scrollEl = document.getElementById('qualityResultScroll');
+  if (scrollEl) scrollEl.scrollTop = 0;
+  renderQualityResultActions(options.actions || meta.actions, options.customButtons);
   panel.classList.remove('hidden');
   syncChatResultOverlay();
 }
@@ -1846,13 +1911,58 @@ async function openQualityLogEntry(entryId) {
   const title = `${row.label || '质量记录'}${ch ? ` · ${ch}` : ''}`;
   const hint = row.persisted_detail || row.summary || '';
   if (state.mode !== 'chat' && state.mode !== 'quality') await setMode('chat');
+  const extra = row.extra || {};
+  const pending = extra.pending_accept && !row.persisted;
   showQualityResult(title, row.body || '', hint, {
     createdAt: row.created_at,
     persisted: row.persisted,
+    guide: pending
+      ? '通读改稿全文后，点「采纳并同步档案」写回章节并更新全局文件。'
+      : undefined,
+    customButtons: pending ? femaleFictionAcceptButtons(entryId) : [],
   });
   if (state.mode !== 'quality') {
     setState({ sidebar: 'quality' }, 'sidebar');
   }
+}
+
+function femaleFictionAcceptButtons(logId) {
+  if (!logId) return [];
+  return [
+    {
+      label: '✅ 采纳并同步档案',
+      className: 'btn btn-sm btn-primary',
+      onClick: () => acceptFemaleFictionRewrite(logId),
+    },
+  ];
+}
+
+async function acceptFemaleFictionRewrite(logId) {
+  if (!logId) return toast('无待采纳记录');
+  if (!confirm('采纳改稿：写回章节文件，并同步概述/观察/钉子/伏笔到全局档案？')) return;
+  await runWithLoading(async () => {
+    const r = await api(
+      '/review/female-fiction/accept',
+      {
+        method: 'POST',
+        body: JSON.stringify({ log_id: logId, sync_archive: true }),
+      },
+      QUALITY_FULL_TIMEOUT_MS,
+    );
+    invalidateCache(['chapters', 'plan', 'quality']);
+    invalidateQualityCache();
+    await refreshQualityHistoryList();
+    const hint = r.archive_synced
+      ? `✅ 第 ${r.chapter_num} 章已写回${r.chapter_title ? `（${r.chapter_title}）` : ''}，全局档案已同步。`
+      : `⚠️ 章节已写回，但档案同步未完成${r.archive_errors?.length ? '：' + r.archive_errors.join('；') : ''}`;
+    showQualityResult(
+      `女频采纳 · 第 ${r.chapter_num} 章`,
+      _qualityResultText || '（改稿正文见上一条预览）',
+      hint,
+      { persisted: true, customButtons: [] },
+    );
+    toast(r.archive_synced ? '已采纳并同步档案' : '章节已写回，档案请检查');
+  }, { loadingText: '采纳并同步中…' });
 }
 
 async function renderQualitySidebar(body) {
@@ -1881,7 +1991,9 @@ async function renderQualitySidebar(body) {
     const preview = (e.preview || e.summary || '').trim();
     const badge = e.persisted
       ? '<span class="record-badge record-badge--ok">已写入</span>'
-      : '';
+      : (e.kind === 'female_fiction_revise'
+        ? '<span class="record-badge record-badge--warn">待采纳</span>'
+        : '');
     el.querySelector('.meta').innerHTML =
       `${timeBadgeHtml(e.created_at, e.persisted ? 'ok' : 'muted')}` +
       (ch ? ` <span class="record-meta">${escapeHtml(ch)}</span>` : '') +
@@ -4056,6 +4168,88 @@ async function runRepetitionCheck(chapterNum = null) {
   }, { btnIds: ['runRepetitionBtn', 'runRepetitionBtnDock', 'qualityBtnStyle'], loadingText: '检查中…' });
 }
 
+async function runFemaleFictionReview() {
+  const mode = document.getElementById('femaleReviewMode')?.value || 'chapter';
+  const profile_id = document.getElementById('femaleReviewProfile')?.value || undefined;
+  const revise = document.getElementById('femaleReviewRevise')?.checked || false;
+  const rewriteOnly = _femaleReviewProfilesCache?.active?.rewrite_only
+    || (profile_id && ['world-tomato', 'world-qimao'].includes(profile_id));
+  const write_back = !rewriteOnly && revise
+    && (document.getElementById('femaleReviewWriteBack')?.checked || false);
+  const sync_archive = write_back
+    && (document.getElementById('femaleReviewSyncArchive')?.checked || false);
+  const num = getQualityChapterNum() || getWriteChapterNum();
+  const modeLabel = { chapter: '章节', outline: '大纲', characters: '人物' }[mode] || mode;
+  if (mode === 'chapter' && !num) return toast('请先选择锚点章');
+  if (mode === 'chapter' && write_back) {
+    if (!confirm(`将覆盖第 ${num} 章正文（会先备份）${sync_archive ? '，并同步全局档案' : ''}。继续？`)) return;
+  }
+  await runWithLoading(async () => {
+    const r = await api('/review/female-fiction', {
+      method: 'POST',
+      body: JSON.stringify({
+        mode,
+        chapter_num: mode === 'chapter' ? num : undefined,
+        profile_id,
+        revise: rewriteOnly ? false : revise,
+        write_back: mode === 'chapter' ? write_back : false,
+        sync_archive: mode === 'chapter' ? sync_archive : false,
+      }),
+    }, QUALITY_FULL_TIMEOUT_MS);
+    invalidateQualityCache();
+    await refreshQualityHistoryList();
+    const ch = r.chapter_num ? ` · 第 ${r.chapter_num} 章` : '';
+    const prof = r.profile_label ? ` · ${r.profile_label}` : '';
+    const action = r.rewrite_only ? '女频直改稿' : (revise ? '审阅改稿' : '女频审阅');
+    let hint = '';
+    let customButtons = [];
+    if (r.pending_accept && r.log_id) {
+      hint = '请通读下方改稿全文。满意后点「采纳并同步档案」写回章节并更新全局文件。';
+      customButtons = femaleFictionAcceptButtons(r.log_id);
+    } else if (r.write_back) {
+      hint = `✅ 已写回第 ${r.chapter_num} 章${r.chapter_title ? `（${r.chapter_title}）` : ''}。`;
+      if (r.sync_archive) {
+        hint += r.archive_synced
+          ? ' 档案已同步。'
+          : ` ⚠️ 档案同步未完全成功${r.archive_errors?.length ? '：' + r.archive_errors.join('；') : ''}`;
+      }
+    } else if (revise && !r.revised_text) {
+      hint = '⚠️ 模型未输出改稿正文，请重试。';
+    }
+    showQualityResult(`${action} · ${modeLabel}${ch}${prof}`, r.reply, hint, { customButtons });
+    if (r.write_back) {
+      invalidateCache(['chapters', 'quality']);
+      if (r.archive_synced) invalidateCache(['plan']);
+      toast(r.archive_synced ? `第 ${r.chapter_num} 章已更新并同步档案` : `第 ${r.chapter_num} 章已更新`);
+    }
+  }, { btnId: 'femaleReviewBtn', loadingText: (rewriteOnly || revise) ? '改稿中…' : '女频审阅中…' });
+}
+
+function bindFemaleReviewReviseToggle() {
+  const reviseEl = document.getElementById('femaleReviewRevise');
+  const writeEl = document.getElementById('femaleReviewWriteBack');
+  const archiveEl = document.getElementById('femaleReviewSyncArchive');
+  const writeOpts = document.getElementById('femaleReviewWriteOpts');
+  if (!reviseEl || !writeEl) return;
+  const isRewriteOnly = () =>
+    _femaleReviewProfilesCache?.active?.rewrite_only
+    || ['world-tomato', 'world-qimao'].includes(
+      document.getElementById('femaleReviewProfile')?.value || '',
+    );
+  const sync = () => {
+    const ro = isRewriteOnly();
+    reviseEl.disabled = ro;
+    if (ro) reviseEl.checked = false;
+    if (writeOpts) writeOpts.classList.toggle('hidden', ro);
+    writeEl.disabled = !reviseEl.checked || ro;
+    if (archiveEl) archiveEl.disabled = !writeEl.checked || writeEl.disabled;
+  };
+  reviseEl.addEventListener('change', sync);
+  writeEl.addEventListener('change', sync);
+  document.getElementById('femaleReviewProfile')?.addEventListener('change', sync);
+  sync();
+}
+
 async function runReaderReview() {
   const scope = getQualityScope();
   const num = getQualityChapterNum() || getWriteChapterNum();
@@ -4150,6 +4344,99 @@ function onQualityChapterChange() {
   if (num) setState({ writeChapterNum: num }, 'none');
 }
 
+let _deconstructLatestReply = '';
+
+function updateDeconstructCharCount() {
+  const ta = document.getElementById('deconstructInput');
+  const el = document.getElementById('deconstructCharCount');
+  if (!ta || !el) return;
+  const n = (ta.value || '').replace(/\s/g, '').length;
+  el.textContent = `${n.toLocaleString()} 字（不含空白）`;
+}
+
+async function refreshDeconstructHistory() {
+  const list = document.getElementById('deconstructHistoryList');
+  if (!list) return;
+  const entries = await ensureQualityLog(true);
+  const rows = entries.filter((e) => e.kind === 'deconstruct');
+  clearEl(list);
+  if (!rows.length) {
+    list.textContent = '尚无记录，完成一次拆解后会出现在这里。';
+    return;
+  }
+  for (const e of rows.slice(0, 15)) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'deconstruct-history-item';
+    btn.innerHTML =
+      `<span class="deconstruct-history-meta">${escapeHtml(formatRecordTime(e.created_at))}</span>` +
+      `<span class="deconstruct-history-summary">${escapeHtml(e.summary || e.preview || '参考拆文')}</span>`;
+    btn.addEventListener('click', () => openDeconstructEntry(e.id));
+    list.appendChild(btn);
+  }
+}
+
+async function openDeconstructEntry(id) {
+  const row = await api(`/quality/log/${encodeURIComponent(id)}`);
+  _deconstructLatestReply = row.body || '';
+  const panel = document.getElementById('deconstructResult');
+  const body = document.getElementById('deconstructResultBody');
+  if (panel && body) {
+    body.textContent = _deconstructLatestReply;
+    panel.classList.remove('hidden');
+    panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+}
+
+async function renderDeconstructView() {
+  updateDeconstructCharCount();
+  await refreshDeconstructHistory();
+  const ta = document.getElementById('deconstructInput');
+  if (ta && !ta.dataset.bound) {
+    ta.dataset.bound = '1';
+    ta.addEventListener('input', updateDeconstructCharCount);
+  }
+}
+
+async function runDeconstruct() {
+  const ta = document.getElementById('deconstructInput');
+  const text = (ta?.value || '').trim();
+  if (text.replace(/\s/g, '').length < 80) {
+    toast('请至少粘贴 80 字参考文');
+    return;
+  }
+  const sourceLabel = document.getElementById('deconstructLabel')?.value?.trim() || '';
+  const includeBook = document.getElementById('deconstructUseBookCtx')?.checked !== false;
+  await runWithLoading(async () => {
+    const r = await api('/deconstruct', {
+      method: 'POST',
+      body: JSON.stringify({
+        text,
+        source_label: sourceLabel,
+        include_book_context: includeBook,
+      }),
+    }, QUALITY_FULL_TIMEOUT_MS);
+    _deconstructLatestReply = r.reply || '';
+    const panel = document.getElementById('deconstructResult');
+    const body = document.getElementById('deconstructResultBody');
+    if (panel && body) {
+      body.textContent = _deconstructLatestReply;
+      panel.classList.remove('hidden');
+    }
+    invalidateQualityCache();
+    await refreshDeconstructHistory();
+    toast('拆解完成');
+  }, { btnId: 'deconstructRunBtn', loadingText: '拆解中…' });
+}
+
+function copyDeconstructResult() {
+  if (!_deconstructLatestReply) return toast('暂无报告');
+  navigator.clipboard?.writeText(_deconstructLatestReply).then(
+    () => toast('已复制到剪贴板'),
+    () => toast('复制失败，请手动选择复制'),
+  );
+}
+
 async function refreshQualityHistoryList() {
   const list = document.getElementById('qualityHistoryList');
   if (!list) return;
@@ -4158,6 +4445,8 @@ async function refreshQualityHistoryList() {
   const reviewKinds = new Set([
     'finalize', 'continuity', 'character_drift', 'repetition', 'pacing',
     'reader_review', 'editor_review', 'quality_full',
+    'batch_world_review', 'batch_world_finalize', 'world_remediate', 'world_batch_generate',
+    'female_fiction_review', 'female_fiction_accept',
   ]);
   const filtered = entries.filter((e) => reviewKinds.has(e.kind));
   if (!filtered.length) {
@@ -4184,8 +4473,276 @@ async function refreshQualityHistoryList() {
 async function renderQualityView() {
   await fillQualityChapterSel();
   await refreshQualityHistoryList();
+  await refreshWorldBatchStatus();
+  await refreshFemaleReviewProfiles();
   const status = await fetchGuideStatus(true);
   if (status) renderQualityGuideHints(status);
+}
+
+let _worldBatchCache = null;
+let _lastRemediateJobId = null;
+
+async function refreshWorldBatchStatus() {
+  const panel = document.getElementById('worldBatchPanel');
+  const textEl = document.getElementById('worldBatchStatusText');
+  const hintEl = document.getElementById('worldBatchHint');
+  const reviewBtn = document.getElementById('worldBatchReviewBtn');
+  const finalizeBtn = document.getElementById('worldBatchFinalizeBtn');
+  const generateBtn = document.getElementById('worldGenerateBtn');
+  const remediateBtn = document.getElementById('worldRemediateBtn');
+  if (!textEl) return;
+  try {
+    const active = await api('/library/active');
+    if (active.book?.type === 'short') {
+      if (panel) panel.classList.add('hidden');
+      return;
+    }
+    if (panel) panel.classList.remove('hidden');
+    const s = await api('/batch/world/status');
+    _worldBatchCache = s;
+    const label = s.label || '当前世界';
+    const plan = `第${s.chapter_from}–${s.chapter_to}章`;
+    const written = s.written_count
+      ? `已有正文 ${s.written_count} 章（第${s.written_from}–${s.written_to}）`
+      : '尚无正文';
+    const beats = s.beats_count
+      ? ` · plan 已覆盖 ${s.beats_count} 章 Beat`
+      : ' · ⚠️ plan 无 Beat';
+    const prog = s.world_in_progress ? ' · 进行中' : (s.complete ? ' · 已写满' : '');
+    textEl.textContent = `${label} · ${plan} · ${written}${beats}${prog}`;
+    if (hintEl) {
+      const pending = (s.beats_count || 0) - (s.written_count || 0);
+      hintEl.innerHTML =
+        `<strong>批量生成</strong>：按 Beat 自动写 ${plan}（缺 ${Math.max(0, pending)} 章会补写，已有正文默认跳过）。`
+        + ` <strong>世界闭环</strong>：需已有正文。`;
+    }
+    const noWritten = !s.written_count;
+    const noBeats = !(s.beats_count > 0);
+    if (generateBtn) generateBtn.disabled = noBeats;
+    if (reviewBtn) reviewBtn.disabled = noWritten;
+    if (finalizeBtn) finalizeBtn.disabled = noWritten;
+    if (remediateBtn) remediateBtn.disabled = noWritten;
+  } catch (e) {
+    textEl.textContent = '无法加载世界批次信息';
+    if (hintEl) hintEl.textContent = String(e.message || e);
+  }
+}
+
+function remediateResultButtons(jobId) {
+  if (!jobId) return [];
+  return [
+    {
+      label: '✅ 全部接受',
+      className: 'btn btn-sm btn-primary',
+      onClick: () => acceptRemediateJob(jobId),
+    },
+    {
+      label: '↩️ 撤销某章',
+      className: 'btn btn-sm',
+      onClick: () => revertRemediateChapter(jobId),
+    },
+  ];
+}
+
+async function acceptRemediateJob(jobId) {
+  const id = jobId || _lastRemediateJobId;
+  if (!id) return toast('无闭环任务');
+  try {
+    await api(`/batch/jobs/${encodeURIComponent(id)}/accept`, { method: 'POST' });
+    toast('已确认接受全部改动');
+  } catch (e) {
+    toast(e.message || '确认失败');
+  }
+}
+
+async function revertRemediateChapter(jobId) {
+  const id = jobId || _lastRemediateJobId;
+  if (!id) return toast('无闭环任务');
+  const raw = prompt('撤销第几章？（输入章号，仅恢复正文快照，不调 API）');
+  const num = parseInt(raw ?? '', 10);
+  if (!num || num < 1) return;
+  if (!confirm(`确定将第 ${num} 章正文恢复为闭环前版本？（档案不回滚）`)) return;
+  await runWithLoading(async () => {
+    const r = await api(`/batch/jobs/${encodeURIComponent(id)}/revert`, {
+      method: 'POST',
+      body: JSON.stringify({ chapter_num: num }),
+    });
+    invalidateCache(['plan', 'chapters']);
+    toast(r.warning ? `第 ${num} 章已恢复（${r.warning}）` : `第 ${num} 章已恢复`);
+  }, { loadingText: '恢复中…' });
+}
+
+async function runWorldBatchGenerate() {
+  const s = _worldBatchCache;
+  if (!s?.beats_count) return toast('请先在规划模式填写 Scene Beat（如「第1-2章」）');
+  const label = s.label || '当前世界';
+  const from = s.chapter_from;
+  const to = s.chapter_to;
+  const pending = Math.max(0, (s.beats_count || 0) - (s.written_count || 0));
+  const overwrite = s.written_count > 0 && confirm(
+    '范围内部分章节已有正文。\n\n'
+    + '点「确定」= 覆盖已有章节重新生成\n'
+    + '点「取消」= 只补写空白章（推荐）',
+  );
+  if (
+    !confirm(
+      `批量生成「${label}」？\n\n`
+        + `范围：第 ${from}–${to} 章\n`
+        + `plan Beat 覆盖：${s.beats_count} 章\n`
+        + `${overwrite ? '将覆盖已有正文' : `约补写 ${pending} 章（已有正文跳过）`}\n\n`
+        + `将逐章调用写作 API（约 ${s.beats_count} 次），耗时较长，请勿关闭页面。`,
+    )
+  ) {
+    return;
+  }
+  await runWithLoading(async () => {
+    const r = await api(
+      '/batch/world/generate',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          chapter_from: from,
+          chapter_to: to,
+          overwrite,
+          skip_existing: !overwrite,
+        }),
+      },
+      FINALIZE_API_TIMEOUT_MS,
+    );
+    invalidateCache(['plan', 'chapters', 'quality']);
+    invalidateQualityCache();
+    const title = `世界批量生成 · ${label} · 第${from}–${to}章`;
+    const hint = r.partial
+      ? `部分完成：${r.ok_count}/${r.target_count} 章`
+      : `成功 ${r.ok_count}/${r.target_count} 章`;
+    showQualityResult(title, r.report || '', hint);
+    toast(r.partial ? '批量生成部分完成' : '批量生成完成');
+    await refreshQualityHistoryList();
+    await refreshWorldBatchStatus();
+  }, { btnId: 'worldGenerateBtn', loadingText: '批量生成中（较久）…' });
+}
+
+async function runWorldRemediate() {
+  const s = _worldBatchCache;
+  if (!s?.written_count) return toast('本世界尚无正文');
+  const label = s.label || '当前世界';
+  const from = s.written_from || s.chapter_from;
+  const to = s.written_to || s.chapter_to;
+  if (
+    !confirm(
+      `运行「世界闭环」？\n\n` +
+        `${label} · 第 ${from}–${to} 章\n\n` +
+        `AI 将自动：诊断 → 改稿 → 写回章节 → 同步档案\n` +
+        `完成后展示变更报告。耗时与 API 次数较多，请耐心等待。`,
+    )
+  ) {
+    return;
+  }
+  await runWithLoading(async () => {
+    const r = await api(
+      '/batch/world/remediate',
+      { method: 'POST', body: JSON.stringify({}) },
+      FINALIZE_API_TIMEOUT_MS,
+    );
+    _lastRemediateJobId = r.job_id || null;
+    invalidateCache(['plan', 'chapters', 'quality']);
+    invalidateQualityCache();
+    const title = `世界闭环 · ${label} · 第${from}–${to}章`;
+    const hint = r.partial
+      ? `部分完成：${r.ok_count}/${r.target_count} 章`
+      : `成功 ${r.ok_count}/${r.target_count} 章`;
+    showQualityResult(title, r.report || '', hint, {
+      reportChars: (r.report || '').length,
+      warnings: r.warnings || [],
+      customButtons: remediateResultButtons(r.job_id),
+    });
+    toast(r.partial ? '世界闭环部分完成' : '世界闭环完成');
+    await refreshQualityHistoryList();
+  }, { btnId: 'worldRemediateBtn', loadingText: '世界闭环中（较久）…' });
+}
+
+async function runWorldBatchReview() {
+  const s = _worldBatchCache;
+  if (!s?.written_count) return toast('本世界尚无正文');
+  await runWithLoading(async () => {
+    const preview = await api('/batch/world/review/preview');
+    const label = preview.label || s.label || '当前世界';
+    showQualityResult(
+      `发送预览 · 世界审阅 · ${label}`,
+      preview.preview || '（无预览）',
+      '请核对下方每次 API 将发送的内容与 token 估算，确认后再发送。',
+      {
+        reportChars: (preview.preview || '').length,
+        inputTruncated: preview.input_truncated,
+        customButtons: [
+          {
+            label: '确认发送',
+            className: 'btn btn-sm btn-primary',
+            onClick: () => executeWorldBatchReview(preview),
+          },
+          {
+            label: '取消',
+            className: 'btn btn-sm btn-ghost',
+            onClick: () => closeQualityPanel(),
+          },
+        ],
+      },
+    );
+  }, { btnId: 'worldBatchReviewBtn', loadingText: '生成发送预览…' });
+}
+
+async function executeWorldBatchReview(preview) {
+  closeQualityPanel();
+  const label = preview?.label || '当前世界';
+  await runWithLoading(async () => {
+    const r = await api('/batch/world/review', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }, QUALITY_FULL_TIMEOUT_MS);
+    invalidateQualityCache();
+    await refreshQualityHistoryList();
+    const title = `世界审阅 · ${label} · 第${r.written_from}–${r.written_to}章`;
+    const hint = r.partial
+      ? `部分步骤失败：${(r.errors || []).join('；')}`
+      : '只读报告；改稿后重新审阅，满意再「定稿本世界」';
+    showQualityResult(title, r.reply, hint, {
+      warnings: r.warnings,
+      outputTruncated: r.output_truncated,
+      inputTruncated: r.input_truncated,
+      reportChars: r.report_chars,
+    });
+    toast(r.partial ? '世界审阅部分完成' : '世界审阅完成');
+  }, { btnId: 'worldBatchReviewBtn', loadingText: '世界审阅中（较久）…' });
+}
+
+async function runWorldBatchFinalize() {
+  const s = _worldBatchCache;
+  if (!s?.written_count) return toast('本世界尚无正文');
+  const label = s.label || '当前世界';
+  const msg =
+    `定稿本世界（写档案）\n\n`
+    + `${label} · 第${s.written_from}–${s.written_to}章共 ${s.written_count} 章\n\n`
+    + `将逐章执行本章定稿（约 ${s.written_count * 2}–${s.written_count * 3} 次 API），`
+    + '可能需要十数分钟。';
+  if (!confirm(msg)) return;
+  await runWithLoading(async () => {
+    const r = await api('/batch/world/finalize', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    }, QUALITY_FULL_TIMEOUT_MS);
+    invalidateQualityCache();
+    await refreshQualityHistoryList();
+    await refreshWorldBatchStatus();
+    const title = `世界定稿 · ${label}`;
+    const hint = r.partial
+      ? `部分章节失败：${(r.errors || []).join('；')}`
+      : `成功 ${r.ok_count}/${(r.finalized_chapters || []).length} 章`;
+    showQualityResult(title, r.reply, hint, {
+      warnings: r.errors,
+      reportChars: (r.reply || '').length,
+    });
+    toast(r.partial ? '世界定稿部分完成' : '世界定稿完成');
+  }, { btnId: 'worldBatchFinalizeBtn', loadingText: '世界定稿中（较久）…' });
 }
 
 function renderQualityGuideHints(status) {
@@ -4207,7 +4764,7 @@ function renderQualityGuideHints(status) {
   }
   container.innerHTML = items.length
     ? `<div class="guide-bar guide-bar--warn"><div class="guide-bar__title">章后维护提醒</div>${items.map((i) => `<div class="guide-bar__item">${i}</div>`).join('')}</div>`
-    : `<div class="guide-bar guide-bar--ok">✅ 档案状态良好；审阅结果不会自动写盘，改稿后请「本章定稿」</div>`;
+    : `<div class="guide-bar guide-bar--ok">✅ 档案状态良好。快穿建议世界写满后用「审阅/定稿本世界」；单章定稿仅作补救。</div>`;
   setGuideHostVisible('qualityGuideBar', true);
 }
 
@@ -4375,12 +4932,44 @@ function makeStatCard(title, num, desc, wide = false) {
 async function renderReview() {
   const s = await api('/stats');
   const st = await api('/status');
+  let runtimeLogs = { status: {}, entries: [] };
+  try {
+    runtimeLogs = await api('/runtime-logs?limit=30');
+  } catch (_) { /* optional */ }
   const grid = document.getElementById('reviewGrid');
   clearEl(grid);
   grid.appendChild(makeStatCard('总字数', s.total_chars.toLocaleString(), '全稿字符数（不含空白）'));
   grid.appendChild(makeStatCard('章节 / 场景', `${s.chapter_count} / ${s.scene_count}`, '章节数 · Plan 场景数'));
   grid.appendChild(makeStatCard('Codex / 概述', `${s.codex_count} / ${s.summary_count}`, '设定条目 · 已生成概述章数'));
   grid.appendChild(makeStatCard('API 费用', `$${(s.total_cost ?? st.total_cost).toFixed(4)}`, '累计费用 · 详见 data/cost_log.jsonl'));
+
+  const rs = runtimeLogs.status || st.runtime_log || {};
+  const envLabel = rs.runtime_env_label || '运行时';
+  const logPath = rs.log_path || 'logs/';
+  const logWide = makeStatCard(`${envLabel} · Bug 日志`, '', `${logPath} · 共 ${rs.entry_count ?? 0} 条`, true);
+  const logList = document.createElement('div');
+  logList.className = 'quality-history__list runtime-log-list';
+  const entries = (runtimeLogs.entries || []).filter((e) => e.level === 'error' || e.level === 'warn');
+  const showEntries = entries.length ? entries : (runtimeLogs.entries || []).slice(0, 8);
+  if (showEntries.length) {
+    for (const e of showEntries) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'quality-history__item runtime-log-item';
+      btn.dataset.logId = e.id;
+      btn.dataset.level = e.level || '';
+      btn.innerHTML = `<div class="quality-history__meta">${escapeHtml(e.created_at)} · ${escapeHtml(e.level_label)} · ${escapeHtml(e.category)}</div><div class="quality-history__summary">${escapeHtml(e.summary || e.message)}</div>`;
+      btn.onclick = () => openRuntimeLogDetail(e.id);
+      logList.appendChild(btn);
+    }
+  } else {
+    const empty = document.createElement('p');
+    empty.className = 'quality-history__empty';
+    empty.textContent = '暂无错误/警告记录';
+    logList.appendChild(empty);
+  }
+  logWide.querySelector('.num').appendChild(logList);
+  grid.appendChild(logWide);
 
   const wide = makeStatCard('各章字数', '', '', true);
   const list = document.createElement('div');
@@ -4400,13 +4989,165 @@ async function renderReview() {
   grid.appendChild(wide);
 }
 
+async function openRuntimeLogDetail(entryId) {
+  if (!entryId) return;
+  try {
+    const row = await api(`/runtime-logs/${encodeURIComponent(entryId)}`);
+    const parts = [
+      `${row.created_at || ''} · ${row.level_label || row.level || ''} · ${row.category || ''}`,
+      row.location ? `位置：${row.location}` : '',
+      row.message || '',
+      row.detail ? `\n--- 详情 ---\n${row.detail}` : '',
+      row.data && Object.keys(row.data).length
+        ? `\n--- 数据 ---\n${JSON.stringify(row.data, null, 2)}`
+        : '',
+    ].filter(Boolean);
+    showQualityResult(
+      `Bug 日志 · ${row.runtime_env_label || ''}`,
+      parts.join('\n\n'),
+      `文件：${(row.runtime_env ? `logs/${row.runtime_env}/runtime.jsonl` : 'logs/')}`,
+      { guide: '开发/写作环境日志分开存储；写作端 bug 在 novel_writer_write/logs/write/' },
+    );
+  } catch (e) {
+    toast(String(e.message || e));
+  }
+}
+
 // ── Overview（书架）──────────────────────────────
 let _overviewReadChapter = null;
+
+const BOOK_TYPE_LABELS = { novel: '长篇', world: '快穿世界', short: '短篇' };
+const PLATFORM_LABELS = { tomato: '番茄', qimao: '七猫', jjwxc: '晋江', general: '通用' };
+
+let _femaleReviewProfilesCache = null;
+
+async function refreshFemaleReviewProfiles() {
+  const sel = document.getElementById('femaleReviewProfile');
+  const hint = document.getElementById('femaleReviewProfileHint');
+  if (!sel) return;
+  try {
+    const data = await api('/review/profiles');
+    _femaleReviewProfilesCache = data;
+    const active = data.active || {};
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">跟随本书设定</option>';
+    for (const p of data.profiles || []) {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.label;
+      sel.appendChild(opt);
+    }
+    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+    if (hint) {
+      const bt = BOOK_TYPE_LABELS[active.book_type] || active.book_type || '';
+      const pf = PLATFORM_LABELS[active.platform] || active.platform || '';
+      const modeHint = active.rewrite_only ? ' · 直改稿（只出全文）' : '';
+      hint.textContent = `本书：${bt} · ${pf} → ${active.label || active.profile_id || '默认'}${modeHint}`;
+    }
+    document.getElementById('femaleReviewProfile')?.dispatchEvent(new Event('change'));
+  } catch {
+    if (hint) hint.textContent = 'Prompt 见 docs/review-prompts/';
+  }
+}
+
+async function switchLibraryBook(bookId) {
+  if (!bookId) return;
+  await runWithLoading(async () => {
+    await api('/library/switch', {
+      method: 'POST',
+      body: JSON.stringify({ book_id: bookId }),
+    });
+    invalidateCache(['chapters', 'plan', 'codex', 'chat', 'quality', 'freeChat']);
+    _overviewReadChapter = null;
+    _worldBatchCache = null;
+    await loadStatus();
+    await renderOverview();
+    toast('已切换书籍');
+  }, { loadingText: '切换书籍…' });
+}
+
+async function createLibraryBook() {
+  const title = prompt('书名', '未命名小说');
+  if (title === null || !title.trim()) return;
+  const typeRaw = prompt('类型：novel（长篇）/ world（快穿）/ short（短篇）', 'novel');
+  if (typeRaw === null) return;
+  const type = ['novel', 'world', 'short'].includes(typeRaw.trim()) ? typeRaw.trim() : 'novel';
+  const platformRaw = prompt('平台：tomato（番茄）/ qimao（七猫）/ jjwxc（晋江）', 'tomato');
+  if (platformRaw === null) return;
+  const platform = ['tomato', 'qimao', 'jjwxc', 'general'].includes(platformRaw.trim())
+    ? platformRaw.trim()
+    : 'tomato';
+  await runWithLoading(async () => {
+    await api('/library/books', {
+      method: 'POST',
+      body: JSON.stringify({ title: title.trim(), type, platform }),
+    });
+    invalidateCache(['chapters', 'plan', 'codex', 'chat', 'quality', 'freeChat']);
+    _overviewReadChapter = null;
+    await loadStatus();
+    await renderOverview();
+    toast('新书已创建');
+  }, { loadingText: '创建书籍…' });
+}
+
+function renderLibraryPanel(lib, activeType) {
+  const sec = document.createElement('section');
+  sec.className = 'overview-section library-panel';
+  const head = document.createElement('div');
+  head.className = 'overview-section-head';
+  head.innerHTML = '<h2>书库</h2>';
+  const actions = document.createElement('div');
+  actions.className = 'library-actions';
+  const newBtn = document.createElement('button');
+  newBtn.type = 'button';
+  newBtn.className = 'btn btn-sm btn-primary';
+  newBtn.textContent = '+ 新建书';
+  newBtn.addEventListener('click', () => createLibraryBook());
+  actions.appendChild(newBtn);
+  head.appendChild(actions);
+  sec.appendChild(head);
+
+  const body = document.createElement('div');
+  body.className = 'overview-body library-grid';
+  const books = lib?.books || [];
+  const activeId = lib?.active_book_id || '';
+  if (!books.length) {
+    body.textContent = '暂无书籍';
+  }
+  for (const b of books) {
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'library-card' + (b.id === activeId ? ' library-card--active' : '');
+    const typeLabel = BOOK_TYPE_LABELS[b.type] || b.type || '长篇';
+    card.innerHTML =
+      `<span class="library-card__title">${escapeHtml(b.title || '未命名')}</span>` +
+      `<span class="library-card__meta">${escapeHtml(typeLabel)}` +
+      `${b.world_label ? ' · ' + escapeHtml(b.world_label) : ''}</span>`;
+    if (b.id !== activeId) {
+      card.addEventListener('click', () => switchLibraryBook(b.id));
+    } else {
+      card.disabled = true;
+    }
+    body.appendChild(card);
+  }
+  sec.appendChild(body);
+
+  const hint = document.createElement('p');
+  hint.className = 'library-type-hint muted';
+  const cur = BOOK_TYPE_LABELS[activeType] || activeType || '长篇';
+  hint.textContent = `当前书类型：${cur}。短篇自动跳过概述/档案维护。`;
+  sec.appendChild(hint);
+  return sec;
+}
 
 async function renderOverview() {
   const o = await api('/overview');
   const host = document.getElementById('overviewShell');
   clearEl(host);
+
+  if (o.library) {
+    host.appendChild(renderLibraryPanel(o.library, o.book_type));
+  }
 
   const hero = document.createElement('div');
   hero.className = 'overview-hero';
@@ -4424,13 +5165,6 @@ async function renderOverview() {
   `;
   host.appendChild(hero);
   hero.querySelector('#btnEditProject').addEventListener('click', () => editProjectMeta(o.project));
-
-  if (o.multi_book_hint) {
-    const hint = document.createElement('div');
-    hint.className = 'overview-hint';
-    hint.textContent = o.multi_book_hint;
-    host.appendChild(hint);
-  }
 
   host.appendChild(makeOverviewSection('世界观（全书框架）', o.world_excerpt || '（尚未填写 world.md）', () => openGlobal('world')));
 
@@ -4552,9 +5286,29 @@ async function editProjectMeta(current) {
   if (world_label === null) return;
   const tagline = prompt('一句话简介', current.tagline || '');
   if (tagline === null) return;
+  const typeRaw = prompt(
+    '类型：novel（长篇）/ world（快穿）/ short（短篇）',
+    current.type || 'novel',
+  );
+  if (typeRaw === null) return;
+  const type = ['novel', 'world', 'short'].includes(typeRaw.trim()) ? typeRaw.trim() : (current.type || 'novel');
+  const platformRaw = prompt(
+    '目标平台：tomato（番茄）/ qimao（七猫）/ jjwxc（晋江）',
+    current.platform || 'tomato',
+  );
+  if (platformRaw === null) return;
+  const platform = ['tomato', 'qimao', 'jjwxc', 'general'].includes(platformRaw.trim())
+    ? platformRaw.trim()
+    : (current.platform || 'tomato');
   await api('/project', {
     method: 'PUT',
-    body: JSON.stringify({ title: title.trim(), world_label: world_label.trim(), tagline: tagline.trim() }),
+    body: JSON.stringify({
+      title: title.trim(),
+      world_label: world_label.trim(),
+      tagline: tagline.trim(),
+      type,
+      platform,
+    }),
   });
   await loadStatus();
   await renderOverview();
@@ -4571,8 +5325,10 @@ async function loadStatus() {
   updateApiKeyBanner(s);
   const titleEl = document.getElementById('brandTitle');
   if (titleEl && s.project_title) titleEl.textContent = s.project_title;
+  const typeLabel = BOOK_TYPE_LABELS[s.book_type] || s.book_type || '';
   const sub = [
-    s.world_label || '单书',
+    typeLabel || null,
+    s.world_label || null,
     s.chapter_num ? `第${s.chapter_num}章` : null,
     s.provider_name,
   ].filter(Boolean).join(' · ');
@@ -4702,6 +5458,7 @@ async function init() {
     'none',
   );
   setMode('write');
+  bindFemaleReviewReviseToggle();
   requestAnimationFrame(() => {
     _logMaintainUiState('init');
     // #region agent log

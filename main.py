@@ -18,6 +18,7 @@ from pathlib import Path
 import config
 import change_history
 import quality_log
+import runtime_log
 import file_utils
 import novel_data
 from app_state import state
@@ -30,8 +31,11 @@ from summarizer import (
     OUTLINE_SYSTEM,
     PACING_CHECK_SYSTEM,
     POST_CHAPTER_MAINTAIN_SYSTEM,
+    BULK_ARCHIVE_SUMMARIES_SYSTEM,
+    BULK_ARCHIVE_STATE_SYSTEM,
     QUALITY_CHECK_BUNDLE_SYSTEM,
     CROSS_CHAPTER_CONTINUITY_SYSTEM,
+    DECONSTRUCT_SYSTEM,
     EDITOR_REVIEW_SYSTEM,
     READER_REVIEW_SYSTEM,
     REPETITION_CHECK_SYSTEM,
@@ -41,11 +45,16 @@ from summarizer import (
     build_check_user_message,
     build_cross_chapter_check_user_message,
     build_detail_extract_user_message,
+    build_deconstruct_user_message,
+    build_female_fiction_review_user_message,
+    split_female_review_revise_reply,
     build_editor_review_user_message,
     build_observe_user_message,
     build_outline_user_message,
     build_pacing_check_user_message,
     build_post_chapter_maintain_user_message,
+    build_bulk_summaries_user_message,
+    build_bulk_state_user_message,
     build_quality_bundle_user_message,
     build_reader_review_user_message,
     build_summary_user_message,
@@ -53,6 +62,8 @@ from summarizer import (
     extract_plot_active_unresolved,
     parse_observe_proposals,
     parse_post_chapter_maintain,
+    parse_bulk_summaries,
+    parse_bulk_state,
     parse_quality_bundle,
 )
 
@@ -131,8 +142,8 @@ DEFAULT_CHAT_PROMPTS = {
     ],
 }
 
-INITIAL_FILES = {
-    WORLD_FILE: (
+INITIAL_FILE_TEMPLATES = {
+    "world": (
         "# 全书世界观\n\n"
         "## 主线框架\n\n"
         "- **类型**：快穿\n"
@@ -153,7 +164,7 @@ INITIAL_FILES = {
         "### 爽点设计\n\n"
         "| 类型 | 具体设计 | 建议落点 |\n"
     ),
-    STYLE_FILE: (
+    "style": (
         "# 文风锚点文档\n\n"
         "> 写第一章正文前必须填写。续写时 AI 会参考本文件。\n\n"
         "## 一、风格定位\n\n"
@@ -168,13 +179,13 @@ INITIAL_FILES = {
         "## 四、对话规范\n\n"
         "（男主/女主/系统台词风格）\n"
     ),
-    CHARACTERS_FILE: "# 人物初始设定\n\n（在此填写主要人物的初始设定，只追加不修改）\n",
-    CHAR_CURRENT_FILE: (
+    "characters": "# 人物初始设定\n\n（在此填写主要人物的初始设定，只追加不修改）\n",
+    "char_current": (
         "# 人物状态（已拆分）\n\n"
         "> 请改用：`char_static.md`（性格锚点，缓存②）+ `char_dynamic.md`（当前状态，每章更新）。\n"
         "> 本文件仅作兼容占位，续写不再读取。\n"
     ),
-    CHAR_STATIC_FILE: (
+    "char_static": (
         "# 人物锚点（静态 · 缓存层）\n\n"
         "> 人物本质、深层软肋、禁止写法。极少改动。\n\n"
         "## 女主\n\n"
@@ -189,7 +200,7 @@ INITIAL_FILES = {
         "❌ \n"
         "✅ \n"
     ),
-    CHAR_DYNAMIC_FILE: (
+    "char_dynamic": (
         "# 人物动态（每章更新 · 不缓存）\n\n"
         "> 章后维护：当前状态、表层软肋、关系阶段。\n\n"
         "## 女主 · 当前\n\n"
@@ -202,23 +213,23 @@ INITIAL_FILES = {
         "## 双方关系\n\n"
         "- 阶段：\n"
     ),
-    SUMMARIES_FILE: "# 章节概述（兼容视图）\n\n> 自动生成概述写入 `summaries_recent.md`；归档见 `summaries_archive.md`。\n",
-    SUMMARIES_ARCHIVE_FILE: "# 章节概述归档（缓存层）\n\n",
-    SUMMARIES_RECENT_FILE: (
+    "summaries": "# 章节概述（兼容视图）\n\n> 自动生成概述写入 `summaries_recent.md`；归档见 `summaries_archive.md`。\n",
+    "summaries_archive": "# 章节概述归档（缓存层）\n\n",
+    "summaries_recent": (
         "# 近期概述（最近 3–5 章）\n\n"
         "> 每章「生成概述」追加在此；旧条可剪切到 `summaries_archive.md`。\n"
     ),
-    PLOT_THREADS_FILE: (
+    "plot_threads": (
         "# 伏笔线索（已拆分）\n\n"
         "> 请改用：`plot_threads_locked.md`（细节钉子，缓存③）+ `plot_threads_active.md`（伏笔，每章更新）。\n"
     ),
-    PLOT_THREADS_LOCKED_FILE: (
+    "plot_threads_locked": (
         "# 已钉死的细节（不能改）\n\n"
         "> 每出现新的具体数字、日期、专名、外貌细节，立刻追加一行。\n\n"
         "- 女主年龄：\n"
         "- 男主身高/标志特征：\n"
     ),
-    PLOT_THREADS_ACTIVE_FILE: (
+    "plot_threads_active": (
         "# 活跃伏笔线索\n\n"
         "## 未回收\n\n"
         "（伏笔条目）\n\n"
@@ -237,27 +248,7 @@ _request_lock = threading.Lock()
 
 
 def _dbg_stream_log(location: str, message: str, data: dict, hypothesis_id: str) -> None:
-    # #region agent log
-    try:
-        log_path = Path(__file__).resolve().parent / "debug-4132c7.log"
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "sessionId": "4132c7",
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "hypothesisId": hypothesis_id,
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
+    runtime_log.log_debug(location, message, data=data, hypothesis_id=hypothesis_id)
 _heartbeat_stop = threading.Event()
 _exiting = False
 _context_logger = logging.getLogger("novel_writer.context")
@@ -287,13 +278,34 @@ CODEX_FILES = {
 }
 
 
+def bootstrap_library() -> None:
+    """初始化书库并绑定当前书路径（启动时调用一次）。"""
+    runtime_log.init_runtime_log(BASE_DIR)
+    import book_context
+
+    book_context.init_library()
+
+
+def _short_story_archive_skip(feature: str) -> dict | None:
+    import book_context
+
+    if book_context.is_short_book():
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": f"短篇模式跳过{feature}",
+        }
+    return None
+
+
 def init_data_dirs() -> None:
     """首次运行：创建目录与空文件。"""
     CHAPTERS_DIR.mkdir(parents=True, exist_ok=True)
     BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
     novel_data.CODEX_DIR.mkdir(parents=True, exist_ok=True)
-    for path, content in INITIAL_FILES.items():
-        if not path.exists():
+    for key, path in CODEX_FILES.items():
+        content = INITIAL_FILE_TEMPLATES.get(key)
+        if content and not path.exists():
             path.write_text(content, encoding="utf-8")
     if not CHAT_PROMPTS_FILE.exists():
         file_utils.atomic_write_text(
@@ -407,10 +419,18 @@ def log_cost(
     with _cost_lock:
         state.total_cost += cost
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        book_id = ""
+        try:
+            import book_context
+
+            book_id = book_context.get_context().book_id
+        except RuntimeError:
+            pass
         record = {
             "ts": ts,
             "tag": tag,
             "provider": pid,
+            "book_id": book_id,
             "cache_read": cache_read,
             "cache_write": cache_creation,
             "input": input_tokens,
@@ -1187,12 +1207,27 @@ def call_api(
     except APIError as e:
         err = _api_error_message(e)
         state.last_call_info = {"ok": False, "error": err, "kind": e.kind}
+        runtime_log.log_api_error(
+            "main.py:call_api",
+            err,
+            kind=e.kind,
+            provider=pid,
+            tag=tag,
+            exc=e,
+        )
         if not silent:
             print(f"API 错误：{err}")
         return None
     except Exception as e:
         err = _api_error_message(e)
         state.last_call_info = {"ok": False, "error": err}
+        runtime_log.log_api_error(
+            "main.py:call_api",
+            err,
+            provider=pid,
+            tag=tag,
+            exc=e,
+        )
         if not silent:
             print(f"API 错误：{err}")
         return None
@@ -1998,6 +2033,8 @@ def _prepare_writing_turn(
     chapter_num: int | None = None,
 ) -> dict:
     """追加用户消息并构建 API 请求上下文。"""
+    if state.batch_job_running:
+        return {"ok": False, "error": "世界闭环任务进行中，请稍后再使用写书对话"}
     beat_text = scene_beat.strip()
     if not beat_text and scene_id:
         scene = novel_data.get_scene(scene_id)
@@ -2720,7 +2757,7 @@ def get_guide_status() -> dict:
         text = read_text(path).strip()
         if len(text) < 20:
             return False
-        placeholder = INITIAL_FILES.get(path, "").strip()
+        placeholder = (INITIAL_FILE_TEMPLATES.get(key) or "").strip()
         return not placeholder or text != placeholder
 
     files = {key: _file_ready(key) for key in track_keys}
@@ -2820,7 +2857,23 @@ def get_app_status() -> dict:
     latest = get_latest_chapter()
     cfg = config.get_provider_config()
     project = novel_data.get_project_meta()
+    book_id = ""
+    book_type = "novel"
+    try:
+        import book_context
+
+        book_id = book_context.get_context().book_id
+        book_type = book_context.get_book_type()
+    except RuntimeError:
+        pass
+    import review_prompts
+
+    review_profile = review_prompts.active_profile_for_project(project)
     return {
+        "book_id": book_id,
+        "book_type": book_type,
+        "platform": project.get("platform") or "tomato",
+        "review_profile": review_profile,
         "project_title": project.get("title", ""),
         "world_label": project.get("world_label", ""),
         "provider": config.PROVIDER,
@@ -2860,6 +2913,9 @@ def get_app_status() -> dict:
             key: config.is_api_key_configured(key) for key in config.PROVIDERS
         },
         "writing_cache_supported": config.supports_prompt_cache(config.PROVIDER),
+        "batch_job_running": state.batch_job_running,
+        "batch_job_id": state.batch_job_id or None,
+        "runtime_log": runtime_log.get_status(),
     }
 
 
@@ -2931,26 +2987,7 @@ def _append_plot_new_threads(
 
 
 def _debug_c56229(location: str, message: str, data: dict, hypothesis_id: str) -> None:
-    # #region agent log
-    try:
-        with open(BASE_DIR / "debug-c56229.log", "a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "sessionId": "c56229",
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "hypothesisId": hypothesis_id,
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
+    runtime_log.log_debug(location, message, data=data, hypothesis_id=hypothesis_id)
 
 
 def _observe_item_has_change(item: dict) -> bool:
@@ -3006,6 +3043,10 @@ def _observe_fallback_apply(chapter_num: int, text: str) -> list[dict]:
 
 
 def api_run_summary(chapter_num: int | None = None) -> dict:
+    skipped = _short_story_archive_skip("生成概述")
+    if skipped:
+        skipped["chapter_num"] = chapter_num
+        return skipped
     resolved = _resolve_chapter_num(chapter_num)
     if isinstance(resolved, dict):
         return resolved
@@ -3584,6 +3625,423 @@ def api_run_reader_review(
         "scope": scope,
         "scope_label": scope_label,
         "log_id": log_id,
+        **get_last_call_info(),
+    }
+
+
+_DECONSTRUCT_MAX_CHARS = 80_000
+
+
+def api_run_deconstruct(
+    source_text: str,
+    *,
+    source_label: str = "",
+    include_book_context: bool = True,
+) -> dict:
+    """参考拆文：分析外部粘贴正文，输出结构化拆解报告。"""
+    text = (source_text or "").strip()
+    if len(text) < 80:
+        return {"ok": False, "error": "正文过短，请至少粘贴 80 字"}
+    if len(text) > _DECONSTRUCT_MAX_CHARS:
+        text = text[:_DECONSTRUCT_MAX_CHARS] + "\n\n…（后文已截断，请缩短粘贴范围）"
+
+    book_title = ""
+    world_excerpt = ""
+    style_excerpt = ""
+    if include_book_context:
+        project = novel_data.get_project_meta()
+        book_title = (project.get("title") or "").strip()
+        world_excerpt = read_text(WORLD_FILE).strip()[:5000]
+        style_excerpt = read_text(STYLE_FILE).strip()[:3000]
+
+    pid = config.CHECK_PROVIDER
+    system = build_cached_system(DECONSTRUCT_SYSTEM, provider=pid)
+    messages = [
+        {
+            "role": "user",
+            "content": build_deconstruct_user_message(
+                text,
+                source_label=source_label,
+                book_title=book_title,
+                world_excerpt=world_excerpt if include_book_context else "",
+                style_excerpt=style_excerpt if include_book_context else "",
+            ),
+        }
+    ]
+    reply = call_api(system, messages, provider=pid, tag="参考拆文", silent=True)
+    if reply is None:
+        return {"ok": False, "error": get_last_call_info().get("error", "拆解失败")}
+
+    log_id = _quality_log_entry(
+        "deconstruct",
+        0,
+        reply,
+        summary=(source_label or "参考拆文")[:120],
+        extra={
+            "source_label": source_label,
+            "input_chars": len(text),
+            "include_book_context": include_book_context,
+        },
+    )
+    return {
+        "ok": True,
+        "reply": reply,
+        "source_label": source_label,
+        "input_chars": len(text),
+        "log_id": log_id,
+        **get_last_call_info(),
+    }
+
+
+_FEMALE_REVIEW_MODES = frozenset({"chapter", "outline", "characters"})
+
+
+def _format_plan_outline_text() -> str:
+    plan = novel_data.load_plan()
+    lines: list[str] = []
+    for key in sorted(plan.get("chapters", {}), key=lambda x: int(x)):
+        ch = plan["chapters"][key]
+        num = int(key)
+        title = (ch.get("title") or "").strip() or f"第{num}章"
+        lines.append(f"## 第{num}章 · {title}")
+        for scene in ch.get("scenes") or []:
+            st = (scene.get("title") or "").strip()
+            beat = (scene.get("beat") or "").strip()
+            summary = (scene.get("summary") or "").strip()
+            lines.append(f"- 场景：{st}")
+            if summary:
+                lines.append(f"  概述：{summary}")
+            if beat:
+                lines.append(f"  Beat：{beat}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def api_run_female_fiction_review(
+    mode: str = "chapter",
+    *,
+    text: str = "",
+    chapter_num: int | None = None,
+    profile_id: str | None = None,
+    revise: bool = False,
+    write_back: bool = False,
+    sync_archive: bool = True,
+) -> dict:
+    """女频核心审阅（Prompt 按 project.type × project.platform 路由，可 profile_id 覆盖）。"""
+    if mode not in _FEMALE_REVIEW_MODES:
+        return {"ok": False, "error": "mode 必须是 chapter / outline / characters"}
+    if write_back and not revise:
+        import review_prompts as _rp_preview
+
+        _proj = novel_data.get_project_meta()
+        _pid = (profile_id or "").strip() or _rp_preview.resolve_profile_id(
+            _proj.get("type"), _proj.get("platform")
+        )
+        if not _rp_preview.is_rewrite_only_profile(_pid):
+            return {"ok": False, "error": "写回章节须先开启「审阅并改稿」"}
+    if write_back and mode != "chapter":
+        return {"ok": False, "error": "写回章节仅支持章节正文模式"}
+
+    body = (text or "").strip()
+    num = 0
+
+    if mode == "chapter":
+        if body:
+            if chapter_num and chapter_num > 0:
+                num = chapter_num
+        else:
+            resolved = _resolve_chapter_num(chapter_num)
+            if isinstance(resolved, dict):
+                return resolved
+            num, body = resolved
+            if not body.strip():
+                return {"ok": False, "error": "章节正文为空"}
+    elif mode == "outline":
+        if not body:
+            body = _format_plan_outline_text()
+            if not body:
+                return {"ok": False, "error": "plan.json 尚无章节/场景，请先规划或粘贴大纲"}
+    elif mode == "characters":
+        if not body:
+            parts = []
+            chars = read_text(CHARACTERS_FILE).strip()
+            static = read_text(CHAR_STATIC_FILE).strip()
+            dynamic = read_text(CHAR_DYNAMIC_FILE).strip()
+            if chars:
+                parts.append(f"## characters.md\n{chars}")
+            if static:
+                parts.append(f"## char_static.md\n{static}")
+            if dynamic:
+                parts.append(f"## char_dynamic.md\n{dynamic}")
+            body = "\n\n".join(parts)
+            if not body:
+                return {"ok": False, "error": "人物文件为空，请填写或粘贴设定"}
+
+    if len(body) < 40:
+        return {"ok": False, "error": "审阅材料过短"}
+
+    if len(body) > _DECONSTRUCT_MAX_CHARS:
+        body = body[:_DECONSTRUCT_MAX_CHARS] + "\n\n…（后文已截断）"
+
+    import review_prompts
+
+    project = novel_data.get_project_meta()
+    book_title = (project.get("title") or "").strip()
+    world_excerpt = read_text(WORLD_FILE).strip()[:3000]
+
+    system_text, active_profile = review_prompts.load_prompt_text(
+        profile_id, project=project, include_revise=revise
+    )
+    rewrite_only = review_prompts.is_rewrite_only_profile(active_profile)
+    if rewrite_only:
+        write_back = False
+        sync_archive = False
+    profile_meta = review_prompts.active_profile_for_project(project)
+    if profile_id:
+        profile_meta = {**profile_meta, "rewrite_only": rewrite_only}
+
+    use_writing = revise or rewrite_only
+    pid = config.PROVIDER if use_writing else config.CHECK_PROVIDER
+    system = build_cached_system(
+        system_text,
+        provider=pid,
+        include_scene_context=use_writing,
+    )
+    messages = [
+        {
+            "role": "user",
+            "content": build_female_fiction_review_user_message(
+                mode,
+                body,
+                book_title=book_title,
+                chapter_num=num,
+                world_excerpt=world_excerpt,
+                revise=revise and not rewrite_only,
+                rewrite_only=rewrite_only,
+            ),
+        }
+    ]
+    tag_base = {
+        "chapter": "女频直改稿·章" if rewrite_only else "女频审阅·章",
+        "outline": "女频审阅·大纲",
+        "characters": "女频审阅·人物",
+    }[mode]
+    tag = f"{tag_base}+写回" if write_back else tag_base
+    reply = call_api(system, messages, provider=pid, tag=tag, silent=True)
+    if reply is None:
+        return {"ok": False, "error": get_last_call_info().get("error", "审阅失败")}
+
+    review_text = reply
+    revised_text = ""
+    written_back = False
+    chapter_title = ""
+    display_reply = reply
+
+    if rewrite_only:
+        revised_text = (reply or "").strip()
+        display_reply = revised_text
+        if write_back and num > 0 and revised_text:
+            parsed = sanitize_chapter_text(revised_text)
+            if not parsed.strip().startswith("【章节标题】"):
+                parsed = f"【章节标题】\n{parsed}"
+            title, chapter_body = prepare_chapter_body_from_reply(parsed, num)
+            chapter_file = format_chapter_file(num, chapter_body, title=title)
+            write_text(
+                get_chapter_path(num),
+                chapter_file,
+                append=False,
+                chapter_num=num,
+            )
+            _invalidate_chapter_injection(num)
+            written_back = True
+            chapter_title = title
+    elif revise:
+        review_text, revised_text = split_female_review_revise_reply(reply)
+        display_reply = revised_text if revised_text.strip() else review_text
+        if write_back and num > 0 and revised_text.strip():
+            parsed = sanitize_chapter_text(revised_text)
+            if not parsed.strip().startswith("【章节标题】"):
+                parsed = f"【章节标题】\n{parsed}"
+            title, chapter_body = prepare_chapter_body_from_reply(parsed, num)
+            chapter_file = format_chapter_file(num, chapter_body, title=title)
+            write_text(
+                get_chapter_path(num),
+                chapter_file,
+                append=False,
+                chapter_num=num,
+            )
+            _invalidate_chapter_injection(num)
+            written_back = True
+            chapter_title = title
+
+    archive_result: dict | None = None
+    archive_synced = False
+    if written_back and sync_archive and num > 0:
+        archive_result = api_run_archive_sync(num)
+        archive_synced = bool(archive_result.get("ok"))
+
+    profile_label = review_prompts.profile_label(active_profile)
+    pending_accept = bool(
+        (rewrite_only or revise) and (revised_text or display_reply).strip() and not written_back
+    )
+    log_kind = "female_fiction_revise" if rewrite_only else "female_fiction_review"
+    log_body = display_reply if rewrite_only else (review_text if revise else reply)
+    log_id = _quality_log_entry(
+        log_kind,
+        num,
+        log_body,
+        summary=f"{tag} · {profile_label} · {book_title or '未命名'}"[:120],
+        persisted=written_back,
+        persisted_detail="已写回章节" if written_back else ("待采纳" if pending_accept else ""),
+        extra={
+            "mode": mode,
+            "input_chars": len(body),
+            "profile_id": active_profile,
+            "profile_label": profile_label,
+            "revise": revise,
+            "rewrite_only": rewrite_only,
+            "write_back": written_back,
+            "archive_synced": archive_synced,
+            "pending_accept": pending_accept,
+        },
+    )
+    if revise and revised_text.strip() and not rewrite_only:
+        revise_log_id = _quality_log_entry(
+            "female_fiction_revise",
+            num,
+            revised_text,
+            summary=f"女频改稿 · 第{num}章 · {profile_label}"[:120],
+            persisted=written_back,
+            persisted_detail="已写回章节" if written_back else ("待采纳" if pending_accept else ""),
+            extra={
+                "profile_id": active_profile,
+                "write_back": written_back,
+                "parent_log_id": log_id,
+                "pending_accept": pending_accept and not written_back,
+            },
+        )
+    else:
+        revise_log_id = log_id if rewrite_only else None
+    accept_log_id = revise_log_id if (pending_accept and revise_log_id) else log_id
+    return {
+        "ok": True,
+        "reply": display_reply,
+        "full_reply": reply if (revise or rewrite_only) else None,
+        "revised_text": revised_text or None,
+        "revise": revise,
+        "rewrite_only": rewrite_only,
+        "write_back": written_back,
+        "chapter_title": chapter_title or None,
+        "sync_archive": sync_archive and written_back,
+        "archive_synced": archive_synced,
+        "archive": archive_result.get("archive") if archive_result else None,
+        "archive_errors": archive_result.get("errors") if archive_result else None,
+        "mode": mode,
+        "chapter_num": num or None,
+        "input_chars": len(body),
+        "profile_id": active_profile,
+        "profile_label": profile_label,
+        "book_type": profile_meta.get("book_type"),
+        "platform": profile_meta.get("platform"),
+        "log_id": accept_log_id,
+        "review_log_id": log_id if accept_log_id != log_id else None,
+        "pending_accept": pending_accept,
+        **get_last_call_info(),
+    }
+
+
+def _write_chapter_from_review_text(chapter_num: int, body: str) -> dict:
+    """将审阅/改稿正文写入章节文件。"""
+    parsed = sanitize_chapter_text((body or "").strip())
+    if not parsed:
+        return {"ok": False, "error": "改稿正文为空"}
+    if not parsed.strip().startswith("【章节标题】"):
+        parsed = f"【章节标题】\n{parsed}"
+    title, chapter_body = prepare_chapter_body_from_reply(parsed, chapter_num)
+    chapter_file = format_chapter_file(chapter_num, chapter_body, title=title)
+    write_text(
+        get_chapter_path(chapter_num),
+        chapter_file,
+        append=False,
+        chapter_num=chapter_num,
+    )
+    _invalidate_chapter_injection(chapter_num)
+    return {
+        "ok": True,
+        "chapter_num": chapter_num,
+        "chapter_title": title,
+        "chars": len(chapter_file),
+    }
+
+
+def api_accept_female_fiction_rewrite(
+    log_id: str,
+    *,
+    sync_archive: bool = True,
+) -> dict:
+    """采纳女频改稿：写回章节 + 同步全局档案。"""
+    import quality_log
+
+    row = quality_log.get_entry((log_id or "").strip())
+    if not row:
+        return {"ok": False, "error": "质量记录不存在"}
+
+    kind = row.get("kind") or ""
+    if kind not in ("female_fiction_revise", "female_fiction_review"):
+        return {"ok": False, "error": "该记录不是女频改稿预览"}
+
+    extra = row.get("extra") if isinstance(row.get("extra"), dict) else {}
+    if extra.get("accepted"):
+        return {"ok": False, "error": "该改稿已采纳"}
+
+    num = int(row.get("chapter_num") or 0)
+    if num < 1:
+        return {"ok": False, "error": "章节号无效"}
+
+    body = (row.get("body") or "").strip()
+    if len(body) < 40:
+        return {"ok": False, "error": "改稿正文过短，无法采纳"}
+
+    write_r = _write_chapter_from_review_text(num, body)
+    if not write_r.get("ok"):
+        return write_r
+
+    archive_result: dict | None = None
+    archive_synced = False
+    if sync_archive:
+        archive_result = api_run_archive_sync(num)
+        archive_synced = bool(archive_result.get("ok"))
+
+    profile_label = extra.get("profile_label") or ""
+    accept_log_id = _quality_log_entry(
+        "female_fiction_accept",
+        num,
+        f"已采纳改稿（来源记录 {log_id}）",
+        summary=f"女频采纳 · 第{num}章 · {profile_label}"[:120],
+        persisted=True,
+        persisted_detail=(
+            f"已写回章节"
+            + ("；档案已同步" if archive_synced else "；档案同步未完成")
+        ),
+        extra={
+            "source_log_id": log_id,
+            "sync_archive": sync_archive,
+            "archive_synced": archive_synced,
+            "chapter_title": write_r.get("chapter_title"),
+        },
+    )
+    return {
+        "ok": True,
+        "chapter_num": num,
+        "chapter_title": write_r.get("chapter_title"),
+        "chars": write_r.get("chars"),
+        "write_back": True,
+        "sync_archive": sync_archive,
+        "archive_synced": archive_synced,
+        "archive": archive_result.get("archive") if archive_result else None,
+        "archive_errors": archive_result.get("errors") if archive_result else None,
+        "source_log_id": log_id,
+        "log_id": accept_log_id,
         **get_last_call_info(),
     }
 
@@ -4229,6 +4687,10 @@ def api_run_post_chapter_maintain(
     auto_append: bool = True,
 ) -> dict:
     """章后维护：单次 LLM 档案 bundle（子集，不含质检）。"""
+    skipped = _short_story_archive_skip("章后维护")
+    if skipped:
+        skipped["chapter_num"] = chapter_num
+        return skipped
     resolved = _resolve_chapter_num(chapter_num)
     if isinstance(resolved, dict):
         return resolved
@@ -4341,27 +4803,530 @@ def api_run_post_chapter_maintain(
     }
 
 
+def api_run_archive_sync(
+    chapter_num: int | None = None,
+    *,
+    auto_apply_observe: bool = True,
+    auto_append_locked: bool = True,
+    auto_append_plot_new: bool = True,
+) -> dict:
+    """档案同步：概述/观察/钉子/伏笔，不含质检。"""
+    skipped = _short_story_archive_skip("档案同步")
+    if skipped:
+        skipped["chapter_num"] = chapter_num
+        return skipped
+    resolved = _resolve_chapter_num(chapter_num)
+    if isinstance(resolved, dict):
+        return resolved
+    num, content = resolved
+    if not (content or "").strip():
+        return {"ok": False, "error": "章节正文为空，无法同步档案"}
+
+    ctx = _build_archive_context(num, content)
+    reply, parsed = _call_archive_bundle(ctx)
+    if reply is None:
+        return {"ok": False, "error": get_last_call_info().get("error", "档案同步失败")}
+    if not parsed:
+        return {
+            "ok": False,
+            "error": "未能解析档案 JSON",
+            "chapter_num": num,
+            "reply": reply,
+            **get_last_call_info(),
+        }
+
+    archive, errors, _ = _persist_archive_payload(
+        num,
+        parsed,
+        auto_apply_observe=auto_apply_observe,
+        auto_append_locked=auto_append_locked,
+        auto_append_plot_new=auto_append_plot_new,
+    )
+    ok = (
+        archive.get("summary", {}).get("ok")
+        or archive.get("observe", {}).get("applied_count", 0) > 0
+        or archive.get("detail_locked", {}).get("ok")
+        or archive.get("plot_new_threads", {}).get("appended_count", 0) > 0
+    )
+    return {
+        "ok": ok,
+        "chapter_num": num,
+        "archive": archive,
+        "errors": errors,
+        "partial": bool(errors) and ok,
+        **get_last_call_info(),
+    }
+
+
+def _build_chapters_text_for_nums(chapter_nums: list[int]) -> tuple[str, bool]:
+    """拼接多章改后正文（带单章/总量截断）。"""
+    import batch_world
+
+    text, truncated, _ = batch_world.build_chapters_text_block(
+        chapter_nums,
+        read_chapter_content,
+    )
+    return text, truncated
+
+
+def _persist_bulk_summaries(parsed: dict) -> tuple[bool, list[str], int]:
+    """写入 bulk 概述；不触发 rotate。"""
+    errors: list[str] = []
+    count = 0
+    for row in parsed.get("summaries") or []:
+        if not isinstance(row, dict):
+            continue
+        try:
+            num = int(row.get("num") or 0)
+        except (TypeError, ValueError):
+            continue
+        if num < 1:
+            continue
+        text = (row.get("text") or "").strip()
+        if not text:
+            errors.append(f"第{num}章概述为空")
+            continue
+        w1 = _upsert_summary_in_file(SUMMARIES_RECENT_FILE, num, text)
+        w2 = _upsert_summary_in_file(SUMMARIES_FILE, num, text)
+        if w1 or w2:
+            count += 1
+        else:
+            errors.append(f"第{num}章概述写入失败")
+    return count > 0, errors, count
+
+
+def _persist_bulk_state(parsed: dict, *, anchor_chapter: int) -> tuple[bool, list[str]]:
+    """写入 bulk 状态档案。"""
+    errors: list[str] = []
+    wrote = False
+
+    char_dyn = (parsed.get("char_dynamic") or "").strip()
+    if char_dyn:
+        if write_text(
+            CHAR_DYNAMIC_FILE,
+            char_dyn if char_dyn.endswith("\n") else char_dyn + "\n",
+            append=False,
+            history_source="char_dynamic",
+            chapter_num=anchor_chapter,
+        ):
+            wrote = True
+        else:
+            errors.append("char_dynamic 写入失败")
+
+    plot_active = (parsed.get("plot_threads_active") or "").strip()
+    if plot_active:
+        if write_text(
+            PLOT_THREADS_ACTIVE_FILE,
+            plot_active if plot_active.endswith("\n") else plot_active + "\n",
+            append=False,
+            history_source="plot_threads",
+            chapter_num=anchor_chapter,
+        ):
+            wrote = True
+        else:
+            errors.append("plot_threads_active 写入失败")
+
+    detail = (parsed.get("detail_locked_append") or "").strip()
+    if detail:
+        if write_text(
+            PLOT_THREADS_LOCKED_FILE,
+            f"\n\n{detail}\n",
+            append=True,
+            history_source="detail_extract",
+            chapter_num=anchor_chapter,
+        ):
+            wrote = True
+        else:
+            errors.append("detail_locked 追加失败")
+
+    plot_new = (parsed.get("plot_new_threads") or "").strip()
+    if plot_new:
+        appended, _ = _append_plot_new_threads(
+            anchor_chapter,
+            plot_new,
+            auto_append=True,
+        )
+        if appended:
+            wrote = True
+        else:
+            errors.append("plot_new_threads 追加失败")
+
+    return wrote, errors
+
+
+def api_run_bulk_archive_sync(chapter_nums: list[int]) -> dict:
+    """整批档案同步（方案 B）：先概述，再状态。仅处理给定章号列表。"""
+    skipped = _short_story_archive_skip("整批档案同步")
+    if skipped:
+        return skipped
+
+    nums = sorted({int(n) for n in chapter_nums if int(n) >= 1})
+    if not nums:
+        return {"ok": False, "error": "无有效章节号"}
+
+    chapters_text, truncated = _build_chapters_text_for_nums(nums)
+    if not chapters_text.strip():
+        return {"ok": False, "error": "范围内无正文"}
+
+    pid = config.MAINTAIN_PROVIDER
+    warnings: list[str] = []
+    if truncated:
+        warnings.append("部分章节正文在档案同步输入中已截断")
+
+    # Step 1: summaries
+    sum_system = build_cached_system(BULK_ARCHIVE_SUMMARIES_SYSTEM, provider=pid)
+    sum_user = build_bulk_summaries_user_message(
+        nums,
+        chapters_text,
+        summaries_recent=read_text(SUMMARIES_RECENT_FILE).strip(),
+        char_static=_read_char_static(),
+    )
+    sum_reply = call_api(
+        sum_system,
+        [{"role": "user", "content": sum_user}],
+        provider=pid,
+        tag=f"整批概述·{nums[0]}–{nums[-1]}章",
+        silent=True,
+    )
+    if sum_reply is None:
+        return {
+            "ok": False,
+            "error": get_last_call_info().get("error", "整批概述失败"),
+            "fixed_nums": nums,
+            **get_last_call_info(),
+        }
+    sum_parsed, sum_err = parse_bulk_summaries(sum_reply)
+    if not sum_parsed:
+        return {
+            "ok": False,
+            "error": f"整批概述 JSON 解析失败：{sum_err[:200]}",
+            "fixed_nums": nums,
+            "reply": sum_reply,
+            **get_last_call_info(),
+        }
+
+    sum_ok, sum_errors, sum_count = _persist_bulk_summaries(sum_parsed)
+    summaries_blob = "\n\n".join(
+        (r.get("text") or "").strip()
+        for r in (sum_parsed.get("summaries") or [])
+        if isinstance(r, dict) and (r.get("text") or "").strip()
+    )
+
+    # Step 2: state
+    state_system = build_cached_system(BULK_ARCHIVE_STATE_SYSTEM, provider=pid)
+    state_user = build_bulk_state_user_message(
+        nums,
+        chapters_text,
+        summaries_blob,
+        _read_char_static(),
+        read_text(CHAR_DYNAMIC_FILE).strip(),
+        read_text(PLOT_THREADS_LOCKED_FILE).strip(),
+        extract_plot_active_unresolved(read_text(PLOT_THREADS_ACTIVE_FILE).strip()),
+    )
+    state_reply = call_api(
+        state_system,
+        [{"role": "user", "content": state_user}],
+        provider=pid,
+        tag=f"整批档案·{nums[0]}–{nums[-1]}章",
+        silent=True,
+    )
+    if state_reply is None:
+        return {
+            "ok": False,
+            "partial": sum_ok,
+            "summaries_ok": sum_ok,
+            "state_ok": False,
+            "error": get_last_call_info().get("error", "整批状态档案失败"),
+            "errors": sum_errors,
+            "summary_count": sum_count,
+            "fixed_nums": nums,
+            "warnings": warnings,
+            **get_last_call_info(),
+        }
+    state_parsed, state_err = parse_bulk_state(state_reply)
+    if not state_parsed:
+        return {
+            "ok": False,
+            "partial": sum_ok,
+            "summaries_ok": sum_ok,
+            "state_ok": False,
+            "error": f"整批状态 JSON 解析失败：{state_err[:200]}",
+            "errors": sum_errors,
+            "summary_count": sum_count,
+            "fixed_nums": nums,
+            "warnings": warnings,
+            "reply": state_reply,
+            **get_last_call_info(),
+        }
+
+    state_ok, state_errors = _persist_bulk_state(
+        state_parsed,
+        anchor_chapter=nums[-1],
+    )
+    all_errors = sum_errors + state_errors
+    ok = sum_ok and state_ok
+    return {
+        "ok": ok,
+        "partial": (sum_ok or state_ok) and not ok,
+        "summaries_ok": sum_ok,
+        "state_ok": state_ok,
+        "summary_count": sum_count,
+        "fixed_nums": nums,
+        "errors": all_errors,
+        "warnings": warnings,
+        **get_last_call_info(),
+    }
+
+
+def generate_chapter_standalone(
+    chapter_num: int,
+    instruction: str,
+    *,
+    scene_beat: str = "",
+) -> dict:
+    """批量生成：单轮 API 写章，不写入写书对话历史。"""
+    if chapter_num < 1:
+        return {"ok": False, "error": "章节号无效"}
+
+    parts: list[str] = []
+    if scene_beat.strip():
+        parts.append(f"【场景指令 Scene Beat】\n{scene_beat.strip()}")
+    if instruction.strip():
+        parts.append(instruction.strip())
+    full_instruction = "\n\n".join(parts)
+    if not full_instruction:
+        return {"ok": False, "error": "写作指令不能为空"}
+
+    chapter_content = read_chapter_content(chapter_num)
+    if not chapter_content.strip():
+        chapter_content = "（本章尚无正文）"
+
+    user_content = (
+        f"【当前章节：第{chapter_num}章】\n\n"
+        f"{chapter_content}\n\n"
+        f"【写作指令】\n{full_instruction}"
+    )
+    system = build_cached_system(WRITING_INSTRUCTION)
+    reply = call_api(
+        system,
+        [{"role": "user", "content": user_content}],
+        silent=True,
+        tag=f"批量生成·第{chapter_num}章",
+    )
+    if reply is None:
+        return {"ok": False, "error": get_last_call_info().get("error", "生成失败")}
+
+    reply = sanitize_chapter_text(reply)
+    path = get_chapter_path(chapter_num)
+    title, body = prepare_chapter_body_from_reply(reply, chapter_num)
+    chapter_text = format_chapter_file(chapter_num, body, title=title)
+    write_text(path, chapter_text, append=False, chapter_num=chapter_num)
+    _invalidate_chapter_injection(chapter_num)
+    return {
+        "ok": True,
+        "chapter_num": chapter_num,
+        "chars": len(chapter_text),
+        "chapter_title": title,
+        **get_last_call_info(),
+    }
+
+
+def remediate_chapter_standalone(
+    chapter_num: int,
+    instruction: str,
+    *,
+    scene_beat: str = "",
+) -> dict:
+    """世界闭环改稿：单轮 API 覆盖章节，不写入写书对话历史。"""
+    if chapter_num < 1:
+        return {"ok": False, "error": "章节号无效"}
+
+    parts: list[str] = []
+    if scene_beat.strip():
+        parts.append(f"【场景指令 Scene Beat】\n{scene_beat.strip()}")
+    if instruction.strip():
+        parts.append(instruction.strip())
+    full_instruction = "\n\n".join(parts)
+    if not full_instruction:
+        return {"ok": False, "error": "改稿指令不能为空"}
+
+    chapter_content = read_chapter_content(chapter_num)
+    if not chapter_content.strip():
+        chapter_content = "（本章尚无正文）"
+
+    user_content = (
+        f"【当前章节：第{chapter_num}章】\n\n"
+        f"{chapter_content}\n\n"
+        f"【写作指令】\n{full_instruction}"
+    )
+    system = build_cached_system(WRITING_INSTRUCTION)
+    reply = call_api(
+        system,
+        [{"role": "user", "content": user_content}],
+        silent=True,
+        tag=f"闭环改稿·第{chapter_num}章",
+    )
+    if reply is None:
+        return {"ok": False, "error": get_last_call_info().get("error", "改稿失败")}
+
+    reply = sanitize_chapter_text(reply)
+    path = get_chapter_path(chapter_num)
+    title, body = prepare_chapter_body_from_reply(reply, chapter_num)
+    chapter_text = format_chapter_file(chapter_num, body, title=title)
+    write_text(path, chapter_text, append=False, chapter_num=chapter_num)
+    _invalidate_chapter_injection(chapter_num)
+    return {
+        "ok": True,
+        "chapter_num": chapter_num,
+        "chars": len(chapter_text),
+        "chapter_title": title,
+        **get_last_call_info(),
+    }
+
+
+def _upsert_or_clear_summary(chapter_num: int, summary_text: str) -> bool:
+    text = (summary_text or "").strip()
+    if text:
+        ok, _ = _persist_summary_text(chapter_num, text)
+        return ok
+    raw = read_text(SUMMARIES_RECENT_FILE)
+    header, entries = _split_summary_entries(raw)
+    prefix = f"【第{chapter_num}章"
+    new_entries = [e for e in entries if not e.startswith(prefix)]
+    body = header.rstrip() + ("\n\n" + "\n\n".join(new_entries) if new_entries else "") + "\n"
+    return write_text(
+        SUMMARIES_RECENT_FILE,
+        body,
+        append=False,
+        history_source="summary",
+        chapter_num=chapter_num,
+    )
+
+
+def _restore_global_archive_file(filename: str, snapshot_path: Path) -> None:
+    mapping = {
+        "summaries_recent.md": SUMMARIES_RECENT_FILE,
+        "char_dynamic.md": CHAR_DYNAMIC_FILE,
+        "plot_threads_locked.md": PLOT_THREADS_LOCKED_FILE,
+        "plot_threads_active.md": PLOT_THREADS_ACTIVE_FILE,
+    }
+    dest = mapping.get(filename)
+    if dest and snapshot_path.exists():
+        write_text(dest, snapshot_path.read_text(encoding="utf-8"), append=False)
+
+
+def _set_batch_job_running(running: bool, job_id: str = "") -> None:
+    state.batch_job_running = running
+    state.batch_job_id = job_id if running else ""
+
+
+def _remediate_deps() -> dict:
+    return {
+        "data_dir": DATA_DIR,
+        "read_chapter": read_chapter_content,
+        "read_text": read_text,
+        "get_char_context_for_check": get_char_context_for_check,
+        "build_cached_system": build_cached_system,
+        "call_api": call_api,
+        "get_last_call_info": get_last_call_info,
+        "remediate_chapter": remediate_chapter_standalone,
+        "bulk_archive_sync": api_run_bulk_archive_sync,
+        "write_chapter": lambda n, t: write_text(
+            get_chapter_path(n), t, append=False, chapter_num=n
+        ),
+        "sync_title": sync_chapter_title_from_file,
+        "quality_log_entry": _quality_log_entry,
+        "set_batch_job_running": _set_batch_job_running,
+        "world_file": WORLD_FILE,
+        "characters_file": CHARACTERS_FILE,
+        "char_dynamic_file": CHAR_DYNAMIC_FILE,
+        "summaries_recent_file": SUMMARIES_RECENT_FILE,
+        "plot_locked_file": PLOT_THREADS_LOCKED_FILE,
+        "plot_active_file": PLOT_THREADS_ACTIVE_FILE,
+    }
+
+
+def api_run_world_batch_generate(
+    chapter_from: int | None = None,
+    chapter_to: int | None = None,
+    *,
+    overwrite: bool = False,
+    skip_existing: bool = True,
+) -> dict:
+    skipped = _short_story_archive_skip("世界批量生成")
+    if skipped:
+        return skipped
+    if state.batch_job_running:
+        return {"ok": False, "error": "已有批次任务正在运行，请稍后再试"}
+    import batch_generate
+
+    return batch_generate.run_world_batch_generate(
+        read_chapter=read_chapter_content,
+        generate_chapter=generate_chapter_standalone,
+        set_batch_job_running=_set_batch_job_running,
+        quality_log_entry=_quality_log_entry,
+        chapter_from=chapter_from,
+        chapter_to=chapter_to,
+        overwrite=overwrite,
+        skip_existing=skip_existing,
+    )
+
+
+def api_run_world_remediate(
+    chapter_from: int | None = None,
+    chapter_to: int | None = None,
+) -> dict:
+    import batch_remediate
+
+    if state.batch_job_running:
+        return {"ok": False, "error": "已有世界闭环任务正在运行"}
+    return batch_remediate.run_world_remediate(
+        **_remediate_deps(),
+        chapter_from=chapter_from,
+        chapter_to=chapter_to,
+    )
+
+
+def api_get_batch_job(job_id: str) -> dict:
+    import batch_remediate
+
+    job = batch_remediate.load_job(DATA_DIR, job_id)
+    if not job:
+        return {"ok": False, "error": "任务不存在"}
+    root = batch_remediate.job_path(DATA_DIR, job_id)
+    report_path = root / "report.md"
+    report = job.get("report") or ""
+    if not report and report_path.exists():
+        report = report_path.read_text(encoding="utf-8")
+    return {"ok": True, "job": job, "report": report}
+
+
+def api_accept_batch_job(job_id: str) -> dict:
+    import batch_remediate
+
+    return batch_remediate.accept_job(DATA_DIR, job_id)
+
+
+def api_revert_batch_job_chapter(job_id: str, chapter_num: int) -> dict:
+    import batch_remediate
+
+    return batch_remediate.revert_chapter_from_job(
+        DATA_DIR,
+        job_id,
+        chapter_num,
+        write_chapter=lambda n, t: write_text(
+            get_chapter_path(n), t, append=False, chapter_num=n
+        ),
+        sync_title=sync_chapter_title_from_file,
+    )
+
+
+def is_batch_job_running() -> bool:
+    return bool(state.batch_job_running)
+
+
 def _dbg_finalize_main(location: str, message: str, data: dict, hypothesis_id: str) -> None:
-    # #region agent log
-    try:
-        with open(BASE_DIR / "debug-4132c7.log", "a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "sessionId": "4132c7",
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "hypothesisId": hypothesis_id,
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
+    runtime_log.log_debug(location, message, data=data, hypothesis_id=hypothesis_id)
 
 
 def api_run_post_chapter_finalize(
@@ -4375,6 +5340,10 @@ def api_run_post_chapter_finalize(
     auto_append_plot_new: bool = True,
 ) -> dict:
     """本章定稿：档案 bundle + 质检 bundle + 可选 pacing/outline。"""
+    skipped = _short_story_archive_skip("本章定稿")
+    if skipped:
+        skipped["chapter_num"] = chapter_num
+        return skipped
     # #region agent log
     _dbg_finalize_main(
         "main.py:api_run_post_chapter_finalize",
@@ -4718,6 +5687,108 @@ def api_run_post_chapter_finalize(
     return result
 
 
+def api_get_world_batch_status() -> dict:
+    import batch_world
+
+    return batch_world.get_world_batch_status(read_chapter=read_chapter_content)
+
+
+def _world_batch_review_deps() -> dict:
+    import batch_world
+
+    return {
+        "read_chapter": read_chapter_content,
+        "read_text": read_text,
+        "get_char_context_for_check": get_char_context_for_check,
+        "build_cached_system": build_cached_system,
+        "summaries_for_scope_fn": _summaries_for_scope,
+        "cross_chapter_user_message_fn": build_cross_chapter_check_user_message,
+        "world_file": WORLD_FILE,
+        "characters_file": CHARACTERS_FILE,
+        "plot_locked_file": PLOT_THREADS_LOCKED_FILE,
+        "plot_active_file": PLOT_THREADS_ACTIVE_FILE,
+    }
+
+
+def api_preview_world_batch_review(
+    chapter_from: int | None = None,
+    chapter_to: int | None = None,
+) -> dict:
+    import batch_world
+
+    plan = batch_world.build_world_batch_review_plan(
+        **_world_batch_review_deps(),
+        chapter_from=chapter_from,
+        chapter_to=chapter_to,
+    )
+    if not plan.get("ok"):
+        return plan
+    preview = batch_world.format_review_plan_markdown(plan)
+    public = {k: v for k, v in plan.items() if k != "_calls_internal"}
+    public["preview"] = preview
+    return public
+
+
+def api_run_world_batch_review(
+    chapter_from: int | None = None,
+    chapter_to: int | None = None,
+) -> dict:
+    import batch_world
+
+    return batch_world.run_world_batch_review(
+        **_world_batch_review_deps(),
+        call_api=call_api,
+        get_last_call_info=get_last_call_info,
+        quality_log_entry=_quality_log_entry,
+        chapter_from=chapter_from,
+        chapter_to=chapter_to,
+    )
+
+
+def api_run_world_batch_finalize(
+    chapter_from: int | None = None,
+    chapter_to: int | None = None,
+    *,
+    run_pacing_on_last: bool = True,
+) -> dict:
+    skipped = _short_story_archive_skip("世界定稿")
+    if skipped:
+        return skipped
+    import batch_world
+
+    def _archive_sync_batch(num: int, **_kwargs) -> dict:
+        return api_run_archive_sync(num)
+
+    result = batch_world.run_world_batch_finalize(
+        read_chapter=read_chapter_content,
+        finalize_chapter_fn=_archive_sync_batch,
+        chapter_from=chapter_from,
+        chapter_to=chapter_to,
+        run_pacing_on_last=False,
+    )
+    if result.get("reply"):
+        w_to = (result.get("finalized_chapters") or [0])[-1]
+        log_id = _quality_log_entry(
+            "batch_world_finalize",
+            w_to,
+            result["reply"],
+            summary=(
+                f"世界定稿 · {result.get('label', '')} · "
+                f"{result.get('ok_count', 0)}章"
+            ),
+            persisted=bool(result.get("ok_count")),
+            persisted_detail=f"成功 {result.get('ok_count', 0)} 章",
+            extra={
+                "chapter_from": result.get("chapter_from"),
+                "chapter_to": result.get("chapter_to"),
+                "errors": result.get("errors"),
+                "total_cost_usd": result.get("total_cost_usd"),
+            },
+        )
+        result["log_id"] = log_id
+    return result
+
+
 def _chapter_cn(n: int) -> str:
     """1–99 章中文序数（用于正文文件标题行）。"""
     if n <= 0:
@@ -4773,7 +5844,7 @@ def _maint_file_has_user_content(file_key: str) -> bool:
     text = read_text(path).strip()
     if len(text) < 30:
         return False
-    placeholder = INITIAL_FILES.get(path, "").strip()
+    placeholder = (INITIAL_FILE_TEMPLATES.get(file_key) or "").strip()
     if text == placeholder:
         return False
     if file_key == "char_dynamic":
@@ -5114,7 +6185,9 @@ def start_heartbeat_thread() -> threading.Thread:
 
 
 def main() -> None:
+    bootstrap_library()
     init_data_dirs()
+    config.load_runtime_settings()
     state.total_cost = load_total_cost()
     setup_exit_handlers()
 

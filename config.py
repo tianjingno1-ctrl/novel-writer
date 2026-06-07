@@ -9,7 +9,8 @@ logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path(__file__).resolve().parent
 _ENV_CANDIDATES = (_CONFIG_DIR / ".env", _CONFIG_DIR / ".evn")
-RUNTIME_FILE = _CONFIG_DIR / "data" / "runtime.json"
+# 用户级偏好（换书不重置）；见 book_context.LIBRARY_DIR
+RUNTIME_FILE = _CONFIG_DIR / "library" / "runtime.json"
 
 
 def _load_env_file() -> None:
@@ -34,17 +35,18 @@ def _load_env_file() -> None:
 
 _load_env_file()
 
-# 主力提供商（正文续写、润色、多轮对话）：建议 kie (Claude)
-PROVIDER = os.environ.get("NOVEL_PROVIDER", "kie")
+# 主力提供商（正文续写、润色、多轮对话）
+# 暂以 DeepSeek 为默认以控制成本；恢复 Claude 可设 NOVEL_PROVIDER=kie
+PROVIDER = os.environ.get("NOVEL_PROVIDER", "deepseek")
 
-# 辅助任务专用提供商（不影响主对话，自动走便宜模型）
+# 辅助任务专用提供商（默认均为 deepseek）
 SUMMARY_PROVIDER = os.environ.get("NOVEL_SUMMARY_PROVIDER", "deepseek")
 CHECK_PROVIDER = os.environ.get("NOVEL_CHECK_PROVIDER", "deepseek")
 OUTLINE_PROVIDER = os.environ.get("NOVEL_OUTLINE_PROVIDER", "deepseek")
 _maintain_pid = os.environ.get("NOVEL_MAINTAIN_PROVIDER", "").strip()
 _quality_pid = os.environ.get("NOVEL_QUALITY_PROVIDER", "").strip()
-MAINTAIN_PROVIDER = _maintain_pid or CHECK_PROVIDER
-QUALITY_PROVIDER = _quality_pid or CHECK_PROVIDER
+MAINTAIN_PROVIDER = _maintain_pid or "deepseek"
+QUALITY_PROVIDER = _quality_pid or "deepseek"
 
 
 def _env_int(name: str, default: int) -> int:
@@ -58,6 +60,21 @@ def _env_int(name: str, default: int) -> int:
 
 # 单次 API 输出 token 上限（写书续写、概述、检查等）
 MAX_TOKENS = _env_int("NOVEL_MAX_TOKENS", 8192)
+# 世界批次审阅（按约 5 万字 / 15 章世界校准，中文粗估 1.6 字/token）
+# 15 章×≈3300 字 ≈ 5 万正文；分 3 段×5 章，每段正文约 1.6 万 + 档案约 1.2 万 ≈ 2.8 万字符 ≈ 1.75 万 input tokens/次
+BATCH_REVIEW_CHUNK_CHAPTERS = _env_int("NOVEL_BATCH_REVIEW_CHUNK_CHAPTERS", 5)
+# 单段 user 消息字符上限（5 章正文 + 世界观/人物/伏笔档案）
+BATCH_REVIEW_INPUT_MAX_CHARS = _env_int("NOVEL_BATCH_REVIEW_INPUT_MAX_CHARS", 36000)
+# 单章正文上限（均值 3k 时不截断；超长章才头尾省略）
+BATCH_REVIEW_CHAPTER_MAX_CHARS = _env_int("NOVEL_BATCH_REVIEW_CHAPTER_MAX_CHARS", 12000)
+# 分段审阅单次输出上限（报告目标 ≤3500 字 ≈ 2200 token，留足余量）
+BATCH_REVIEW_MAX_TOKENS = _env_int("NOVEL_BATCH_REVIEW_MAX_TOKENS", 6144)
+# 合并总报告输出上限（目标 ≤5000 字 ≈ 3100 token）
+BATCH_REVIEW_MERGE_MAX_TOKENS = _env_int("NOVEL_BATCH_REVIEW_MERGE_MAX_TOKENS", 10240)
+# 预览/UI：典型输出 token（非上限，用于发送前估算）
+BATCH_REVIEW_TYPICAL_CHUNK_OUTPUT = _env_int("NOVEL_BATCH_REVIEW_TYPICAL_CHUNK_OUTPUT", 2800)
+BATCH_REVIEW_TYPICAL_CROSS_OUTPUT = _env_int("NOVEL_BATCH_REVIEW_TYPICAL_CROSS_OUTPUT", 1800)
+BATCH_REVIEW_TYPICAL_MERGE_OUTPUT = _env_int("NOVEL_BATCH_REVIEW_TYPICAL_MERGE_OUTPUT", 3600)
 # 自由聊单独上限（默认按 Claude 超长输出；DeepSeek 若报错请在 .env 略降）
 FREE_CHAT_MAX_TOKENS = _env_int("NOVEL_FREE_CHAT_MAX_TOKENS", 64000)
 
@@ -91,6 +108,10 @@ CONTEXT_LOG_ENABLED = os.environ.get("NOVEL_CONTEXT_LOG", "1").strip().lower() n
     "no",
     "off",
 )
+
+# 运行时 Bug 日志：logs/dev/ 或 logs/write/runtime.jsonl（见 runtime_log.py）
+# NOVEL_RUNTIME_ENV=dev|write ；未设时按目录名（*_write → write）自动识别
+# NOVEL_RUNTIME_LOG=0 关闭；NOVEL_RUNTIME_LOG_DEBUG=1 写作环境也记 debug
 
 PLACEHOLDER_PREFIX = "在这里填"
 
@@ -200,7 +221,7 @@ _load_prices_from_file()
 
 
 def load_runtime_settings() -> None:
-    """从 data/runtime.json 恢复 Web 端修改过的 provider / 上下文配置。"""
+    """从 library/runtime.json 恢复 Web 端修改过的 provider / 上下文配置。"""
     global PROVIDER, CONTEXT_MODE, CHAT_CONTEXT_TURNS, FREE_CHAT_CONTEXT_TURNS
     if not RUNTIME_FILE.exists():
         return
