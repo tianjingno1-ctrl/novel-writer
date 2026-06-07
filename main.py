@@ -1325,19 +1325,22 @@ def append_to_chapter(
         title, body = prepare_chapter_body_from_reply(text, chapter_num)
     else:
         title, body = extract_chapter_title_from_reply(text)
-    if chapter_num > 0 and title:
-        refresh_chapter_file_header(chapter_num, title)
     content = body.strip()
     if not content:
         return 0, title
     existing = read_text(chapter_path)
-    separator = "\n\n" if existing.strip() else ""
     state.last_append_undo = {
         "path": str(chapter_path),
         "content": existing,
         "msg_index": msg_index,
     }
-    write_text(chapter_path, f"{separator}{content}\n", append=True)
+    if not existing.strip() and chapter_num > 0:
+        chapter_text = format_chapter_file(chapter_num, content, title=title)
+        write_text(chapter_path, chapter_text, append=False)
+        return len(content), title
+    if chapter_num > 0 and title:
+        refresh_chapter_file_header(chapter_num, title)
+    write_text(chapter_path, f"\n\n{content}\n", append=True)
     return len(content), title
 
 
@@ -3609,25 +3612,38 @@ def _maybe_rotate_summaries_to_archive(
     }
 
 
+def _upsert_summary_in_file(path: Path, chapter_num: int, summary_text: str) -> bool:
+    """写入或替换指定章节的概述块（避免重复定稿时只追加不更新）。"""
+    raw = read_text(path)
+    header, entries = _split_summary_entries(raw)
+    chapter_prefix = f"【第{chapter_num}章"
+    new_entries: list[str] = []
+    replaced = False
+    for entry in entries:
+        if entry.startswith(chapter_prefix):
+            if not replaced:
+                new_entries.append(summary_text)
+                replaced = True
+        else:
+            new_entries.append(entry)
+    if not replaced:
+        new_entries.append(summary_text)
+    body = header.rstrip() + "\n\n" + "\n\n".join(new_entries) + "\n"
+    return write_text(
+        path,
+        body,
+        append=False,
+        history_source="summary",
+        chapter_num=chapter_num,
+    )
+
+
 def _persist_summary_text(chapter_num: int, summary_text: str) -> tuple[bool, dict]:
     text = (summary_text or "").strip()
     if not text:
         return False, {"rotated": 0, "ok": True, "recent_count": 0}
-    append_text = f"\n{text}\n"
-    w1 = write_text(
-        SUMMARIES_RECENT_FILE,
-        append_text,
-        append=True,
-        history_source="summary",
-        chapter_num=chapter_num,
-    )
-    w2 = write_text(
-        SUMMARIES_FILE,
-        append_text,
-        append=True,
-        history_source="summary",
-        chapter_num=chapter_num,
-    )
+    w1 = _upsert_summary_in_file(SUMMARIES_RECENT_FILE, chapter_num, text)
+    w2 = _upsert_summary_in_file(SUMMARIES_FILE, chapter_num, text)
     rotate = _maybe_rotate_summaries_to_archive(chapter_num=chapter_num)
     return (w1 or w2), rotate
 
@@ -3965,11 +3981,11 @@ def api_run_post_chapter_maintain(
 def _dbg_finalize_main(location: str, message: str, data: dict, hypothesis_id: str) -> None:
     # #region agent log
     try:
-        with open(BASE_DIR / "debug-2b4904.log", "a", encoding="utf-8") as f:
+        with open(BASE_DIR / "debug-4132c7.log", "a", encoding="utf-8") as f:
             f.write(
                 json.dumps(
                     {
-                        "sessionId": "2b4904",
+                        "sessionId": "4132c7",
                         "location": location,
                         "message": message,
                         "data": data,

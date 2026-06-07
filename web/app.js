@@ -24,67 +24,75 @@ const dataCache = {
 };
 
 const API_TIMEOUT_MS = 120000;
+/** 本章定稿：档案 + 质检 + 爽点，多次 LLM 串行，与后端 httpx 超时对齐 */
+const FINALIZE_API_TIMEOUT_MS = 1800000;
 /** 自由聊：超长输出 + 大上下文，与后端 httpx 超时对齐（30 分钟） */
 const FREE_CHAT_API_TIMEOUT_MS = 1800000;
 const STREAM_FIRST_BYTE_MS = 90000;
 const STREAM_CHUNK_IDLE_MS = 180000;
 const RENDER_DEBOUNCE_MS = 16;
 
-// #region agent log
-function _dbgApiLog(location, message, data, hypothesisId) {
-  fetch('http://127.0.0.1:7643/ingest/c6fde0d0-8b7f-4359-b7b1-fc56e37d6bb4', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4132c7' },
-    body: JSON.stringify({
-      sessionId: '4132c7',
-      location,
-      message,
-      data,
-      hypothesisId,
-      timestamp: Date.now(),
-    }),
-  }).catch(() => {});
+const FINALIZE_ON_SAVE_KEY = 'novel_prompt_finalize_on_save';
+
+function shouldPromptFinalizeOnSave() {
+  try {
+    return localStorage.getItem(FINALIZE_ON_SAVE_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
-function _dbgUiLog(location, message, data, hypothesisId) {
-  const payload = {
-    sessionId: '4132c7',
-    location,
-    message,
-    data,
-    hypothesisId,
-    timestamp: Date.now(),
-  };
-  fetch('/api/debug/ui-log', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ location, message, data, hypothesisId }),
-  }).catch(() => {});
-  fetch('http://127.0.0.1:7643/ingest/c6fde0d0-8b7f-4359-b7b1-fc56e37d6bb4', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '4132c7' },
-    body: JSON.stringify(payload),
-  }).catch(() => {});
+function parseRecordTimestamp(ts) {
+  if (!ts) return null;
+  const normalized = String(ts).trim().replace(' ', 'T');
+  const d = new Date(normalized);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
-function _logMaintainUiState(trigger) {
-  const dock = document.getElementById('chatComposeDock');
-  const observeBtn = document.getElementById('runObserveQuickBtn');
-  const qualityRow = document.querySelector('#viewChat .compose-quality-row');
-  const writeRow = document.getElementById('writeQualityRow');
-  _dbgUiLog('app.js:_logMaintainUiState', 'maintain UI snapshot', {
-    trigger,
-    mode: state.mode,
-    readingMode: isChatReadingMode(),
-    dockDisplay: dock ? getComputedStyle(dock).display : 'missing',
-    observeBtnFound: !!observeBtn,
-    observeBtnVisible: observeBtn ? observeBtn.offsetParent !== null : false,
-    qualityRowFound: !!qualityRow,
-    qualityRowVisible: qualityRow ? qualityRow.offsetParent !== null : false,
-    writeRowVisible: writeRow ? !writeRow.classList.contains('hidden') : false,
-    editTarget: state.editTarget?.type || null,
-  }, 'H1');
+
+function formatRecordTime(ts) {
+  const d = parseRecordTimestamp(ts);
+  if (!d) return ts || '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
-// #endregion
+
+function formatRelativeTime(ts) {
+  const d = parseRecordTimestamp(ts);
+  if (!d) return '';
+  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sec < 60) return '刚刚';
+  if (sec < 3600) return `${Math.floor(sec / 60)} 分钟前`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)} 小时前`;
+  return `${Math.floor(sec / 86400)} 天前`;
+}
+
+function timeBadgeHtml(ts, variant = 'muted') {
+  if (!ts) return '';
+  const abs = formatRecordTime(ts);
+  const rel = formatRelativeTime(ts);
+  const relPart = rel ? ` · ${rel}` : '';
+  return `<time class="record-time record-time--${variant}" datetime="${escapeHtml(String(ts))}">${escapeHtml(abs)}${escapeHtml(relPart)}</time>`;
+}
+
+function splitChapterDisplayTitle(text) {
+  const raw = (text || '').trim();
+  if (!raw) return { title: null, body: '' };
+  const m = raw.match(/^#\s*第\s*(\d+|[一二三四五六七八九十百千]+)\s*章(?:\s*[·•\-—]\s*(.+))?/);
+  if (m) {
+    const sub = (m[2] || '').trim();
+    const body = raw.slice(m[0].length).replace(/^\s*\n+/, '');
+    return { title: sub || null, body: body || raw };
+  }
+  const parsed = extractChapterTitleFromReply(raw);
+  if (parsed.title) return { title: parsed.title, body: parsed.body || raw };
+  return { title: null, body: raw };
+}
+
+function _logMaintainUiState() {}
+
+function _dbgApiLog() {}
+
+function _dbgUiLog() {}
 
 let _isChatSending = false;
 let _isQualityBusy = false;
@@ -722,19 +730,27 @@ function syncChatMetaFold() {
   fold.open = conflict || beat;
 }
 
+async function getChapterPlanTitle(num) {
+  if (!num) return '';
+  await ensurePlanData();
+  const ch = dataCache.planByNum[num];
+  return (ch?.title || '').trim();
+}
+
 function updateChatHints() {
   const hint = document.getElementById('chatSceneHint');
-  if (!hint) return;
   const writeNum = getWriteChapterNum();
   const scenePart = state.currentSceneId
     ? `场景已选 · 第${state.currentChapter}章`
     : '建议先在 Plan 选中场景';
-  hint.textContent = writeNum
-    ? `${scenePart} · 写作目标：第 ${writeNum} 章`
-    : scenePart;
+  if (hint) {
+    hint.textContent = writeNum
+      ? `${scenePart} · 写作目标：第 ${writeNum} 章`
+      : scenePart;
+  }
 
-  const conflictEl = document.getElementById('chatTargetConflict');
   const conflict = getWriteTargetConflict();
+  const conflictEl = document.getElementById('chatTargetConflict');
   if (conflictEl) {
     if (conflict) {
       conflictEl.textContent =
@@ -743,6 +759,27 @@ function updateChatHints() {
     } else {
       conflictEl.classList.add('hidden');
     }
+  }
+
+  const bar = document.getElementById('chatWriteTargetBar');
+  if (bar) {
+  ensurePlanData().then(() => {
+    const planTitle = writeNum ? (dataCache.planByNum[writeNum]?.title || '') : '';
+    const titlePart = planTitle ? ` · ${planTitle}` : '';
+    bar.classList.toggle('chat-write-target-bar--warn', !!conflict);
+    if (!writeNum) {
+      bar.innerHTML = '<span class="chat-write-target-bar__label">将写入</span><span class="chat-write-target-bar__value">请先选择目标章</span>';
+    } else if (conflict) {
+      bar.innerHTML =
+        `<span class="chat-write-target-bar__label">将写入</span>` +
+        `<span class="chat-write-target-bar__value chat-write-target-bar__value--warn">第 ${writeNum} 章${escapeHtml(titlePart)}</span>` +
+        `<span class="chat-write-target-bar__note">（场景在第 ${conflict.sceneCh} 章）</span>`;
+    } else {
+      bar.innerHTML =
+        `<span class="chat-write-target-bar__label">将写入</span>` +
+        `<span class="chat-write-target-bar__value">第 ${writeNum} 章${escapeHtml(titlePart)}</span>`;
+    }
+  });
   }
   syncChatMetaFold();
 }
@@ -886,6 +923,17 @@ function showQualityResult(title, body, hint = '', options = {}) {
   if (!panel) return;
   const meta = resolveQualityMeta(title, hint);
   document.getElementById('qualityResultTitle').textContent = title;
+  const timeEl = document.getElementById('qualityResultTime');
+  if (timeEl) {
+    if (options.createdAt) {
+      timeEl.innerHTML = timeBadgeHtml(
+        options.createdAt,
+        options.persisted ? 'ok' : 'muted',
+      );
+    } else {
+      timeEl.textContent = '';
+    }
+  }
   const guideEl = document.getElementById('qualityResultGuide');
   if (guideEl) guideEl.innerHTML = options.guide || meta.guide;
   const bodyEl = document.getElementById('qualityResultBody');
@@ -912,7 +960,12 @@ async function goToChatFromPlan() {
   if (state.currentSceneId) {
     await saveBeat();
   }
+  const found = state.currentSceneId ? getSceneFromCache(state.currentSceneId) : null;
+  const sceneCh = found?.chapterNum || state.currentChapter;
   await setMode('chat');
+  if (sceneCh > 0) {
+    await setWriteChapterTarget(sceneCh);
+  }
 }
 
 function highlightActiveScene(sceneId) {
@@ -981,12 +1034,29 @@ function sidebarAdd() {
   else if (state.sidebar === 'freechats') createFreeChatThread();
 }
 
+function syncFinalizeOnSavePrefUi() {
+  const cb = document.getElementById('promptFinalizeOnSave');
+  if (cb) cb.checked = shouldPromptFinalizeOnSave();
+}
+
+function saveFinalizeOnSavePref() {
+  const cb = document.getElementById('promptFinalizeOnSave');
+  if (!cb) return;
+  try {
+    localStorage.setItem(FINALIZE_ON_SAVE_KEY, cb.checked ? '1' : '0');
+  } catch { /* ignore */ }
+  toast(cb.checked ? '已开启：保存后询问定稿' : '已关闭：保存后不再询问定稿');
+}
+
 function toggleSettings() {
   const drawer = document.getElementById('settingsDrawer');
   const opening = drawer.classList.contains('hidden');
   drawer.classList.toggle('hidden');
   document.getElementById('overlay').classList.toggle('hidden');
-  if (opening) loadHistoryPanel();
+  if (opening) {
+    syncFinalizeOnSavePrefUi();
+    loadHistoryPanel();
+  }
 }
 
 async function loadHistoryPanel() {
@@ -1002,13 +1072,21 @@ async function loadHistoryPanel() {
       host.innerHTML = '<p class="muted">暂无变更记录</p>';
       return;
     }
-    host.innerHTML = entries.map((e) =>
-      `<div class="history-entry">` +
-      `<div class="history-entry__meta">${escapeHtml(e.ts || '')} · ${escapeHtml(e.file_key || '')} · ${escapeHtml(e.source || '')} · 第${e.chapter_num || '?'}章</div>` +
-      `<div>${escapeHtml(e.after_preview || '')}</div>` +
-      `<button type="button" class="history-entry__btn" data-history-id="${escapeHtml(e.id)}" data-file-key="${escapeHtml(e.file_key || '')}" data-chapter-num="${e.chapter_num || 0}" onclick="revertHistoryEntry(this.dataset.historyId, this.dataset.fileKey, this.dataset.chapterNum)">撤销此次</button>` +
-      `</div>`,
-    ).join('');
+    host.innerHTML = entries.map((e) => {
+      const isRevert = String(e.source || '').includes('revert');
+      const timeVariant = isRevert ? 'err' : 'ok';
+      return (
+        `<div class="history-entry">` +
+        `<div class="history-entry__head">` +
+        `<span class="history-entry__file">${escapeHtml(e.file_key || '')}</span>` +
+        timeBadgeHtml(e.ts, timeVariant) +
+        `</div>` +
+        `<div class="history-entry__meta">${escapeHtml(e.source || '')} · 第${e.chapter_num || '?'}章</div>` +
+        `<div class="history-entry__body">${escapeHtml(e.after_preview || '')}</div>` +
+        `<button type="button" class="history-entry__btn" data-history-id="${escapeHtml(e.id)}" data-file-key="${escapeHtml(e.file_key || '')}" data-chapter-num="${e.chapter_num || 0}" onclick="revertHistoryEntry(this.dataset.historyId, this.dataset.fileKey, this.dataset.chapterNum)">撤销此次</button>` +
+        `</div>`
+      );
+    }).join('');
   } catch (e) {
     host.textContent = e.message || '加载失败';
   }
@@ -1748,7 +1826,10 @@ async function openQualityLogEntry(entryId) {
   const title = `${row.label || '质量记录'}${ch ? ` · ${ch}` : ''}`;
   const hint = row.persisted_detail || row.summary || '';
   if (state.mode !== 'chat') await setMode('chat');
-  showQualityResult(title, row.body || '', hint);
+  showQualityResult(title, row.body || '', hint, {
+    createdAt: row.created_at,
+    persisted: row.persisted,
+  });
   setState({ sidebar: 'quality' }, 'sidebar');
 }
 
@@ -1773,11 +1854,17 @@ async function renderQualitySidebar(body) {
   for (const e of entries) {
     const el = cloneTplEl('tpl-sidebar-list-item');
     el.dataset.qualityId = e.id;
-    const ch = e.chapter_num ? `第${e.chapter_num}章 · ` : '';
-    const saved = e.persisted ? ' · ✓已写入' : '';
-    el.querySelector('.title').textContent = `${e.label || e.kind}${saved}`;
-    el.querySelector('.meta').textContent =
-      `${ch}${e.created_at || ''} ${e.preview || e.summary || ''}`.trim();
+    el.querySelector('.title').textContent = `${e.label || e.kind}`;
+    const ch = e.chapter_num ? `第${e.chapter_num}章` : '';
+    const preview = (e.preview || e.summary || '').trim();
+    const badge = e.persisted
+      ? '<span class="record-badge record-badge--ok">已写入</span>'
+      : '';
+    el.querySelector('.meta').innerHTML =
+      `${timeBadgeHtml(e.created_at, e.persisted ? 'ok' : 'muted')}` +
+      (ch ? ` <span class="record-meta">${escapeHtml(ch)}</span>` : '') +
+      badge +
+      (preview ? `<div class="record-preview">${escapeHtml(preview)}</div>` : '');
     el.addEventListener('click', () => openQualityLogEntry(e.id));
     body.appendChild(el);
   }
@@ -2319,36 +2406,20 @@ async function saveEditor({ silent = false, confirmed = false } = {}) {
     if (t.type === 'chapter') {
       const explicitSave = !silent;
       const r = await api(`/chapters/${t.num}`, { method: 'PUT', body: JSON.stringify({ content }) });
-      // #region agent log
-      _dbgUiLog('app.js:saveEditor:chapter', 'chapter save result', {
-        chapterNum: t.num,
-        silent,
-        explicitSave,
-        apiChanged: r.changed,
-        contentLen: content.length,
-        editTargetType: t.type,
-      }, 'H4');
-      // #endregion
       _editorSnapshot = content;
+      const chTitle = r.chapter_title ? ` · ${r.chapter_title}` : '';
+      if (titleEl) titleEl.textContent = `第${t.num}章${chTitle}`;
       if (silent) {
         document.getElementById('wordCountPill')?.classList.add('saved-flash');
         setTimeout(() => document.getElementById('wordCountPill')?.classList.remove('saved-flash'), 1200);
-      } else {
-        toast(`第${t.num}章已保存`);
+      } else if (content.trim()) {
+        toast(`第${t.num}章已保存${chTitle}`);
       }
-      if (titleEl) titleEl.textContent = `第${t.num}章 正文`;
-      if (explicitSave && content.trim()) {
+      if (explicitSave && content.trim() && shouldPromptFinalizeOnSave()) {
         delete guideState.modalDismissed[t.num];
         const runNow = confirm(
           `第 ${t.num} 章已保存。\n\n是否立即「本章定稿」？\n（档案写入 + 质检，约 2–3 次 API）`,
         );
-        // #region agent log
-        _dbgUiLog('app.js:saveEditor:chapter', 'post-chapter prompt', {
-          chapterNum: t.num,
-          prompted: true,
-          runNow,
-        }, 'H4');
-        // #endregion
         if (runNow) {
           await runPostChapterFinalize(t.num, { skipConfirm: true });
         } else {
@@ -2415,7 +2486,9 @@ async function newChapter() {
   const r = await api('/chapters/new', { method: 'POST' });
   invalidatePlanCache();
   setState({ currentChapter: r.num }, 'none');
-  toast(`第${r.num}章已创建`);
+  await setWriteChapterTarget(r.num);
+  await fillWriteChapterTargetSel();
+  toast(`第${r.num}章已创建，写作目标已同步`);
   setMode(state.mode === 'plan' ? 'plan' : 'write');
   await loadStatus();
 }
@@ -3600,8 +3673,13 @@ async function runPostChapterFinalize(chapterNum = null, { skipConfirm = false, 
     'runPostChapterMaintainWriteBtn',
   ];
   await runWithLoading(async () => {
+    const finalizeStart = Date.now();
     // #region agent log
-    fetch('http://127.0.0.1:7643/ingest/c6fde0d0-8b7f-4359-b7b1-fc56e37d6bb4', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '2b4904' }, body: JSON.stringify({ sessionId: '2b4904', location: 'app.js:runPostChapterFinalize', message: 'finalize request start', data: { chapter_num: num, runOutline }, hypothesisId: 'H5', timestamp: Date.now() }) }).catch(() => {});
+    _dbgUiLog('app.js:runPostChapterFinalize', 'finalize request start', {
+      chapter_num: num,
+      runOutline,
+      timeoutMs: FINALIZE_API_TIMEOUT_MS,
+    }, 'F1');
     // #endregion
     let r;
     try {
@@ -3616,13 +3694,24 @@ async function runPostChapterFinalize(chapterNum = null, { skipConfirm = false, 
           auto_append_locked: true,
           auto_append_plot_new: true,
         }),
-      });
+      }, FINALIZE_API_TIMEOUT_MS);
       // #region agent log
-      fetch('http://127.0.0.1:7643/ingest/c6fde0d0-8b7f-4359-b7b1-fc56e37d6bb4', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '2b4904' }, body: JSON.stringify({ sessionId: '2b4904', location: 'app.js:runPostChapterFinalize', message: 'finalize request ok', data: { ok: r.ok, partial: r.partial, chapter_num: r.chapter_num, calls: (r.calls || []).length }, hypothesisId: 'H5', timestamp: Date.now() }) }).catch(() => {});
+      _dbgUiLog('app.js:runPostChapterFinalize', 'finalize request ok', {
+        ok: r.ok,
+        partial: r.partial,
+        chapter_num: r.chapter_num,
+        calls: (r.calls || []).length,
+        elapsedMs: Date.now() - finalizeStart,
+        archiveSummaryOk: r.archive?.summary?.ok,
+      }, 'F1');
       // #endregion
     } catch (err) {
       // #region agent log
-      fetch('http://127.0.0.1:7643/ingest/c6fde0d0-8b7f-4359-b7b1-fc56e37d6bb4', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '2b4904' }, body: JSON.stringify({ sessionId: '2b4904', location: 'app.js:runPostChapterFinalize', message: 'finalize request error', data: { error: String(err?.message || err).slice(0, 300) }, hypothesisId: 'H5', timestamp: Date.now() }) }).catch(() => {});
+      _dbgUiLog('app.js:runPostChapterFinalize', 'finalize request error', {
+        error: String(err?.message || err).slice(0, 300),
+        elapsedMs: Date.now() - finalizeStart,
+        timeoutMs: FINALIZE_API_TIMEOUT_MS,
+      }, 'F1');
       // #endregion
       throw err;
     }

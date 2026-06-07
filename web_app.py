@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
-_DEBUG_LOG = Path(__file__).resolve().parent / "debug-2b4904.log"
+_DEBUG_LOG = Path(__file__).resolve().parent / "debug-4132c7.log"
 
 
 def _dbg_finalize(location: str, message: str, data: dict, hypothesis_id: str) -> None:
@@ -28,7 +28,7 @@ def _dbg_finalize(location: str, message: str, data: dict, hypothesis_id: str) -
             f.write(
                 json.dumps(
                     {
-                        "sessionId": "2b4904",
+                        "sessionId": "4132c7",
                         "location": location,
                         "message": message,
                         "data": data,
@@ -440,39 +440,6 @@ def debug_last_context() -> dict:
     return core.get_last_context_debug()
 
 
-class DebugUiLogBody(BaseModel):
-    location: str
-    message: str
-    data: dict | None = None
-    hypothesisId: str = ""
-
-
-@app.post("/api/debug/ui-log")
-def debug_ui_log(body: DebugUiLogBody) -> dict:
-    # #region agent log
-    try:
-        log_path = Path(__file__).resolve().parent / "debug-4132c7.log"
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "sessionId": "4132c7",
-                        "location": body.location,
-                        "message": body.message,
-                        "data": body.data or {},
-                        "hypothesisId": body.hypothesisId,
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
-    return {"ok": True}
-
-
 class ProjectUpdate(BaseModel):
     title: str | None = None
     world_label: str | None = None
@@ -569,6 +536,7 @@ def plan_update_chapter_title(chapter_num: int, body: ChapterTitleUpdate) -> dic
         raise HTTPException(400, "标题不能为空")
     if novel_data.update_chapter_title(chapter_num, title) is None:
         raise HTTPException(404, "章节不存在")
+    core.refresh_chapter_file_header(chapter_num, title)
     return {"ok": True, "title": title}
 
 

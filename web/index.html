@@ -191,6 +191,7 @@
           </details>
         </div>
       <div class="chat-compose chat-compose--compact chat-compose--scroll">
+        <div id="chatWriteTargetBar" class="chat-write-target-bar" aria-live="polite"></div>
         <div class="compose-main-row">
           <textarea id="chatInstruction" rows="2" placeholder="写作指令：续写 1500 字，番茄风格，章末留悬念…（Enter 发送，Shift+Enter 换行）"></textarea>
           <div class="compose-main-actions">
@@ -308,7 +309,10 @@
   <div class="chat-result-sheet" onclick="event.stopPropagation()">
     <div id="qualityResultPanel" class="chat-compare hidden">
       <div class="chat-compare-head">
-        <span id="qualityResultTitle">检查结果</span>
+        <div class="chat-compare-head__titles">
+          <span id="qualityResultTitle">检查结果</span>
+          <span id="qualityResultTime" class="quality-result-time"></span>
+        </div>
         <button class="btn btn-sm btn-ghost" onclick="copyQualityResult()">复制</button>
         <button class="btn btn-sm btn-ghost" onclick="closeQualityPanel()">关闭</button>
       </div>
@@ -394,6 +398,12 @@
     <p class="hint">单条消息上限约 5 万字，整章粘贴也够用；输出长度见 .env 的 NOVEL_MAX_TOKENS。</p>
 
     <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="saveContext()">应用上下文设置</button>
+
+    <label class="settings-check">
+      <input type="checkbox" id="promptFinalizeOnSave" onchange="saveFinalizeOnSavePref()" />
+      手动保存章节后询问「本章定稿」
+    </label>
+    <p class="hint">默认关闭：小改只保存文件即可；章写完后可点「本章定稿」或开启此项。</p>
 
     <hr class="divider" />
     <label>档案留痕</label>
@@ -569,6 +579,6 @@
   </div>
 </aside>
 
-<script src="/static/app.js?v=16"></script>
+<script src="/static/app.js?v=17"></script>
 </body>
 </html>

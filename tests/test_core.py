@@ -808,6 +808,24 @@ class ApplyTurnTests(unittest.TestCase):
         self.assertIn("正文一段", out)
         self.assertNotIn("【章节标题】", out)
 
+    def test_append_to_empty_chapter_writes_header(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ch_dir = Path(tmp) / "chapters"
+            ch_dir.mkdir()
+            main.CHAPTERS_DIR = ch_dir
+            path = ch_dir / "ch002.md"
+            path.write_text("", encoding="utf-8")
+            chars, title = main.append_to_chapter(
+                "【章节标题】测试标题\n\n第一段正文。",
+                path,
+                chapter_num=2,
+            )
+            text = path.read_text(encoding="utf-8")
+            self.assertGreater(chars, 0)
+            self.assertEqual(title, "测试标题")
+            self.assertIn("# 第2章 · 测试标题", text)
+            self.assertIn("第一段正文", text)
+
     def test_extract_chapter_title_from_reply(self) -> None:
         title, body = main.extract_chapter_title_from_reply(
             "【章节标题】化妆间里的手册\n\n她翻开攻略手册。"
