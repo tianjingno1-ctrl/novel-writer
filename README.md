@@ -83,7 +83,7 @@ python main.py
 
 ## 用户手册
 
-完整操作说明见 [docs/novel-writer-manual.md](./docs/novel-writer-manual.md)（**§1.5 顺序写作手册**、界面、五大模式、FAQ、更新日志）。
+完整说明见 **[docs/novel-writer-manual.md](./docs/novel-writer-manual.md)**（系统设定、写作流程、注意事项合一）。技术架构与 API 见 [docs/tech-intake.md](./docs/tech-intake.md)。
 
 ## 给 AI / 协作者
 
@@ -94,11 +94,15 @@ python main.py
 
 | 文件 | 用途 |
 |------|------|
-| `data/world.md` | 世界观、魔法体系、地图（几乎不变，缓存块①） |
+| `data/world.md` | 世界观、五点骨架、章节节拍、爽点表（几乎不变，缓存块①） |
+| `data/style.md` | 文风锚点：示范句、禁用词、节奏（写第一章前必做，与 world 同缓存块） |
 | `data/characters.md` | 人物初始设定（只追加，用 `/patch`，缓存块②） |
-| `data/char_current.md` | 人物当前状态（可单独维护） |
-| `data/summaries.md` | 章节概述（只追加，用 `/summary` 生成，缓存块③） |
-| `data/plot_threads.md` | 伏笔/线索清单（手动维护） |
+| `data/char_static.md` | 人物锚点（性格/禁止写法，缓存②） |
+| `data/char_dynamic.md` | 人物动态（当前状态，每章更新，④ 层） |
+| `data/summaries_archive.md` | 概述归档（缓存③） |
+| `data/summaries_recent.md` | 近期概述（`/summary` 追加，④ 层） |
+| `data/plot_threads_locked.md` | 细节钉子（缓存③） |
+| `data/plot_threads_active.md` | 活跃伏笔（④ 层） |
 | `data/chapters/ch001.md` | 各章正文，命名 `ch001.md`、`ch002.md` … |
 | `data/backups/` | 每次写入 `.md` 前自动备份（带时间戳） |
 | `cost_log.jsonl` | API 费用记录（JSON Lines，运行后自动生成；旧版 `cost_log.txt` 仍可读） |
@@ -126,7 +130,7 @@ python main.py
 
 System prompt 按「稳定 → 变化」分三层，均带 `cache_control`，利用 Claude Prompt Cache 前缀匹配：
 
-1. `world.md`
+1. `world.md` + `style.md`（文风锚点，合并为同一缓存块）
 2. `characters.md`
 3. `summaries.md`
 

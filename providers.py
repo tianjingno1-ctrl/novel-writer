@@ -35,8 +35,20 @@ def _classify_api_error(exc: Exception) -> APIError:
         return APIError(msg, kind="auth")
     if "429" in msg or "rate" in lower or "quota" in lower:
         return APIError(msg, kind="rate_limit")
-    if "connection" in lower or "connect" in name:
+    if (
+        "connection" in lower
+        or "connect" in name
+        or "peer closed" in lower
+        or "incomplete chunked" in lower
+    ):
         return APIError(msg, kind="network")
+    if (
+        "error code: 500" in lower
+        or "internal server error" in lower
+        or "server exception" in lower
+        or "api_error" in lower and "500" in msg
+    ):
+        return APIError(msg, kind="server_error")
     return APIError(msg, kind="unknown")
 
 
@@ -46,6 +58,7 @@ class TokenUsage:
     cache_creation_input_tokens: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
+    stop_reason: str | None = None
 
 
 @dataclass
@@ -78,6 +91,12 @@ def _is_kie_base_url(base_url: str) -> bool:
     return "kie.ai" in (base_url or "")
 
 
+def _api_http_timeout():
+    import httpx
+
+    return httpx.Timeout(1800.0, connect=60.0)
+
+
 def _kie_anthropic_http_client():
     """kie.ai 拒绝 Anthropic SDK 默认 User-Agent，须改用 Bearer + 自定义 UA。"""
     import httpx
@@ -88,7 +107,16 @@ def _kie_anthropic_http_client():
                 del request.headers[key]
         request.headers["user-agent"] = "novel-writer/1.0"
 
-    return httpx.Client(event_hooks={"request": [_hook]})
+    return httpx.Client(
+        timeout=_api_http_timeout(),
+        event_hooks={"request": [_hook]},
+    )
+
+
+def _openai_http_client():
+    import httpx
+
+    return httpx.Client(timeout=_api_http_timeout())
 
 
 class APIClient:
@@ -148,6 +176,7 @@ class APIClient:
             clients.openai = OpenAI(
                 api_key=config.get_api_key(provider),
                 base_url=cfg["base_url"],
+                http_client=_openai_http_client(),
             )
         return clients.openai
 
@@ -223,31 +252,48 @@ class APIClient:
         if system_text.strip():
             openai_messages.append({"role": "system", "content": system_text})
         openai_messages.extend(messages)
+        create_kwargs: dict = {
+            "model": config.get_model(provider),
+            "max_tokens": max_tokens,
+            "messages": openai_messages,
+            "stream": True,
+        }
+        # DeepSeek 流式对 stream_options 支持不稳定，直接走基础流式
+        if provider != "deepseek":
+            create_kwargs["stream_options"] = {"include_usage": True}
         try:
             stream = self._get_openai(provider).chat.completions.create(
-                model=config.get_model(provider),
-                max_tokens=max_tokens,
-                messages=openai_messages,
-                stream=True,
-                stream_options={"include_usage": True},
+                **create_kwargs
             )
         except Exception as e:
-            raise _classify_api_error(e) from e
+            if "stream_options" in create_kwargs:
+                fallback = {k: v for k, v in create_kwargs.items() if k != "stream_options"}
+                try:
+                    stream = self._get_openai(provider).chat.completions.create(
+                        **fallback
+                    )
+                except Exception as e2:
+                    raise _classify_api_error(e2) from e2
+            else:
+                raise _classify_api_error(e) from e
         prompt_tokens = 0
         completion_tokens = 0
         cached = 0
-        for chunk in stream:
-            if chunk.choices:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    yield delta
-            usage_obj = getattr(chunk, "usage", None)
-            if usage_obj is not None:
-                prompt_tokens = _or_zero(usage_obj, "prompt_tokens")
-                completion_tokens = _or_zero(usage_obj, "completion_tokens")
-                prompt_details = getattr(usage_obj, "prompt_tokens_details", None)
-                if prompt_details is not None:
-                    cached = _or_zero(prompt_details, "cached_tokens")
+        try:
+            for chunk in stream:
+                if chunk.choices:
+                    delta = chunk.choices[0].delta.content
+                    if delta:
+                        yield delta
+                usage_obj = getattr(chunk, "usage", None)
+                if usage_obj is not None:
+                    prompt_tokens = _or_zero(usage_obj, "prompt_tokens")
+                    completion_tokens = _or_zero(usage_obj, "completion_tokens")
+                    prompt_details = getattr(usage_obj, "prompt_tokens_details", None)
+                    if prompt_details is not None:
+                        cached = _or_zero(prompt_details, "cached_tokens")
+        except Exception as e:
+            raise _classify_api_error(e) from e
         self._last_stream_usage = TokenUsage(
             cache_read_input_tokens=cached,
             input_tokens=max(prompt_tokens - cached, 0),
@@ -286,6 +332,7 @@ class APIClient:
             cache_creation_input_tokens=_or_zero(usage_obj, "cache_creation_input_tokens"),
             input_tokens=_or_zero(usage_obj, "input_tokens"),
             output_tokens=_or_zero(usage_obj, "output_tokens"),
+            stop_reason=getattr(response, "stop_reason", None),
         )
         return text, usage
 
@@ -312,7 +359,8 @@ class APIClient:
         except Exception as e:
             raise _classify_api_error(e) from e
 
-        text = response.choices[0].message.content or ""
+        choice = response.choices[0]
+        text = choice.message.content or ""
         usage_obj = response.usage
         prompt_tokens = _or_zero(usage_obj, "prompt_tokens")
         completion_tokens = _or_zero(usage_obj, "completion_tokens")
@@ -325,6 +373,7 @@ class APIClient:
             cache_read_input_tokens=cached,
             input_tokens=max(prompt_tokens - cached, 0),
             output_tokens=completion_tokens,
+            stop_reason=getattr(choice, "finish_reason", None),
         )
         return text, usage
 

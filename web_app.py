@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import re
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -16,6 +18,30 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, field_validator
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
+_DEBUG_LOG = Path(__file__).resolve().parent / "debug-2b4904.log"
+
+
+def _dbg_finalize(location: str, message: str, data: dict, hypothesis_id: str) -> None:
+    # #region agent log
+    try:
+        with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "sessionId": "2b4904",
+                        "location": location,
+                        "message": message,
+                        "data": data,
+                        "hypothesisId": hypothesis_id,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
 MAX_CONTENT_BYTES = 2 * 1024 * 1024  # 2MB，章节/Codex 文件
 MAX_API_TEXT_CHARS = 50_000  # 对话/指令等 API 文本
 VALID_CODEX_NAMES = frozenset(core.CODEX_FILES.keys())
@@ -48,6 +74,8 @@ async def lifespan(app: FastAPI):
         print("✅ 已从磁盘恢复写书对话（session_autosave.json）")
     if config.WEB_TOKEN:
         print("🔐 Web API 已启用令牌鉴权（请求头 X-Novel-Token）")
+    if config.CONTEXT_LOG_ENABLED:
+        print("📋 上下文体积日志：data/context_log.jsonl（NOVEL_CONTEXT_LOG=0 可关闭）")
     yield
 
 
@@ -154,6 +182,7 @@ class ChatRequest(BaseModel):
     instruction: str = ""
     scene_beat: str = ""
     scene_id: str = ""
+    chapter_num: int | None = None
 
     _validate_instruction = field_validator("instruction")(_check_api_text)
     _validate_scene_beat = field_validator("scene_beat")(_check_api_text)
@@ -161,6 +190,7 @@ class ChatRequest(BaseModel):
 
 class ContentBody(BaseModel):
     content: str
+    chapter_num: int | None = None
 
     @field_validator("content")
     @classmethod
@@ -175,9 +205,29 @@ class FreeChatRequest(BaseModel):
     _validate_content = field_validator("content")(_check_api_text)
 
 
+class FreeChatThreadCreate(BaseModel):
+    title: str = ""
+
+    @field_validator("title")
+    @classmethod
+    def check_title(cls, v: str) -> str:
+        return v.strip()
+
+
+class FreeChatThreadRename(BaseModel):
+    title: str
+
+    _validate_title = field_validator("title")(_check_api_text)
+
+
+class FreeChatThreadSwitch(BaseModel):
+    thread_id: str
+
+
 class ContextConfig(BaseModel):
     turns: int | None = None
     mode: str | None = None
+    free_chat_turns: int | None = None
 
 
 class ProviderSwitch(BaseModel):
@@ -196,6 +246,8 @@ class SceneCreate(BaseModel):
 class SceneUpdate(BaseModel):
     title: str | None = None
     beat: str | None = None
+    pace: str | None = None
+    emotion_anchor: dict | None = None
     summary: str | None = None
     done: bool | None = None
 
@@ -205,6 +257,28 @@ class SceneUpdate(BaseModel):
         if v is None:
             return v
         return _check_api_text(v)
+
+    @field_validator("pace")
+    @classmethod
+    def check_pace(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if v not in ("快", "中", "慢"):
+            raise ValueError("pace 必须是 快 / 中 / 慢")
+        return v
+
+    @field_validator("emotion_anchor")
+    @classmethod
+    def check_emotion_anchor(cls, v: dict | None) -> dict | None:
+        if v is None:
+            return v
+        if not isinstance(v, dict):
+            raise ValueError("emotion_anchor 必须是对象")
+        target = str(v.get("target", "")).strip()
+        how = str(v.get("how", "")).strip()
+        if len(target) > 500 or len(how) > 1000:
+            raise ValueError("情绪锚点过长")
+        return {"target": target, "how": how}
 
 
 class ChapterTitleUpdate(BaseModel):
@@ -244,6 +318,62 @@ class OutlineRequest(BaseModel):
         return v
 
 
+class ChapterQualityRequest(BaseModel):
+    chapter_num: int | None = None
+    auto_append: bool = True
+    auto_apply: bool = True
+
+    @field_validator("chapter_num")
+    @classmethod
+    def check_chapter_num(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError("chapter_num 须 ≥ 1")
+        return v
+
+
+class FinalizeChapterRequest(BaseModel):
+    chapter_num: int | None = None
+    run_pacing: bool = True
+    run_outline: bool = False
+    repetition_scope: str = "current"
+    auto_apply_observe: bool = True
+    auto_append_locked: bool = True
+    auto_append_plot_new: bool = True
+
+    @field_validator("chapter_num")
+    @classmethod
+    def check_chapter_num(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError("chapter_num 须 ≥ 1")
+        return v
+
+    @field_validator("repetition_scope")
+    @classmethod
+    def check_repetition_scope(cls, v: str) -> str:
+        if v not in ("current", "recent3", "all"):
+            raise ValueError("repetition_scope 须为 current / recent3 / all")
+        return v
+
+
+class RepetitionRequest(BaseModel):
+    chapter_num: int | None = None
+    scope: str = "current"
+
+    @field_validator("chapter_num")
+    @classmethod
+    def check_chapter_num(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError("chapter_num 须 ≥ 1")
+        return v
+
+    @field_validator("scope")
+    @classmethod
+    def check_scope(cls, v: str) -> str:
+        if v not in ("current", "recent3", "all"):
+            raise ValueError("scope 必须是 current / recent3 / all")
+        return v
+
+
 class OutlineApplyRequest(BaseModel):
     offset: int = 1
     replace: bool = False
@@ -257,10 +387,43 @@ class OutlineApplyRequest(BaseModel):
         return v
 
 
+class ObserveApplyItem(BaseModel):
+    id: str
+    target_file: str
+    accepted: bool = False
+    proposed_text: str = ""
+    edited_text: str | None = None
+
+    @field_validator("target_file")
+    @classmethod
+    def check_target(cls, v: str) -> str:
+        if v not in ("char_static", "char_dynamic"):
+            raise ValueError("target_file 必须是 char_static 或 char_dynamic")
+        return v
+
+
+class ObserveApplyRequest(BaseModel):
+    items: list[ObserveApplyItem]
+    chapter_num: int | None = None
+
+
+class HistoryRevertRequest(BaseModel):
+    entry_id: str
+    chapter_num: int | None = None
+
+
 # ── 路由 ──────────────────────────────────────────
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(WEB_DIR / "index.html")
+    return FileResponse(
+        WEB_DIR / "index.html",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    return FileResponse(WEB_DIR / "favicon.svg", media_type="image/svg+xml")
 
 
 @app.get("/api/status")
@@ -270,6 +433,44 @@ def status() -> dict:
     if last:
         status_data["last_call"] = last
     return status_data
+
+
+@app.get("/api/debug/last_context")
+def debug_last_context() -> dict:
+    return core.get_last_context_debug()
+
+
+class DebugUiLogBody(BaseModel):
+    location: str
+    message: str
+    data: dict | None = None
+    hypothesisId: str = ""
+
+
+@app.post("/api/debug/ui-log")
+def debug_ui_log(body: DebugUiLogBody) -> dict:
+    # #region agent log
+    try:
+        log_path = Path(__file__).resolve().parent / "debug-4132c7.log"
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(
+                    {
+                        "sessionId": "4132c7",
+                        "location": body.location,
+                        "message": body.message,
+                        "data": body.data or {},
+                        "hypothesisId": body.hypothesisId,
+                        "timestamp": int(time.time() * 1000),
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+    except Exception:
+        pass
+    # #endregion
+    return {"ok": True}
 
 
 class ProjectUpdate(BaseModel):
@@ -299,7 +500,7 @@ def bookshelf_overview() -> dict:
     return novel_data.build_bookshelf_overview(
         chapters=chapters,
         chapter_stats=stats.get("chapters", []),
-        summaries_text=core.read_text(core.SUMMARIES_FILE),
+        summaries_text=core.get_summaries_combined(),
         world_text=core.read_text(core.WORLD_FILE),
         current_chapter=current,
     )
@@ -357,6 +558,7 @@ def plan_all() -> dict:
 
 @app.get("/api/plan/full")
 def plan_full() -> dict:
+    core.sync_all_chapter_titles_from_files()
     return {"chapters": novel_data.list_plan_details()}
 
 
@@ -440,7 +642,10 @@ def get_codex(name: str) -> dict:
 def put_codex(name: str, body: ContentBody) -> dict:
     if name not in VALID_CODEX_NAMES:
         raise HTTPException(400, "非法设定文件名")
-    return _require_ok(core.save_codex(name, body.content), "保存失败")
+    return _require_ok(
+        core.save_codex(name, body.content, chapter_num=body.chapter_num),
+        "保存失败",
+    )
 
 
 # ── Codex 条目 ────────────────────────────────────
@@ -495,7 +700,9 @@ def chat_history() -> dict:
 def chat(req: ChatRequest) -> dict:
     core.touch_user_active()
     return _require_ok(
-        core.writing_chat(req.instruction, req.scene_beat, req.scene_id),
+        core.writing_chat(
+            req.instruction, req.scene_beat, req.scene_id, req.chapter_num
+        ),
         "写书对话失败",
     )
 
@@ -506,7 +713,7 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
 
     def generate():
         for event in core.writing_chat_stream(
-            req.instruction, req.scene_beat, req.scene_id
+            req.instruction, req.scene_beat, req.scene_id, req.chapter_num
         ):
             yield f"data: {event}\n\n"
 
@@ -521,6 +728,13 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
 def chat_clear() -> dict:
     core.clear_chat_session()
     return {"ok": True}
+
+
+@app.put("/api/chat/write-chapter")
+def set_write_chapter(body: ChapterQualityRequest) -> dict:
+    if not body.chapter_num or body.chapter_num <= 0:
+        raise HTTPException(400, "chapter_num 无效")
+    return _require_ok(core.set_write_chapter_num(body.chapter_num), "设置写作目标章失败")
 
 
 @app.post("/api/chat/restore")
@@ -551,10 +765,7 @@ def put_chat_prompts(body: ChatPromptsBody) -> dict:
 
 @app.get("/api/free-chat/history")
 def free_chat_history() -> dict:
-    return {
-        "messages": core.get_free_chat_history(),
-        "provider": core.get_free_chat_provider(),
-    }
+    return core.get_free_chat_state()
 
 
 @app.put("/api/free-chat/provider")
@@ -569,23 +780,232 @@ def set_free_chat_provider(body: ProviderSwitch) -> dict:
 @app.post("/api/free-chat")
 def free_chat_send(body: FreeChatRequest) -> dict:
     core.touch_user_active()
-    return _require_ok(core.free_chat(body.content, provider=body.provider), "自由聊失败")
+    result = core.free_chat(body.content, provider=body.provider)
+    return _require_ok(result, "自由聊失败")
 
 
 @app.post("/api/free-chat/clear")
 def free_chat_clear() -> dict:
-    core.clear_free_chat()
-    return {"ok": True}
+    return core.clear_free_chat()
+
+
+@app.delete("/api/free-chat/messages/{index}")
+def free_chat_delete_message(index: int) -> dict:
+    result = core.delete_free_chat_message(index)
+    return _require_ok(result, "删除消息失败")
+
+
+@app.post("/api/free-chat/threads")
+def free_chat_thread_create(body: FreeChatThreadCreate) -> dict:
+    title = body.title or None
+    return _require_ok(core.create_free_chat_thread(title), "创建话题失败")
+
+
+@app.put("/api/free-chat/threads/{thread_id}")
+def free_chat_thread_rename(thread_id: str, body: FreeChatThreadRename) -> dict:
+    return _require_ok(
+        core.rename_free_chat_thread(thread_id, body.title),
+        "重命名失败",
+    )
+
+
+@app.put("/api/free-chat/active-thread")
+def free_chat_thread_switch(body: FreeChatThreadSwitch) -> dict:
+    return _require_ok(
+        core.switch_free_chat_thread(body.thread_id),
+        "切换话题失败",
+    )
+
+
+@app.delete("/api/free-chat/threads/{thread_id}")
+def free_chat_thread_delete(thread_id: str) -> dict:
+    return _require_ok(
+        core.delete_free_chat_thread(thread_id),
+        "删除话题失败",
+    )
 
 
 @app.post("/api/summary")
-def run_summary() -> dict:
-    return _require_ok(core.api_run_summary(), "生成概述失败")
+def run_summary(body: ChapterQualityRequest | None = None) -> dict:
+    body = body or ChapterQualityRequest()
+    return _require_ok(core.api_run_summary(body.chapter_num), "生成概述失败")
 
 
 @app.post("/api/check")
-def run_check() -> dict:
-    return _require_ok(core.api_run_check(), "连续性检查失败")
+def run_check(body: ChapterQualityRequest | None = None) -> dict:
+    body = body or ChapterQualityRequest()
+    return _require_ok(core.api_run_check(body.chapter_num), "连续性检查失败")
+
+
+@app.post("/api/check/character-drift")
+def check_character_drift(body: ChapterQualityRequest | None = None) -> dict:
+    body = body or ChapterQualityRequest()
+    return _require_ok(
+        core.api_run_character_drift(body.chapter_num),
+        "人物检查失败",
+    )
+
+
+@app.post("/api/post-chapter/maintain")
+def post_chapter_maintain(body: ChapterQualityRequest | None = None) -> dict:
+    body = body or ChapterQualityRequest()
+    return _require_ok(
+        core.api_run_post_chapter_maintain(
+            body.chapter_num,
+            auto_apply=body.auto_apply,
+            auto_append=body.auto_append,
+        ),
+        "章后维护失败",
+    )
+
+
+@app.post("/api/post-chapter/finalize")
+def post_chapter_finalize(body: FinalizeChapterRequest | None = None) -> dict:
+    body = body or FinalizeChapterRequest()
+    # #region agent log
+    _dbg_finalize(
+        "web_app.py:post_chapter_finalize",
+        "finalize route hit",
+        {
+            "chapter_num": body.chapter_num,
+            "run_pacing": body.run_pacing,
+            "repetition_scope": body.repetition_scope,
+        },
+        "H1",
+    )
+    # #endregion
+    result = core.api_run_post_chapter_finalize(
+        body.chapter_num,
+        run_pacing=body.run_pacing,
+        run_outline=body.run_outline,
+        repetition_scope=body.repetition_scope,
+        auto_apply_observe=body.auto_apply_observe,
+        auto_append_locked=body.auto_append_locked,
+        auto_append_plot_new=body.auto_append_plot_new,
+    )
+    # #region agent log
+    _dbg_finalize(
+        "web_app.py:post_chapter_finalize",
+        "finalize core returned",
+        {
+            "ok": result.get("ok"),
+            "partial": result.get("partial"),
+            "chapter_num": result.get("chapter_num"),
+            "error": (result.get("error") or "")[:200],
+            "calls_count": len(result.get("calls") or []),
+        },
+        "H3",
+    )
+    # #endregion
+    return _require_ok(result, "本章定稿失败")
+
+
+@app.post("/api/extract/details")
+def extract_details(body: ChapterQualityRequest | None = None) -> dict:
+    body = body or ChapterQualityRequest()
+    return _require_ok(
+        core.api_run_detail_extract(body.chapter_num, auto_append=body.auto_append),
+        "细节提取失败",
+    )
+
+
+@app.post("/api/check/repetition")
+def check_repetition(body: RepetitionRequest | None = None) -> dict:
+    body = body or RepetitionRequest()
+    return _require_ok(
+        core.api_run_repetition_check(body.chapter_num, body.scope),
+        "重复检查失败",
+    )
+
+
+@app.post("/api/check/pacing")
+def check_pacing() -> dict:
+    return _require_ok(core.api_run_pacing_check(), "爽点检查失败")
+
+
+@app.post("/api/observe")
+def run_observe(body: ChapterQualityRequest | None = None) -> dict:
+    body = body or ChapterQualityRequest()
+    return _require_ok(
+        core.api_run_observe(body.chapter_num, auto_apply=body.auto_apply),
+        "角色观察失败",
+    )
+
+
+@app.post("/api/observe/apply")
+def apply_observe(body: ObserveApplyRequest) -> dict:
+    payload = [item.model_dump() for item in body.items]
+    return _require_ok(
+        core.api_apply_observe(payload, chapter_num=body.chapter_num),
+        "写入失败",
+    )
+
+
+@app.get("/api/history")
+def history_list(file_key: str | None = None, limit: int = 200) -> dict:
+    import change_history
+
+    lim = max(1, min(500, limit))
+    return change_history.list_history(file_key=file_key, limit=lim)
+
+
+@app.get("/api/history/baseline")
+def history_baseline() -> dict:
+    import change_history
+
+    return {"ok": True, **change_history.get_baseline_info()}
+
+
+@app.get("/api/history/{entry_id}")
+def history_entry(entry_id: str) -> dict:
+    import change_history
+
+    result = change_history.get_entry(entry_id)
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error", "记录不存在"))
+    return result
+
+
+@app.post("/api/history/revert")
+def history_revert(body: HistoryRevertRequest) -> dict:
+    import change_history
+
+    return _require_ok(
+        change_history.revert_entry(
+            body.entry_id, chapter_num=body.chapter_num
+        ),
+        "撤销失败",
+    )
+
+
+@app.post("/api/history/baseline")
+def history_baseline_refresh() -> dict:
+    import change_history
+
+    manifest = change_history.ensure_baseline_snapshot(force=True)
+    return {"ok": True, "baseline": manifest}
+
+
+@app.get("/api/quality/log")
+def quality_log_list(kind: str | None = None, limit: int = 80) -> dict:
+    import quality_log
+
+    return {"entries": quality_log.list_entries(limit=limit, kind=kind)}
+
+
+@app.get("/api/quality/log/{entry_id}")
+def quality_log_get(entry_id: str) -> dict:
+    import quality_log
+
+    row = quality_log.get_entry(entry_id)
+    if not row:
+        raise HTTPException(404, "记录不存在")
+    return row
+
+
+@app.get("/api/guide/status")
+def api_guide_status() -> dict:
+    return core.get_guide_status()
 
 
 @app.post("/api/outline")
@@ -614,8 +1034,12 @@ def outline_apply(body: OutlineApplyRequest) -> dict:
 def set_context(cfg: ContextConfig) -> dict:
     if cfg.turns is not None:
         if cfg.turns < 0 or cfg.turns > 100:
-            raise HTTPException(400, "轮数范围 0-100")
+            raise HTTPException(400, "写书轮数范围 0-100")
         config.CHAT_CONTEXT_TURNS = cfg.turns
+    if cfg.free_chat_turns is not None:
+        if cfg.free_chat_turns < 0 or cfg.free_chat_turns > 100:
+            raise HTTPException(400, "自由聊轮数范围 0-100")
+        config.FREE_CHAT_CONTEXT_TURNS = cfg.free_chat_turns
     if cfg.mode is not None:
         if cfg.mode not in ("turns", "summaries", "beats", "codex"):
             raise HTTPException(400, "mode 必须是 turns/summaries/beats/codex")
@@ -624,6 +1048,7 @@ def set_context(cfg: ContextConfig) -> dict:
     return {
         "ok": True,
         "context_turns": config.CHAT_CONTEXT_TURNS,
+        "free_chat_context_turns": config.FREE_CHAT_CONTEXT_TURNS,
         "context_mode": config.CONTEXT_MODE,
     }
 
@@ -638,6 +1063,15 @@ def set_provider(body: ProviderSwitch) -> dict:
 
     reset_client(body.provider)
     return {"ok": True, **core.get_app_status()}
+
+
+@app.get("/static/app.js")
+def serve_app_js() -> FileResponse:
+    return FileResponse(
+        WEB_DIR / "app.js",
+        media_type="application/javascript",
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )
 
 
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

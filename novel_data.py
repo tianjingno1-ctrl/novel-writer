@@ -60,11 +60,41 @@ def _load_json(path: Path, default: dict) -> dict:
         return dict(default)
 
 
-def _save_json(path: Path, data: dict) -> None:
+def _active_chapter_from_plan(plan: dict) -> int:
+    sid = plan.get("active_scene_id") or ""
+    if not sid:
+        return 0
+    for key, ch in plan.get("chapters", {}).items():
+        for scene in ch.get("scenes", []):
+            if scene.get("id") == sid:
+                try:
+                    return int(key)
+                except (TypeError, ValueError):
+                    return 0
+    return 0
+
+
+def _save_json(
+    path: Path,
+    data: dict,
+    *,
+    history_source: str = "plan",
+    chapter_num: int | None = None,
+) -> None:
+    content = json.dumps(data, ensure_ascii=False, indent=2)
+    import change_history
+
+    if change_history.resolve_key(path) == "plan":
+        ch = chapter_num if chapter_num is not None else _active_chapter_from_plan(data)
+        change_history.save_with_history(
+            path,
+            content,
+            source=history_source,
+            chapter_num=ch,
+        )
+        return
     backup_file(path)
-    file_utils.atomic_write_text(
-        path, json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    file_utils.atomic_write_text(path, content, encoding="utf-8")
 
 
 def _read_plan_unlocked() -> dict:
@@ -89,8 +119,15 @@ def _mutate_plan(editor):
     with _plan_lock:
         plan = _read_plan_unlocked()
         result = editor(plan)
-        _save_json(PLAN_FILE, plan)
+        _save_json(PLAN_FILE, plan, chapter_num=_active_chapter_from_plan(plan))
         return result
+
+
+def restore_plan_json_text(content: str) -> None:
+    """从 JSON 文本恢复 plan（用于档案撤销，走 plan 锁，不再二次留痕）。"""
+    with _plan_lock:
+        backup_file(PLAN_FILE)
+        file_utils.atomic_write_text(PLAN_FILE, content, encoding="utf-8")
 
 
 def _new_scene_id(chapter_num: int) -> str:
@@ -150,6 +187,7 @@ def add_scene(chapter_num: int, title: str = "新场景", beat: str = "") -> dic
             "id": _new_scene_id(chapter_num),
             "title": title.strip() or "新场景",
             "beat": beat,
+            "pace": "中",
             "summary": "",
             "done": False,
             "updated_at": datetime.now().isoformat(timespec="seconds"),
@@ -167,8 +205,11 @@ def update_scene(scene_id: str, **fields) -> dict | None:
             for scene in ch.get("scenes", []):
                 if scene["id"] == scene_id:
                     for k, v in fields.items():
-                        if k in ("title", "beat", "summary", "done"):
-                            scene[k] = v
+                        if k in ("title", "beat", "pace", "summary", "done", "emotion_anchor"):
+                            if k == "emotion_anchor":
+                                scene[k] = _normalize_emotion_anchor(v)
+                            else:
+                                scene[k] = v
                     scene["updated_at"] = datetime.now().isoformat(timespec="seconds")
                     return scene
         return None
@@ -250,6 +291,51 @@ def get_active_scene() -> dict | None:
     return get_scene(sid) if sid else None
 
 
+PACE_INSTRUCTIONS = {
+    "快": "【节奏档位：快】短句为主，每段1-2行，动词密集，少修饰，适合冲突/打脸场景。",
+    "中": "【节奏档位：中】正常叙述节奏，对话与动作均衡。",
+    "慢": "【节奏档位：慢】细节丰富，感官描写，适合感情场景或高潮后余韵。",
+}
+
+_PACE_BEAT_RE = re.compile(r"【节奏档位】\s*(快|中|慢)")
+
+
+def resolve_scene_pace(scene: dict) -> str:
+    """场景节奏档位：显式 pace 字段优先，否则从 Beat 文本解析。"""
+    pace = (scene.get("pace") or "").strip()
+    if pace in PACE_INSTRUCTIONS:
+        return pace
+    beat = scene.get("beat") or ""
+    m = _PACE_BEAT_RE.search(beat)
+    if m:
+        return m.group(1)
+    return "中"
+
+
+def _normalize_emotion_anchor(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    target = str(value.get("target", "")).strip()
+    how = str(value.get("how", "")).strip()
+    if not target and not how:
+        return {}
+    return {"target": target, "how": how}
+
+
+def format_emotion_anchor_instruction(scene: dict) -> str:
+    anchor = _normalize_emotion_anchor(scene.get("emotion_anchor"))
+    if anchor:
+        return f"【情绪锚点】目标：{anchor['target']}；落地方式：{anchor['how']}"
+    beat = scene.get("beat") or ""
+    m = re.search(
+        r"【情绪锚点】\s*目标[：:]\s*(.+?)[；;]\s*落地(?:方式)?[：:]\s*(.+?)(?:\n|$)",
+        beat,
+    )
+    if m:
+        return f"【情绪锚点】目标：{m.group(1).strip()}；落地方式：{m.group(2).strip()}"
+    return ""
+
+
 def get_scene_context_text() -> str:
     scene = get_active_scene()
     if not scene:
@@ -257,6 +343,10 @@ def get_scene_context_text() -> str:
     parts = [f"【场景】{scene.get('title', '')}"]
     if scene.get("beat"):
         parts.append(f"【Scene Beat】\n{scene['beat']}")
+    parts.append(PACE_INSTRUCTIONS[resolve_scene_pace(scene)])
+    emotion = format_emotion_anchor_instruction(scene)
+    if emotion:
+        parts.append(emotion)
     if scene.get("summary"):
         parts.append(f"【场景概述】\n{scene['summary']}")
     return "\n\n".join(parts)
@@ -462,14 +552,18 @@ def _outline_field(block: str, field_name: str) -> str:
 
 
 def parse_outline_suggestions(text: str) -> list[dict]:
-    """解析续章灵感输出为结构化建议列表。"""
+    """解析续章灵感输出为结构化建议列表。
+
+    offset 按块出现顺序从 1 编号（紧接当前章后的第 1、2…条建议），
+    不采用标题里的全书章号，避免 AI 写「后续第2章」时错位到第 3 章。
+    """
     results: list[dict] = []
-    for offset_str, body in _OUTLINE_BLOCK_RE.findall(text or ""):
+    for seq, (_label_num, body) in enumerate(_OUTLINE_BLOCK_RE.findall(text or ""), start=1):
         body = body.strip()
         if not body:
             continue
         results.append({
-            "offset": int(offset_str),
+            "offset": seq,
             "定位": _outline_field(body, "定位"),
             "核心事件": _outline_field(body, "核心事件"),
             "冲突转折": _outline_field(body, "冲突/转折") or _outline_field(body, "冲突"),
@@ -508,10 +602,11 @@ def apply_outline_suggestion_to_chapter(
     latest_chapter: int,
     suggestion: dict,
     *,
+    target_offset: int | None = None,
     replace: bool = False,
 ) -> dict:
     """将一条续章建议写入 Plan 对应章节的场景 Beat。"""
-    offset = int(suggestion.get("offset", 1))
+    offset = int(target_offset if target_offset is not None else suggestion.get("offset", 1))
     chapter_num = latest_chapter + offset
     chapter_title = derive_chapter_title_from_suggestion(suggestion) or f"第{chapter_num}章"
     ensure_chapter_plan(chapter_num, title=chapter_title)
@@ -568,6 +663,7 @@ def apply_outline_suggestion_to_chapter(
                 "id": _new_scene_id(chapter_num),
                 "title": title,
                 "beat": beat,
+                "pace": "中",
                 "summary": "",
                 "done": False,
                 "updated_at": datetime.now().isoformat(timespec="seconds"),

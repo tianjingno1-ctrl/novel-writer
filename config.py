@@ -41,8 +41,25 @@ PROVIDER = os.environ.get("NOVEL_PROVIDER", "kie")
 SUMMARY_PROVIDER = os.environ.get("NOVEL_SUMMARY_PROVIDER", "deepseek")
 CHECK_PROVIDER = os.environ.get("NOVEL_CHECK_PROVIDER", "deepseek")
 OUTLINE_PROVIDER = os.environ.get("NOVEL_OUTLINE_PROVIDER", "deepseek")
+_maintain_pid = os.environ.get("NOVEL_MAINTAIN_PROVIDER", "").strip()
+_quality_pid = os.environ.get("NOVEL_QUALITY_PROVIDER", "").strip()
+MAINTAIN_PROVIDER = _maintain_pid or CHECK_PROVIDER
+QUALITY_PROVIDER = _quality_pid or CHECK_PROVIDER
 
-MAX_TOKENS = 4096
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, str(default))
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("环境变量 %s=%r 不是整数，使用默认 %s", name, raw, default)
+        return default
+
+
+# 单次 API 输出 token 上限（写书续写、概述、检查等）
+MAX_TOKENS = _env_int("NOVEL_MAX_TOKENS", 8192)
+# 自由聊单独上限（默认按 Claude 超长输出；DeepSeek 若报错请在 .env 略降）
+FREE_CHAT_MAX_TOKENS = _env_int("NOVEL_FREE_CHAT_MAX_TOKENS", 64000)
 
 USE_1H_CACHE = True
 CACHE_TTL = "1h" if USE_1H_CACHE else "5m"
@@ -55,17 +72,25 @@ HEARTBEAT_IDLE_STOP = 6 * 60
 AUTO_APPEND_CHAPTER = True
 
 # 写作对话保留最近 N 轮（1 轮 = 用户 + 助手各 1 条）；0 表示不限制
-CHAT_CONTEXT_TURNS = int(os.environ.get("NOVEL_CONTEXT_TURNS", "10"))
+CHAT_CONTEXT_TURNS = _env_int("NOVEL_CONTEXT_TURNS", 10)
 
 # 上下文策略: turns | summaries | beats | codex
 CONTEXT_MODE = os.environ.get("NOVEL_CONTEXT_MODE", "beats")
 
 # 自由聊天（与写作分离，默认 DeepSeek 省钱）
 FREE_CHAT_PROVIDER = os.environ.get("NOVEL_FREE_CHAT_PROVIDER", "deepseek")
-FREE_CHAT_CONTEXT_TURNS = int(os.environ.get("NOVEL_FREE_CHAT_TURNS", "20"))
+FREE_CHAT_CONTEXT_TURNS = _env_int("NOVEL_FREE_CHAT_TURNS", 20)
 
 # Web 最小鉴权：设置后所有 /api/* 须带请求头 X-Novel-Token
 WEB_TOKEN = os.environ.get("NOVEL_WEB_TOKEN", "").strip()
+
+# 每次 API 请求记录上下文体积到 data/context_log.jsonl（设 0 关闭）
+CONTEXT_LOG_ENABLED = os.environ.get("NOVEL_CONTEXT_LOG", "1").strip().lower() not in (
+    "0",
+    "false",
+    "no",
+    "off",
+)
 
 PLACEHOLDER_PREFIX = "在这里填"
 
@@ -176,7 +201,7 @@ _load_prices_from_file()
 
 def load_runtime_settings() -> None:
     """从 data/runtime.json 恢复 Web 端修改过的 provider / 上下文配置。"""
-    global PROVIDER, CONTEXT_MODE, CHAT_CONTEXT_TURNS
+    global PROVIDER, CONTEXT_MODE, CHAT_CONTEXT_TURNS, FREE_CHAT_CONTEXT_TURNS
     if not RUNTIME_FILE.exists():
         return
     try:
@@ -190,9 +215,22 @@ def load_runtime_settings() -> None:
     mode = data.get("context_mode")
     if isinstance(mode, str) and mode in ("turns", "summaries", "beats", "codex"):
         CONTEXT_MODE = mode
-    turns = data.get("context_turns")
-    if isinstance(turns, int) and 0 <= turns <= 100:
+    turns = _coerce_turns(data.get("context_turns"))
+    if turns is not None:
         CHAT_CONTEXT_TURNS = turns
+    free_turns = _coerce_turns(data.get("free_chat_context_turns"))
+    if free_turns is not None:
+        FREE_CHAT_CONTEXT_TURNS = free_turns
+
+
+def _coerce_turns(value) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    if isinstance(value, int) and 0 <= value <= 100:
+        return value
+    return None
 
 
 def save_runtime_settings() -> None:
@@ -200,6 +238,7 @@ def save_runtime_settings() -> None:
         "provider": PROVIDER,
         "context_mode": CONTEXT_MODE,
         "context_turns": CHAT_CONTEXT_TURNS,
+        "free_chat_context_turns": FREE_CHAT_CONTEXT_TURNS,
     }
     RUNTIME_FILE.parent.mkdir(parents=True, exist_ok=True)
     file_utils.atomic_write_text(

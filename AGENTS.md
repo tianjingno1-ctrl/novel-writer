@@ -27,7 +27,15 @@ python main.py         # CLI
 | `summarizer.py` | 概述/检查的系统提示词 |
 | `novel_data.py` | Plan 场景、Codex 设定条目 |
 | `web/` | `index.html` `app.js` `style.css` |
-| `data/` | 小说数据（world、characters、chapters、plan.json） |
+| `data/` | 小说数据（world、style、characters、chapters、plan.json） |
+
+## 文档
+
+| 文件 | 用途 |
+|------|------|
+| `docs/novel-writer-manual.md` | **完整使用指南**（系统设定、写作流程、注意事项合一） |
+| `docs/tech-intake.md` | 技术信息清单：栈、数据结构、上下文组装、API 索引 |
+| `docs/six-quality-features.md` | 六项质量功能 API 索引（用户说明已并入手册 §五） |
 
 ## 模式说明（Web 顶栏）
 
