@@ -32,6 +32,7 @@
     <button class="mode-tab active" data-mode="write" onclick="setMode('write')">写作</button>
     <button class="mode-tab" data-mode="chat" onclick="setMode('chat')">写书对话</button>
     <button class="mode-tab" data-mode="free" onclick="setMode('free')">自由聊</button>
+    <button class="mode-tab" data-mode="quality" onclick="setMode('quality')">质量</button>
     <button class="mode-tab" data-mode="review" onclick="setMode('review')">统计</button>
   </nav>
 
@@ -186,7 +187,7 @@
             <button id="runDetailExtractQuickBtn" class="btn btn-sm" type="button" onclick="runDetailExtract()">细节</button>
             <button id="runCheckBtnDock" class="btn btn-sm" type="button" onclick="runCheck()">连续性</button>
             <button id="runCharDriftBtnDock" class="btn btn-sm" type="button" onclick="runCharacterDrift()">人物</button>
-            <button id="runRepetitionBtnDock" class="btn btn-sm" type="button" onclick="runRepetitionCheck()">重复</button>
+            <button id="runRepetitionBtnDock" class="btn btn-sm" type="button" onclick="runRepetitionCheck()">套话</button>
             <button id="runPacingBtnDock" class="btn btn-sm" type="button" onclick="runPacingCheck()">爽点</button>
           </details>
         </div>
@@ -234,12 +235,12 @@
                 <button id="runCheckBtn" class="btn btn-sm" onclick="runCheck()">连续性</button>
                 <button id="runCharDriftBtn" class="btn btn-sm" onclick="runCharacterDrift()">人物</button>
                 <span class="compose-btn-group">
-                  <select id="repetitionScopeSel" class="compose-scope-sel" title="重复检查范围">
+                  <select id="repetitionScopeSel" class="compose-scope-sel" title="套话检查范围">
                     <option value="current">当前章</option>
                     <option value="recent3">最近3章</option>
                     <option value="all">全书</option>
                   </select>
-                  <button id="runRepetitionBtn" class="btn btn-sm" onclick="runRepetitionCheck()">重复</button>
+                  <button id="runRepetitionBtn" class="btn btn-sm" onclick="runRepetitionCheck()">套话</button>
                 </span>
                 <button id="runPacingBtn" class="btn btn-sm" onclick="runPacingCheck()">爽点</button>
               </div>
@@ -292,6 +293,58 @@
         </div>
         <span id="freeChatError" class="error-text"></span>
       </div>
+      </div>
+    </section>
+
+    <!-- QUALITY：质量审阅中心 -->
+    <section class="view view-quality hidden" id="viewQuality">
+      <div class="quality-center">
+        <div class="quality-toolbar">
+          <h2 class="quality-title">质量审阅</h2>
+          <label class="quality-field">锚点章
+            <select id="qualityChapterSel" class="quality-sel" onchange="onQualityChapterChange()"></select>
+          </label>
+          <label class="quality-field">范围
+            <select id="qualityScopeSel" class="quality-sel" title="跨章连续性读概述+钉子；全书爽点/读者/编辑主要读概述">
+              <option value="current">当前章</option>
+              <option value="recent3">最近 3 章</option>
+              <option value="all">全书</option>
+            </select>
+          </label>
+        </div>
+        <p class="quality-intro">审阅为<strong>只读诊断</strong>，不会自动改档案。改完正文或设定后，请用「本章定稿」写入概述/观察/钉子。</p>
+        <div class="quality-dim-grid">
+          <div class="quality-dim">
+            <div class="quality-dim__label">文字层</div>
+            <button type="button" class="btn btn-sm" id="qualityBtnStyle" onclick="runRepetitionCheck(getQualityChapterNum())">套话检查</button>
+          </div>
+          <div class="quality-dim">
+            <div class="quality-dim__label">设定层</div>
+            <button type="button" class="btn btn-sm" id="qualityBtnContinuity" onclick="runCheck(getQualityChapterNum())">连续性</button>
+            <button type="button" class="btn btn-sm" id="qualityBtnCharacter" onclick="runCharacterDrift(getQualityChapterNum())">人物</button>
+            <button type="button" class="btn btn-sm" id="qualityBtnDetail" onclick="runDetailExtract(getQualityChapterNum())">细节</button>
+          </div>
+          <div class="quality-dim">
+            <div class="quality-dim__label">叙事层</div>
+            <button type="button" class="btn btn-sm" id="qualityBtnPacing" onclick="runPacingCheck()">爽点</button>
+            <button type="button" class="btn btn-sm" id="qualityBtnOutline" onclick="runOutline()">续章灵感</button>
+          </div>
+          <div class="quality-dim">
+            <div class="quality-dim__label">感受层</div>
+            <button type="button" class="btn btn-sm" id="qualityBtnReader" onclick="runReaderReview()">读者视角</button>
+            <button type="button" class="btn btn-sm" id="qualityBtnEditor" onclick="runEditorReview()">编辑视角</button>
+          </div>
+        </div>
+        <div class="quality-actions-row">
+          <button type="button" class="btn btn-primary" id="qualityBtnFull" onclick="runQualityFullReview()">⚡ 一键全查</button>
+          <button type="button" class="btn" id="qualityBtnFinalize" onclick="runPostChapterFinalize(getQualityChapterNum(), { skipConfirm: true })">📋 本章定稿（写档案）</button>
+          <button type="button" class="btn btn-ghost" onclick="setState({ sidebar: 'quality', mode: 'write' }, 'full')">侧栏质量记录</button>
+        </div>
+        <div id="qualityGuideBar" class="guide-host quality-guide-host hidden"></div>
+        <div class="quality-history">
+          <h3 class="quality-history__title">审阅历史</h3>
+          <div id="qualityHistoryList" class="quality-history__list"></div>
+        </div>
       </div>
     </section>
 

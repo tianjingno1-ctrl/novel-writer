@@ -31,17 +31,23 @@ from summarizer import (
     PACING_CHECK_SYSTEM,
     POST_CHAPTER_MAINTAIN_SYSTEM,
     QUALITY_CHECK_BUNDLE_SYSTEM,
+    CROSS_CHAPTER_CONTINUITY_SYSTEM,
+    EDITOR_REVIEW_SYSTEM,
+    READER_REVIEW_SYSTEM,
     REPETITION_CHECK_SYSTEM,
     SUMMARY_SYSTEM,
     WRITING_INSTRUCTION,
     build_character_drift_user_message,
     build_check_user_message,
+    build_cross_chapter_check_user_message,
     build_detail_extract_user_message,
+    build_editor_review_user_message,
     build_observe_user_message,
     build_outline_user_message,
     build_pacing_check_user_message,
     build_post_chapter_maintain_user_message,
     build_quality_bundle_user_message,
+    build_reader_review_user_message,
     build_summary_user_message,
     count_report_issues,
     extract_plot_active_unresolved,
@@ -115,7 +121,7 @@ DEFAULT_CHAT_PROMPTS = {
         },
         {
             "id": "repeat-check",
-            "title": "重复词检查",
+            "title": "套话检查",
             "content": (
                 "[讨论] 请检查当前章节正文中出现频率过高的词语或句式，列出 TOP5，"
                 "并给出替换建议。对照 style.md「本书已出现过多」清单，"
@@ -3034,34 +3040,58 @@ def api_run_summary(chapter_num: int | None = None) -> dict:
     }
 
 
-def api_run_check(chapter_num: int | None = None) -> dict:
+def api_run_check(chapter_num: int | None = None, scope: str = "current") -> dict:
+    if scope not in ("current", "recent3", "all"):
+        return {"ok": False, "error": "scope 必须是 current / recent3 / all"}
     resolved = _resolve_chapter_num(chapter_num)
     if isinstance(resolved, dict):
         return resolved
     chapter_num, chapter_content = resolved
     pid = config.CHECK_PROVIDER
-    system = build_cached_system(CHECK_SYSTEM, provider=pid)
-    messages = [
-        {
-            "role": "user",
-            "content": build_check_user_message(
-                read_text(WORLD_FILE),
-                read_text(CHARACTERS_FILE),
-                get_char_context_for_check(),
-                get_summaries_combined(),
-                chapter_num,
-                chapter_content,
-            ),
-        }
-    ]
-    reply = call_api(system, messages, provider=pid, tag="检查", silent=True)
+    scope_label = _scope_label(scope, chapter_num)
+    if scope == "current":
+        system = build_cached_system(CHECK_SYSTEM, provider=pid)
+        user_content = build_check_user_message(
+            read_text(WORLD_FILE),
+            read_text(CHARACTERS_FILE),
+            get_char_context_for_check(),
+            get_summaries_combined(),
+            chapter_num,
+            chapter_content,
+        )
+        tag = "连续性检查"
+    else:
+        system = build_cached_system(CROSS_CHAPTER_CONTINUITY_SYSTEM, provider=pid)
+        anchor = chapter_content if scope == "recent3" else ""
+        user_content = build_cross_chapter_check_user_message(
+            read_text(WORLD_FILE),
+            read_text(CHARACTERS_FILE),
+            get_char_context_for_check(),
+            _summaries_for_scope(chapter_num, scope),
+            read_text(PLOT_THREADS_LOCKED_FILE),
+            read_text(PLOT_THREADS_ACTIVE_FILE),
+            scope_label,
+            chapter_num,
+            anchor,
+        )
+        tag = f"跨章连续性·{scope_label}"
+    messages = [{"role": "user", "content": user_content}]
+    reply = call_api(system, messages, provider=pid, tag=tag, silent=True)
     if reply is None:
         return {"ok": False, "error": get_last_call_info().get("error", "检查失败")}
-    log_id = _quality_log_entry("continuity", chapter_num, reply)
+    log_id = _quality_log_entry(
+        "continuity",
+        chapter_num,
+        reply,
+        summary=f"{scope_label}",
+        extra={"scope": scope},
+    )
     return {
         "ok": True,
         "reply": reply,
         "chapter_num": chapter_num,
+        "scope": scope,
+        "scope_label": scope_label,
         "log_id": log_id,
         **get_last_call_info(),
     }
@@ -3106,6 +3136,142 @@ def get_chapters_text_for_scope(chapter_num: int, scope: str) -> str | None:
                 parts.append(f"## 第{num}章\n{c}")
         return "\n\n".join(parts) if parts else None
     return None
+
+
+def _scope_label(scope: str, chapter_num: int) -> str:
+    if scope == "current":
+        return f"第{chapter_num}章"
+    if scope == "recent3":
+        start = max(1, chapter_num - 2)
+        return f"第{start}–{chapter_num}章"
+    if scope == "all":
+        return "全书"
+    return scope
+
+
+def _summaries_for_scope(chapter_num: int, scope: str) -> str:
+    combined = get_summaries_combined()
+    _header, entries = _split_summary_entries(combined)
+    if scope == "all":
+        return "\n\n".join(entries) if entries else "（暂无概述）"
+    if scope == "current":
+        start = end = chapter_num
+    elif scope == "recent3":
+        start = max(1, chapter_num - 2)
+        end = chapter_num
+    else:
+        return "（未知范围）"
+    filtered: list[str] = []
+    for entry in entries:
+        m = re.match(r"【第(\d+)章", entry)
+        if m and start <= int(m.group(1)) <= end:
+            filtered.append(entry)
+    return "\n\n".join(filtered) if filtered else "（该范围内无概述）"
+
+
+def _review_source_for_scope(chapter_num: int, scope: str) -> tuple[str, str]:
+    summaries = _summaries_for_scope(chapter_num, scope)
+    if scope == "current":
+        return read_chapter_content(chapter_num), summaries
+    if scope == "recent3":
+        text = get_chapters_text_for_scope(chapter_num, "recent3") or ""
+        return text, summaries
+    return "", summaries
+
+
+def _format_finalize_report_markdown(result: dict) -> str:
+    num = result.get("chapter_num") or 0
+    lines = [f"# 本章定稿 · 第{num}章", ""]
+    a = result.get("archive") or {}
+    lines.append("## 已自动写入档案")
+    summary = a.get("summary") or {}
+    if summary.get("ok"):
+        arch = (
+            f"（{summary.get('archived_count')} 条已归档 summaries_archive）"
+            if summary.get("archived_count")
+            else ""
+        )
+        body = summary.get("full_text") or summary.get("text") or ""
+        lines.append(f"### 概述 → summaries_recent{arch}\n{body}")
+    observe = a.get("observe") or {}
+    if observe.get("applied_count"):
+        lines.append(f"### 角色观察 → 已写入 {observe['applied_count']} 条")
+        for it in observe.get("items") or []:
+            if it.get("applied"):
+                lines.append(
+                    f"- {it.get('target_file')}: {(it.get('proposed_text') or '')[:120]}"
+                )
+    detail = a.get("detail_locked") or {}
+    if detail.get("ok") and detail.get("text"):
+        lines.append(f"### 细节钉子 → plot_threads_locked\n{detail.get('text')}")
+    plot_new = a.get("plot_new_threads") or {}
+    if plot_new.get("appended_count"):
+        lines.append(f"### 新伏笔 → active ×{plot_new['appended_count']}")
+        for it in plot_new.get("items") or []:
+            lines.append(f"- {it}")
+    pp = result.get("plot_proposal") or {}
+    if pp.get("advanced"):
+        lines.append(f"\n## 伏笔推进（参考）\n{pp['advanced']}")
+    if pp.get("resolved"):
+        lines.append(f"\n## 疑似已回收（请手动确认）\n{pp['resolved']}")
+    q = result.get("quality") or {}
+    lines.append("\n## 质检报告")
+    for key, label in (
+        ("continuity", "连续性"),
+        ("character_drift", "人物"),
+        ("repetition", "套话"),
+        ("pacing", "爽点"),
+    ):
+        block = q.get(key) or {}
+        if block.get("skipped"):
+            continue
+        text = block.get("text") or ""
+        if not text:
+            continue
+        cnt = block.get("issue_count")
+        suffix = f"（{cnt} 条）" if cnt else ""
+        lines.append(f"\n### {label}{suffix}\n{text}")
+    todos = result.get("manual_todos") or []
+    if todos:
+        lines.append("\n## 还需你处理")
+        for todo in todos:
+            lines.append(f"- {todo.get('label', '')}")
+    if result.get("errors"):
+        lines.append("\n## 错误\n" + "\n".join(f"- {e}" for e in result["errors"]))
+    cost = result.get("total_cost_usd")
+    if cost is not None:
+        lines.append(f"\n费用合计：${float(cost):.4f}")
+    return "\n".join(lines)
+
+
+def _format_quality_full_report(
+    chapter_num: int,
+    scope: str,
+    *,
+    style_text: str = "",
+    continuity_text: str = "",
+    character_text: str = "",
+    pacing_text: str = "",
+    reader_text: str = "",
+    editor_text: str = "",
+) -> str:
+    label = _scope_label(scope, chapter_num)
+    lines = [f"# 质量审阅 · {label} · 第{chapter_num}章锚点", ""]
+    sections = [
+        ("文字层 · 套话", style_text),
+        ("设定层 · 连续性", continuity_text),
+        ("设定层 · 人物", character_text),
+        ("叙事层 · 爽点", pacing_text),
+        ("感受层 · 读者", reader_text),
+        ("感受层 · 编辑", editor_text),
+    ]
+    for title, text in sections:
+        if not (text or "").strip():
+            continue
+        lines.append(f"## {title}\n{text.strip()}\n")
+    if len(lines) <= 2:
+        lines.append("（未产生任何审阅内容）")
+    return "\n".join(lines)
 
 
 def api_run_character_drift(chapter_num: int | None = None) -> dict:
@@ -3356,15 +3522,212 @@ def api_run_repetition_check(
     pid = config.CHECK_PROVIDER
     system = build_cached_system(REPETITION_CHECK_SYSTEM, provider=pid)
     messages = [{"role": "user", "content": text}]
-    reply = call_api(system, messages, provider=pid, tag="重复检查", silent=True)
+    reply = call_api(system, messages, provider=pid, tag="套话检查", silent=True)
     if reply is None:
         return {"ok": False, "error": get_last_call_info().get("error", "检查失败")}
-    log_id = _quality_log_entry("repetition", num, reply)
+    scope_label = _scope_label(scope, num)
+    log_id = _quality_log_entry(
+        "repetition",
+        num,
+        reply,
+        summary=scope_label,
+        extra={"scope": scope},
+    )
     return {
         "ok": True,
         "reply": reply,
         "chapter_num": num,
         "scope": scope,
+        "scope_label": scope_label,
+        "log_id": log_id,
+        **get_last_call_info(),
+    }
+
+
+def api_run_reader_review(
+    chapter_num: int | None = None, scope: str = "current"
+) -> dict:
+    if scope not in ("current", "recent3", "all"):
+        return {"ok": False, "error": "scope 必须是 current / recent3 / all"}
+    resolved = _resolve_chapter_num(chapter_num)
+    if isinstance(resolved, dict):
+        return resolved
+    num, _content = resolved
+    primary, summaries = _review_source_for_scope(num, scope)
+    if not primary.strip() and not summaries.strip():
+        return {"ok": False, "error": "选定范围内没有正文或概述"}
+    scope_label = _scope_label(scope, num)
+    pid = config.CHECK_PROVIDER
+    system = build_cached_system(READER_REVIEW_SYSTEM, provider=pid)
+    messages = [
+        {
+            "role": "user",
+            "content": build_reader_review_user_message(
+                num, scope_label, primary, summaries
+            ),
+        }
+    ]
+    reply = call_api(system, messages, provider=pid, tag="读者审阅", silent=True)
+    if reply is None:
+        return {"ok": False, "error": get_last_call_info().get("error", "审阅失败")}
+    log_id = _quality_log_entry(
+        "reader_review",
+        num,
+        reply,
+        summary=scope_label,
+        extra={"scope": scope},
+    )
+    return {
+        "ok": True,
+        "reply": reply,
+        "chapter_num": num,
+        "scope": scope,
+        "scope_label": scope_label,
+        "log_id": log_id,
+        **get_last_call_info(),
+    }
+
+
+def api_run_editor_review(
+    chapter_num: int | None = None, scope: str = "current"
+) -> dict:
+    if scope not in ("current", "recent3", "all"):
+        return {"ok": False, "error": "scope 必须是 current / recent3 / all"}
+    resolved = _resolve_chapter_num(chapter_num)
+    if isinstance(resolved, dict):
+        return resolved
+    num, _content = resolved
+    primary, summaries = _review_source_for_scope(num, scope)
+    if not primary.strip() and not summaries.strip():
+        return {"ok": False, "error": "选定范围内没有正文或概述"}
+    scope_label = _scope_label(scope, num)
+    pid = config.CHECK_PROVIDER
+    system = build_cached_system(EDITOR_REVIEW_SYSTEM, provider=pid)
+    messages = [
+        {
+            "role": "user",
+            "content": build_editor_review_user_message(
+                num,
+                scope_label,
+                primary,
+                summaries,
+                read_text(WORLD_FILE),
+            ),
+        }
+    ]
+    reply = call_api(system, messages, provider=pid, tag="编辑审阅", silent=True)
+    if reply is None:
+        return {"ok": False, "error": get_last_call_info().get("error", "审阅失败")}
+    log_id = _quality_log_entry(
+        "editor_review",
+        num,
+        reply,
+        summary=scope_label,
+        extra={"scope": scope},
+    )
+    return {
+        "ok": True,
+        "reply": reply,
+        "chapter_num": num,
+        "scope": scope,
+        "scope_label": scope_label,
+        "log_id": log_id,
+        **get_last_call_info(),
+    }
+
+
+def api_run_quality_full_review(
+    chapter_num: int | None = None,
+    *,
+    scope: str = "current",
+    run_pacing: bool = True,
+    run_reader: bool = True,
+    run_editor: bool = True,
+) -> dict:
+    """只读质量审阅：套话 + 连续性 + 人物 + 可选爽点/读者/编辑，不写档案。"""
+    if scope not in ("current", "recent3", "all"):
+        return {"ok": False, "error": "scope 必须是 current / recent3 / all"}
+    resolved = _resolve_chapter_num(chapter_num)
+    if isinstance(resolved, dict):
+        return resolved
+    num, content = resolved
+    scope_label = _scope_label(scope, num)
+    errors: list[str] = []
+
+    style_text = ""
+    style_r = api_run_repetition_check(num, scope=scope)
+    if style_r.get("ok"):
+        style_text = style_r.get("reply") or ""
+    else:
+        errors.append(f"套话：{style_r.get('error', '失败')}")
+
+    continuity_text = ""
+    cont_r = api_run_check(num, scope=scope)
+    if cont_r.get("ok"):
+        continuity_text = cont_r.get("reply") or ""
+    else:
+        errors.append(f"连续性：{cont_r.get('error', '失败')}")
+
+    character_text = ""
+    if scope == "current":
+        char_r = api_run_character_drift(num)
+        if char_r.get("ok"):
+            character_text = char_r.get("reply") or ""
+        else:
+            errors.append(f"人物：{char_r.get('error', '失败')}")
+    else:
+        character_text = "（跨章/全书范围下人物检查以锚点章正文为准，请用「当前章」范围或单独点「人物」）"
+
+    pacing_text = ""
+    if run_pacing:
+        pace_r = api_run_pacing_check()
+        if pace_r.get("ok"):
+            pacing_text = pace_r.get("reply") or ""
+        else:
+            errors.append(f"爽点：{pace_r.get('error', '失败')}")
+
+    reader_text = ""
+    if run_reader:
+        reader_r = api_run_reader_review(num, scope=scope)
+        if reader_r.get("ok"):
+            reader_text = reader_r.get("reply") or ""
+        else:
+            errors.append(f"读者：{reader_r.get('error', '失败')}")
+
+    editor_text = ""
+    if run_editor:
+        editor_r = api_run_editor_review(num, scope=scope)
+        if editor_r.get("ok"):
+            editor_text = editor_r.get("reply") or ""
+        else:
+            errors.append(f"编辑：{editor_r.get('error', '失败')}")
+
+    report = _format_quality_full_report(
+        num,
+        scope,
+        style_text=style_text,
+        continuity_text=continuity_text,
+        character_text=character_text,
+        pacing_text=pacing_text,
+        reader_text=reader_text,
+        editor_text=editor_text,
+    )
+    ok = bool(style_text or continuity_text or character_text or pacing_text or reader_text or editor_text)
+    log_id = _quality_log_entry(
+        "quality_full",
+        num,
+        report,
+        summary=f"一键全查 · {scope_label}",
+        persisted=False,
+        extra={"scope": scope, "errors": errors},
+    )
+    return {
+        "ok": ok,
+        "reply": report,
+        "chapter_num": num,
+        "scope": scope,
+        "scope_label": scope_label,
+        "errors": errors,
         "log_id": log_id,
         **get_last_call_info(),
     }
@@ -4291,26 +4654,34 @@ def api_run_post_chapter_finalize(
         log_summary_parts.append(
             f"连续性{quality['continuity']['issue_count']}条"
         )
+    if quality.get("repetition", {}).get("issue_count"):
+        log_summary_parts.append(f"套话{quality['repetition']['issue_count']}条")
+
+    flat_errors = [f"{e.get('task', '?')}：{e.get('message', '')}" for e in errors]
+    if archive_errors:
+        flat_errors = list(dict.fromkeys(flat_errors + archive_errors))
+
+    finalize_report_md = _format_finalize_report_markdown(
+        {
+            "chapter_num": num,
+            "archive": archive,
+            "plot_proposal": plot_proposal,
+            "quality": quality,
+            "manual_todos": manual_todos,
+            "errors": flat_errors if not ok else [],
+            "total_cost_usd": total_cost,
+        }
+    )
 
     log_id = _quality_log_entry(
         "finalize",
         num,
-        json.dumps(
-            {
-                "archive": {k: v.get("ok") for k, v in archive.items()} if archive else {},
-                "quality_ok": quality_any,
-            },
-            ensure_ascii=False,
-        ),
+        finalize_report_md,
         summary=" · ".join(log_summary_parts) or "本章定稿",
         persisted=archive_any,
         persisted_detail="、".join(log_summary_parts) if log_summary_parts else "",
         extra={"calls": calls, "ok": ok, "partial": partial},
     )
-
-    flat_errors = [f"{e.get('task', '?')}：{e.get('message', '')}" for e in errors]
-    if archive_errors:
-        flat_errors = list(dict.fromkeys(flat_errors + archive_errors))
 
     result = {
         "ok": ok,

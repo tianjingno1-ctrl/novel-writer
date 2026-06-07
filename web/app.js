@@ -26,6 +26,8 @@ const dataCache = {
 const API_TIMEOUT_MS = 120000;
 /** 本章定稿：档案 + 质检 + 爽点，多次 LLM 串行，与后端 httpx 超时对齐 */
 const FINALIZE_API_TIMEOUT_MS = 1800000;
+/** 一键全查：多次 LLM 串行 */
+const QUALITY_FULL_TIMEOUT_MS = FINALIZE_API_TIMEOUT_MS;
 /** 自由聊：超长输出 + 大上下文，与后端 httpx 超时对齐（30 分钟） */
 const FREE_CHAT_API_TIMEOUT_MS = 1800000;
 const STREAM_FIRST_BYTE_MS = 90000;
@@ -223,7 +225,7 @@ function applyChrome() {
   document.querySelectorAll('.view').forEach(v => v.classList.add('hidden'));
   const viewId = 'view' + mode.charAt(0).toUpperCase() + mode.slice(1);
   document.getElementById(viewId)?.classList.remove('hidden');
-  document.getElementById('sidebar')?.classList.toggle('hidden', mode === 'review' || mode === 'overview');
+  document.getElementById('sidebar')?.classList.toggle('hidden', mode === 'review' || mode === 'overview' || mode === 'quality');
 
   const tabs = SIDEBAR_CONFIG[mode] || SIDEBAR_CONFIG.write;
   let nextSidebar = sidebar;
@@ -258,6 +260,9 @@ async function renderMainView() {
       break;
     case 'free':
       await loadFreeChat();
+      break;
+    case 'quality':
+      await renderQualityView();
       break;
     case 'review':
       await renderReview();
@@ -869,9 +874,24 @@ const QUALITY_RESULT_META = {
     actions: ['char_static', 'char_dynamic'],
   },
   repetition: {
-    match: (t) => t.includes('重复检查'),
-    guide: '重复套话请直接在<b>写作模式</b>编辑对应章节正文，或调整 <code>style.md</code> 禁用词。',
+    match: (t) => t.includes('套话') || t.includes('重复检查'),
+    guide: '套话问题请直接在<b>写作模式</b>编辑对应章节正文，或调整 <code>style.md</code> 禁用词。',
     actions: ['style'],
+  },
+  reader: {
+    match: (t) => t.includes('读者审阅') || t.includes('读者视角'),
+    guide: '阅读体验问题请改<b>章节正文</b>或 Plan Beat；审阅不会自动写档案。',
+    actions: [],
+  },
+  editor: {
+    match: (t) => t.includes('编辑审阅') || t.includes('编辑视角'),
+    guide: '编辑建议请对照 <code>world.md</code> 节拍与 Plan；改稿后建议重新「一键全查」对比。',
+    actions: ['world'],
+  },
+  quality_full: {
+    match: (t) => t.includes('一键全查') || t.includes('质量审阅'),
+    guide: '本报告为只读诊断。改完请点「本章定稿」同步概述/观察/钉子，或到质量页重新全查对比。',
+    actions: [],
   },
   pacing: {
     match: (t) => t.includes('爽点检查'),
@@ -1825,12 +1845,14 @@ async function openQualityLogEntry(entryId) {
   const ch = row.chapter_num ? `第 ${row.chapter_num} 章` : '';
   const title = `${row.label || '质量记录'}${ch ? ` · ${ch}` : ''}`;
   const hint = row.persisted_detail || row.summary || '';
-  if (state.mode !== 'chat') await setMode('chat');
+  if (state.mode !== 'chat' && state.mode !== 'quality') await setMode('chat');
   showQualityResult(title, row.body || '', hint, {
     createdAt: row.created_at,
     persisted: row.persisted,
   });
-  setState({ sidebar: 'quality' }, 'sidebar');
+  if (state.mode !== 'quality') {
+    setState({ sidebar: 'quality' }, 'sidebar');
+  }
 }
 
 async function renderQualitySidebar(body) {
@@ -3622,7 +3644,7 @@ function formatFinalizeResultBody(r) {
   for (const key of ['continuity', 'character_drift', 'repetition', 'pacing']) {
     const block = q[key];
     if (!block || block.skipped) continue;
-    const label = { continuity: '连续性', character_drift: '人物', repetition: '重复', pacing: '爽点' }[key];
+    const label = { continuity: '连续性', character_drift: '人物', repetition: '套话', pacing: '爽点' }[key];
     lines.push(`\n## ${label}${block.issue_count ? `（${block.issue_count} 条）` : ''}\n${block.text || ''}`);
   }
   if ((r.manual_todos || []).length) {
@@ -3643,7 +3665,7 @@ function formatFinalizeHint(r) {
   const q = r.quality || {};
   if (q.continuity?.text) parts.push('连续性');
   if (q.character_drift?.text) parts.push('人物');
-  if (q.repetition?.text) parts.push('重复');
+  if (q.repetition?.text) parts.push('套话');
   if (q.pacing?.ok) parts.push('爽点');
   if (r.partial) return `⚠️ 部分完成：${parts.join('、') || '见详情'}。${(r.errors || []).join('；')}`;
   return parts.length
@@ -3660,7 +3682,7 @@ async function runPostChapterFinalize(chapterNum = null, { skipConfirm = false, 
   if (
     !skipConfirm
     && !confirm(
-      `为第 ${num} 章运行「本章定稿」？\n\n将自动：写入档案（概述/观察/钉子/新伏笔）+ 质检（连续性/人物/重复/爽点）\n\n约 2–3 次 API。`,
+      `为第 ${num} 章运行「本章定稿」？\n\n将自动：写入档案（概述/观察/钉子/新伏笔）+ 质检（连续性/人物/套话/爽点）\n\n约 2–3 次 API。`,
     )
   ) {
     return;
@@ -3753,25 +3775,36 @@ async function runSummary(chapterNum = null) {
   }, { btnIds: ['runSummaryBtn', 'runSummaryQuickBtn', 'runSummaryWriteBtn'], loadingText: '生成中…' });
 }
 
-async function runCheck() {
-  const num = getWriteChapterNum();
+async function runCheck(chapterNum = null) {
+  const num = chapterNum || getQualityChapterNum() || getWriteChapterNum();
+  const scope = getQualityScope();
+  const scopeLabel = { current: '当前章', recent3: '最近3章', all: '全书' }[scope] || scope;
   await runWithLoading(async () => {
-    const body = num ? JSON.stringify({ chapter_num: num }) : '{}';
-    const r = await api('/check', { method: 'POST', body });
+    const r = await api('/check', {
+      method: 'POST',
+      body: JSON.stringify({ chapter_num: num || undefined, scope }),
+    });
     invalidateQualityCache();
-    showQualityResult(`连续性检查 · 第 ${r.chapter_num || num || '?'} 章`, r.reply);
-    toast('连续性检查完成：上方蓝条说明了每项问题该改哪个文件');
-  }, { btnId: 'runCheckBtn', loadingText: '检查中…' });
+    await refreshQualityHistoryList();
+    showQualityResult(
+      `连续性检查 · ${scopeLabel} · 第 ${r.chapter_num || num || '?'} 章锚点`,
+      r.reply,
+    );
+    toast('连续性检查完成');
+  }, { btnIds: ['runCheckBtn', 'runCheckBtnDock', 'qualityBtnContinuity'], loadingText: '检查中…' });
 }
 
-async function runCharacterDrift() {
+async function runCharacterDrift(chapterNum = null) {
+  const num = chapterNum || getQualityChapterNum() || getWriteChapterNum();
   await runWithLoading(async () => {
-    const num = getWriteChapterNum();
-    const body = num ? JSON.stringify({ chapter_num: num }) : '{}';
-    const r = await api('/check/character-drift', { method: 'POST', body });
+    const r = await api('/check/character-drift', {
+      method: 'POST',
+      body: JSON.stringify({ chapter_num: num || undefined }),
+    });
     invalidateQualityCache();
+    await refreshQualityHistoryList();
     showQualityResult(`人物检查 · 第 ${r.chapter_num || num || '?'} 章`, r.reply);
-  }, { btnId: 'runCharDriftBtn', loadingText: '检查中…' });
+  }, { btnIds: ['runCharDriftBtn', 'runCharDriftBtnDock', 'qualityBtnCharacter'], loadingText: '检查中…' });
 }
 
 let _observeState = null;
@@ -4008,9 +4041,9 @@ async function runDetailExtract() {
   }, { btnIds: ['runDetailExtractBtn', 'runDetailExtractQuickBtn', 'runDetailExtractWriteBtn'], loadingText: '提取中…' });
 }
 
-async function runRepetitionCheck() {
-  const scope = document.getElementById('repetitionScopeSel')?.value || 'current';
-  const num = getWriteChapterNum();
+async function runRepetitionCheck(chapterNum = null) {
+  const scope = getQualityScope();
+  const num = chapterNum || getQualityChapterNum() || getWriteChapterNum();
   const scopeLabel = { current: '当前章', recent3: '最近3章', all: '全书' }[scope] || scope;
   await runWithLoading(async () => {
     const r = await api('/check/repetition', {
@@ -4018,16 +4051,173 @@ async function runRepetitionCheck() {
       body: JSON.stringify({ scope, chapter_num: num || undefined }),
     });
     invalidateQualityCache();
-    showQualityResult(`重复检查 · ${scopeLabel}`, r.reply);
-  }, { btnId: 'runRepetitionBtn', loadingText: '检查中…' });
+    await refreshQualityHistoryList();
+    showQualityResult(`套话检查 · ${scopeLabel}`, r.reply);
+  }, { btnIds: ['runRepetitionBtn', 'runRepetitionBtnDock', 'qualityBtnStyle'], loadingText: '检查中…' });
+}
+
+async function runReaderReview() {
+  const scope = getQualityScope();
+  const num = getQualityChapterNum() || getWriteChapterNum();
+  const scopeLabel = { current: '当前章', recent3: '最近3章', all: '全书' }[scope] || scope;
+  await runWithLoading(async () => {
+    const r = await api('/quality/reader', {
+      method: 'POST',
+      body: JSON.stringify({ scope, chapter_num: num || undefined }),
+    }, QUALITY_FULL_TIMEOUT_MS);
+    invalidateQualityCache();
+    await refreshQualityHistoryList();
+    showQualityResult(`读者审阅 · ${scopeLabel} · 第 ${r.chapter_num || num} 章锚点`, r.reply);
+  }, { btnId: 'qualityBtnReader', loadingText: '审阅中…' });
+}
+
+async function runEditorReview() {
+  const scope = getQualityScope();
+  const num = getQualityChapterNum() || getWriteChapterNum();
+  const scopeLabel = { current: '当前章', recent3: '最近3章', all: '全书' }[scope] || scope;
+  await runWithLoading(async () => {
+    const r = await api('/quality/editor', {
+      method: 'POST',
+      body: JSON.stringify({ scope, chapter_num: num || undefined }),
+    }, QUALITY_FULL_TIMEOUT_MS);
+    invalidateQualityCache();
+    await refreshQualityHistoryList();
+    showQualityResult(`编辑审阅 · ${scopeLabel} · 第 ${r.chapter_num || num} 章锚点`, r.reply);
+  }, { btnId: 'qualityBtnEditor', loadingText: '审阅中…' });
+}
+
+async function runQualityFullReview() {
+  const scope = getQualityScope();
+  const num = getQualityChapterNum() || getWriteChapterNum();
+  if (!num) return toast('请先选择锚点章');
+  const scopeLabel = { current: '当前章', recent3: '最近3章', all: '全书' }[scope] || scope;
+  if (!confirm(`一键全查（只读）\n\n锚点：第 ${num} 章 · 范围：${scopeLabel}\n\n含套话/连续性/人物/爽点/读者/编辑，约 4–6 次 API，不会写档案。`)) {
+    return;
+  }
+  await runWithLoading(async () => {
+    const r = await api('/quality/full', {
+      method: 'POST',
+      body: JSON.stringify({
+        chapter_num: num,
+        scope,
+        run_pacing: true,
+        run_reader: true,
+        run_editor: true,
+      }),
+    }, QUALITY_FULL_TIMEOUT_MS);
+    invalidateQualityCache();
+    await refreshQualityHistoryList();
+    const hint = r.errors?.length
+      ? `部分步骤失败：${r.errors.join('；')}`
+      : '只读报告已入库，改稿后请「本章定稿」或重新全查对比';
+    showQualityResult(`一键全查 · ${scopeLabel} · 第 ${r.chapter_num || num} 章`, r.reply, hint);
+    toast(r.errors?.length ? '一键全查部分完成' : '一键全查完成');
+  }, { btnId: 'qualityBtnFull', loadingText: '全查中（较久）…' });
+}
+
+function getQualityScope() {
+  const q = document.getElementById('qualityScopeSel')?.value;
+  if (q) return q;
+  return document.getElementById('repetitionScopeSel')?.value || 'current';
+}
+
+function getQualityChapterNum() {
+  const sel = document.getElementById('qualityChapterSel');
+  if (sel?.value) return parseInt(sel.value, 10);
+  return getWriteChapterNum();
+}
+
+async function fillQualityChapterSel() {
+  const sel = document.getElementById('qualityChapterSel');
+  if (!sel) return;
+  await ensurePlanData();
+  const chapters = _chaptersWithBody();
+  const prev = sel.value;
+  sel.replaceChildren();
+  for (const ch of chapters) {
+    const opt = document.createElement('option');
+    opt.value = String(ch.num);
+    opt.textContent = `第 ${ch.num} 章`;
+    sel.appendChild(opt);
+  }
+  const target = getWriteChapterNum() || chapters[chapters.length - 1]?.num;
+  if (target) sel.value = String(target);
+  else if (prev) sel.value = prev;
+}
+
+function onQualityChapterChange() {
+  const num = getQualityChapterNum();
+  if (num) setState({ writeChapterNum: num }, 'none');
+}
+
+async function refreshQualityHistoryList() {
+  const list = document.getElementById('qualityHistoryList');
+  if (!list) return;
+  const entries = await ensureQualityLog(true);
+  clearEl(list);
+  const reviewKinds = new Set([
+    'finalize', 'continuity', 'character_drift', 'repetition', 'pacing',
+    'reader_review', 'editor_review', 'quality_full',
+  ]);
+  const filtered = entries.filter((e) => reviewKinds.has(e.kind));
+  if (!filtered.length) {
+    const empty = document.createElement('p');
+    empty.className = 'quality-history__empty';
+    empty.textContent = '尚无审阅记录。运行单项或「一键全查」后会出现在这里。';
+    list.appendChild(empty);
+    return;
+  }
+  for (const e of filtered.slice(0, 30)) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'quality-history__item';
+    const ch = e.chapter_num ? `第${e.chapter_num}章 · ` : '';
+    const saved = e.persisted ? ' · ✓已写档案' : '';
+    row.innerHTML =
+      `<span class="quality-history__meta">${escapeHtml(e.created_at || '')} · ${escapeHtml(e.label || e.kind)}${saved}</span>` +
+      `<span class="quality-history__summary">${escapeHtml(e.summary || e.preview || '')}</span>`;
+    row.addEventListener('click', () => openQualityLogEntry(e.id));
+    list.appendChild(row);
+  }
+}
+
+async function renderQualityView() {
+  await fillQualityChapterSel();
+  await refreshQualityHistoryList();
+  const status = await fetchGuideStatus(true);
+  if (status) renderQualityGuideHints(status);
+}
+
+function renderQualityGuideHints(status) {
+  const container = document.getElementById('qualityGuideBar');
+  if (!container) return;
+  const todos = status.post_chapter_todos || {};
+  const items = [];
+  if (todos.summary) {
+    items.push(`🔴 第 ${status.latest_chapter_num} 章尚未定稿（缺概述）→ 用下方「本章定稿」`);
+  }
+  if (todos.char_dynamic_never || todos.char_dynamic) {
+    items.push('🟡 char_dynamic 需更新 → 定稿观察或手动编辑');
+  }
+  if (todos.plot_threads_never || todos.plot_threads) {
+    items.push('🟡 plot_threads_active 需更新 → 定稿或手动编辑');
+  }
+  if (todos.archive) {
+    items.push('🟡 summaries_recent 条目过多 → 剪切旧条到 archive');
+  }
+  container.innerHTML = items.length
+    ? `<div class="guide-bar guide-bar--warn"><div class="guide-bar__title">章后维护提醒</div>${items.map((i) => `<div class="guide-bar__item">${i}</div>`).join('')}</div>`
+    : `<div class="guide-bar guide-bar--ok">✅ 档案状态良好；审阅结果不会自动写盘，改稿后请「本章定稿」</div>`;
+  setGuideHostVisible('qualityGuideBar', true);
 }
 
 async function runPacingCheck() {
   await runWithLoading(async () => {
     const r = await api('/check/pacing', { method: 'POST' });
     invalidateQualityCache();
+    await refreshQualityHistoryList();
     showQualityResult('爽点检查', r.reply);
-  }, { btnId: 'runPacingBtn', loadingText: '检查中…' });
+  }, { btnIds: ['runPacingBtn', 'runPacingBtnDock', 'qualityBtnPacing'], loadingText: '检查中…' });
 }
 
 let _outlineLatestReply = '';
@@ -4603,7 +4793,7 @@ async function fetchGuideStatus(force = false) {
 }
 
 async function renderGuideHints(page) {
-  ['overview-guide-bar', 'plan-guide-panel', 'write-guide-bar', 'chat-guide-bar'].forEach((id) => {
+  ['overview-guide-bar', 'plan-guide-panel', 'write-guide-bar', 'chat-guide-bar', 'qualityGuideBar'].forEach((id) => {
     setGuideHostVisible(id, false);
   });
   const status = await fetchGuideStatus();
@@ -4620,6 +4810,9 @@ async function renderGuideHints(page) {
       break;
     case 'chat':
       renderChatHints(status);
+      break;
+    case 'quality':
+      renderQualityGuideHints(status);
       break;
     default:
       break;
@@ -4799,7 +4992,7 @@ async function showPostChapterModal(chapterNum, force = false) {
   document.getElementById('postChapterModal')?.remove();
 
   const allItems = [
-    { key: 'summary', label: '本章定稿（含概述）', why: 'AI 靠概述记前文；定稿会写入概述并顺带观察/钉子与质检。', action: '点右侧「本章定稿」或底部主按钮' },
+    { key: 'summary', label: '本章定稿（含概述）', why: 'AI 靠概述记前文；定稿会写入概述并顺带观察/钉子与质检。', action: '点右侧「本章定稿」或质量页主按钮' },
     { key: 'char_dynamic_never', label: '首次更新 char_dynamic', why: '人物当前心理、关系要记在这里，否则容易人设漂移。', action: '点「打开」→ 填写 → 顶部「保存」并确认' },
     { key: 'char_dynamic', label: '更新 char_dynamic', why: '距上次更新已多章，人物状态可能过时。', action: '点「打开」→ 修改 → 顶部「保存」并确认' },
     { key: 'plot_threads_never', label: '首次更新 plot_threads_active', why: '伏笔清单是防止「坑」被遗忘的唯一手段。', action: '点「打开」→ 填写 → 顶部「保存」并确认' },

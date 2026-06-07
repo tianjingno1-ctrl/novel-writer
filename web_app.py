@@ -374,6 +374,16 @@ class RepetitionRequest(BaseModel):
         return v
 
 
+class QualityScopeRequest(RepetitionRequest):
+    """带 scope 的质量审阅请求（连续性 / 套话 / 读者 / 编辑 / 一键全查）。"""
+
+
+class QualityFullRequest(QualityScopeRequest):
+    run_pacing: bool = True
+    run_reader: bool = True
+    run_editor: bool = True
+
+
 class OutlineApplyRequest(BaseModel):
     offset: int = 1
     replace: bool = False
@@ -800,9 +810,12 @@ def run_summary(body: ChapterQualityRequest | None = None) -> dict:
 
 
 @app.post("/api/check")
-def run_check(body: ChapterQualityRequest | None = None) -> dict:
-    body = body or ChapterQualityRequest()
-    return _require_ok(core.api_run_check(body.chapter_num), "连续性检查失败")
+def run_check(body: QualityScopeRequest | None = None) -> dict:
+    body = body or QualityScopeRequest()
+    return _require_ok(
+        core.api_run_check(body.chapter_num, scope=body.scope),
+        "连续性检查失败",
+    )
 
 
 @app.post("/api/check/character-drift")
@@ -882,13 +895,46 @@ def check_repetition(body: RepetitionRequest | None = None) -> dict:
     body = body or RepetitionRequest()
     return _require_ok(
         core.api_run_repetition_check(body.chapter_num, body.scope),
-        "重复检查失败",
+        "套话检查失败",
     )
 
 
 @app.post("/api/check/pacing")
 def check_pacing() -> dict:
     return _require_ok(core.api_run_pacing_check(), "爽点检查失败")
+
+
+@app.post("/api/quality/reader")
+def quality_reader(body: QualityScopeRequest | None = None) -> dict:
+    body = body or QualityScopeRequest()
+    return _require_ok(
+        core.api_run_reader_review(body.chapter_num, scope=body.scope),
+        "读者审阅失败",
+    )
+
+
+@app.post("/api/quality/editor")
+def quality_editor(body: QualityScopeRequest | None = None) -> dict:
+    body = body or QualityScopeRequest()
+    return _require_ok(
+        core.api_run_editor_review(body.chapter_num, scope=body.scope),
+        "编辑审阅失败",
+    )
+
+
+@app.post("/api/quality/full")
+def quality_full(body: QualityFullRequest | None = None) -> dict:
+    body = body or QualityFullRequest()
+    return _require_ok(
+        core.api_run_quality_full_review(
+            body.chapter_num,
+            scope=body.scope,
+            run_pacing=body.run_pacing,
+            run_reader=body.run_reader,
+            run_editor=body.run_editor,
+        ),
+        "质量审阅失败",
+    )
 
 
 @app.post("/api/observe")

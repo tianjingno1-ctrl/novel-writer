@@ -23,8 +23,11 @@ KIND_LABELS: dict[str, str] = {
     "summary": "生成概述",
     "continuity": "连续性检查",
     "character_drift": "人物检查",
-    "repetition": "重复检查",
+    "repetition": "套话检查",
     "pacing": "爽点检查",
+    "reader_review": "读者审阅",
+    "editor_review": "编辑审阅",
+    "quality_full": "一键全查",
 }
 
 

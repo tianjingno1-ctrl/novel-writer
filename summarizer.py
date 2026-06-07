@@ -98,6 +98,44 @@ CHECK_SYSTEM = """你是一位严谨的小说 continuity editor（连续性编�
 不要改写正文，不要输出无关内容。
 若未发现明显矛盾，仅回复：✅ 未发现明显矛盾"""
 
+CROSS_CHAPTER_CONTINUITY_SYSTEM = """你是一位严谨的小说 continuity editor（连续性编辑）。
+对照用户提供的设定、章节概述（非全文）、细节钉子与伏笔清单，
+检查指定章节范围内的逻辑是否自洽。
+
+重点检查：
+1. 时间线是否自洽（事件顺序、时间跨度、季节等）
+2. 伏笔是否有头无尾（plot_threads_active 未回收与概述是否矛盾）
+3. 人物位置/状态/关系是否连贯
+4. 世界规则、专名、数字是否与 plot_threads_locked 及概述一致
+5. 各章概述之间是否互相矛盾
+
+只输出问题清单，每条一行，格式：「- [类型] 具体问题描述」
+不要改写正文。若未发现明显矛盾，仅回复：✅ 未发现明显矛盾"""
+
+READER_REVIEW_SYSTEM = """你是一位资深网文读者，从追读体验角度审阅给定内容。
+关注：开篇是否抓人、钩子是否有效、节奏是否拖、情绪是否代入、有无出戏点、是否想继续读。
+
+输出格式：
+
+## 读者审阅
+### ✅ 读得顺的部分
+### ⚠️ 可能弃读/出戏点
+- （引用或概括具体位置 + 原因）
+### 📌 建议（不改设定，只谈阅读感受）
+"""
+
+EDITOR_REVIEW_SYSTEM = """你是一位商业网文编辑，从可刊稿与连载运营角度审阅。
+关注：主线是否清晰、冲突是否升级、人物动机、章末钩子、爽点是否落地、是否有注水段。
+
+输出格式：
+
+## 编辑审阅
+### ✅ 可保留的亮点
+### ⚠️ 需改稿的问题
+- （问题 + 建议方向，不直接改写正文）
+### 📌 下一章建议（可选）
+"""
+
 OUTLINE_SYSTEM = """你是一位资深小说主编，擅长快穿/爽文叙事节奏与剧情规划。
 用户会提供「世界观设定（含各世界五点骨架、章节节拍、爽点表）」「人物当前状态」「已有章节概述」「未回收伏笔清单」。
 请基于这些已确立的事实，为接下来的 N 章设计剧情走向建议。
@@ -161,6 +199,61 @@ def build_check_user_message(
 请对照以上资料，检查最新章节中的矛盾与不一致。"""
 
 
+def build_cross_chapter_check_user_message(
+    world: str,
+    characters: str,
+    char_current: str,
+    summaries_slice: str,
+    plot_locked: str,
+    plot_active: str,
+    scope_label: str,
+    chapter_num: int,
+    chapter_content: str = "",
+) -> str:
+    parts = [
+        f"请对以下范围做跨章连续性检查：{scope_label}（锚点章：第{chapter_num}章）\n",
+        f"## 世界观设定\n{world or '（未维护）'}\n",
+        f"## 人物设定\n{characters or '（未维护）'}\n",
+        f"## 人物当前状态\n{char_current or '（未维护）'}\n",
+        f"## 范围内章节概述\n{summaries_slice or '（暂无概述，请先为本章定稿或生成概述）'}\n",
+        f"## 细节钉子（plot_threads_locked）\n{truncate_context_tail(plot_locked) or '（暂无）'}\n",
+        f"## 伏笔清单（plot_threads_active）\n{truncate_context_tail(plot_active) or '（暂无）'}\n",
+    ]
+    if chapter_content.strip():
+        parts.append(f"## 锚点章正文（第{chapter_num}章，供对照）\n{chapter_content}\n")
+    return "\n".join(parts)
+
+
+def build_reader_review_user_message(
+    chapter_num: int,
+    scope_label: str,
+    content: str,
+    summaries_slice: str = "",
+) -> str:
+    body = content.strip() or summaries_slice.strip() or "（无内容）"
+    kind = "正文" if content.strip() else "概述"
+    return (
+        f"请从读者视角审阅：{scope_label}（锚点第{chapter_num}章，主要依据{kind}）\n\n"
+        f"{body}"
+    )
+
+
+def build_editor_review_user_message(
+    chapter_num: int,
+    scope_label: str,
+    content: str,
+    summaries_slice: str = "",
+    world: str = "",
+) -> str:
+    body = content.strip() or summaries_slice.strip() or "（无内容）"
+    kind = "正文" if content.strip() else "概述"
+    return (
+        f"请从编辑视角审阅：{scope_label}（锚点第{chapter_num}章，主要依据{kind}）\n\n"
+        f"## 世界观节拍参考\n{world or '（未维护）'}\n\n"
+        f"## 审阅材料（{kind}）\n{body}"
+    )
+
+
 def build_outline_user_message(
     world: str,
     char_current: str,
@@ -208,12 +301,12 @@ DETAIL_EXTRACT_SYSTEM = """你是专业的小说编辑，负责追踪细节一�
 - 【类别】描述（出处：原文简短引用）
 """
 
-REPETITION_CHECK_SYSTEM = """你是专业的文字编辑，负责检查重复表达。
+REPETITION_CHECK_SYSTEM = """你是专业的文字编辑，负责检查套话与重复表达。
 请分析【正文】中出现频率过高的词语、句式、段落结构。
 
 输出格式：
 
-## 重复表达报告
+## 套话检查报告
 ### 高频词语（出现3次以上）
 | 词语/句式 | 出现次数 | 建议替换 |
 |---------|---------|---------|
@@ -423,7 +516,7 @@ QUALITY_CHECK_BUNDLE_SYSTEM = """你是严谨的小说质检编辑。对照用�
 
 1. **continuity**：连续性检查（对照世界观、人物、概述、细节钉子）
 2. **character_drift**：人物一致性（对照 char_static/char_dynamic 性格锚点）
-3. **repetition**：重复表达（分析给定范围内的正文）
+3. **repetition**：套话/重复表达（分析给定范围内的正文）
 
 严格只输出一个 JSON 代码块，fence 标记必须是 quality-bundle-json：
 
@@ -431,7 +524,7 @@ QUALITY_CHECK_BUNDLE_SYSTEM = """你是严谨的小说质检编辑。对照用�
 {
   "continuity": "- [类型] 具体问题描述\\n（无问题则仅写：✅ 未发现明显矛盾）",
   "character_drift": "## 人物一致性报告\\n### ✅ 一致的部分\\n...\\n### ⚠️ 疑似漂移\\n...",
-  "repetition": "## 重复表达报告\\n..."
+  "repetition": "## 套话检查报告\\n..."
 }
 ```
 
@@ -499,13 +592,13 @@ def build_quality_bundle_user_message(
     repetition_scope: str,
 ) -> str:
     return (
-        f"请对第{chapter_num}章完成质检 bundle（连续性 + 人物 + 重复）。\n\n"
+        f"请对第{chapter_num}章完成质检 bundle（连续性 + 人物 + 套话）。\n\n"
+        f"## 套话检查范围（scope={repetition_scope}）\n{repetition_text}\n\n"
         f"## 世界观设定\n{world or '（未维护）'}\n\n"
         f"## 人物设定\n{characters or '（未维护）'}\n\n"
         f"## 人物当前状态\n{char_current or '（未维护）'}\n\n"
         f"## 章节概述（已写章节）\n{truncate_context_tail(summaries) or '（暂无）'}\n\n"
-        f"## 最新章节正文（第{chapter_num}章）\n{chapter_content}\n\n"
-        f"## 重复检查范围（scope={repetition_scope}）\n{repetition_text}"
+        f"## 最新章节正文（第{chapter_num}章）\n{chapter_content}"
     )
 
 
