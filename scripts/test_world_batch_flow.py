@@ -18,6 +18,8 @@ os.environ.setdefault("NOVEL_QUALITY_PROVIDER", "deepseek")
 import config
 import main
 import quality_log
+from app.bootstrap import init_context
+from core.orchestration import batch as orchestration_batch
 
 
 def _sep(title: str) -> None:
@@ -35,13 +37,14 @@ def main_flow() -> int:
         return 1
     print("API Key: OK")
 
+    ctx = init_context()
     _sep("2. 世界批次 status")
-    status = main.api_get_world_batch_status()
+    status = orchestration_batch.get_world_batch_status(ctx)
     print(json.dumps(status, ensure_ascii=False, indent=2))
 
     _sep("3. 发送预览 preview")
     t0 = time.time()
-    preview = main.api_preview_world_batch_review()
+    preview = orchestration_batch.preview_world_batch_review(ctx)
     if not preview.get("ok"):
         print("ERROR:", preview.get("error"))
         return 1
@@ -66,7 +69,7 @@ def main_flow() -> int:
     _sep("4. 执行世界审阅 review（DeepSeek，串行 API）")
     print("开始调用，请稍候…")
     t1 = time.time()
-    result = main.api_run_world_batch_review()
+    result = orchestration_batch.run_world_batch_review(ctx)
     elapsed = time.time() - t1
     print(f"耗时 {elapsed:.1f}s")
 

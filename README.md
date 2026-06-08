@@ -62,17 +62,19 @@ pip install -r requirements.txt
 
 ## 运行
 
-### Web 界面（推荐）
+### HTTP API（推荐）
 
 ```bash
 cd novel_writer
 copy .env.example .env    # 填入 API Key
-启动web.bat               # 或: python web_app.py
+启动API.bat               # 或: python web_app.py
 ```
 
-浏览器打开 http://127.0.0.1:8765 ，支持规划、写作、写书对话、自由聊、统计。
+浏览器打开 http://127.0.0.1:8765/docs 查看 OpenAPI 并调试 `/api/*`。根路径 `/` 会重定向到 `/docs`。
 
-> **Web 使用限制（必读）**：进程内共享**同一份**写作会话与费用统计，**仅限本地单人**使用；多标签页会互相干扰。建议在 `.env` 设置 `NOVEL_WEB_TOKEN`，API 请求须带 `X-Novel-Token`；默认仅监听 `127.0.0.1`，请勿对公网暴露。
+> **内置 Web 写作界面已移除**（原 `web/` 目录）。新客户端计划为 React PWA，对接同一套 API。
+>
+> **API 使用限制（必读）**：进程内共享**同一份**写作会话与费用统计，**仅限本地单人**使用；多客户端会互相干扰。建议在 `.env` 设置 `NOVEL_WEB_TOKEN`，API 请求须带 `X-Novel-Token`；默认仅监听 `127.0.0.1`，请勿对公网暴露。
 
 ### CLI
 
@@ -140,18 +142,11 @@ System prompt 按「稳定 → 变化」分三层，均带 `cache_control`，利
 
 开启后，后台线程会在你**仍在写作**（6 分钟内有操作）且**距上次 API 请求超过 50 分钟**时，自动发送轻量心跳请求刷新 1 小时缓存，避免缓存过期。离开电脑超过 6 分钟会自动停止，不产生多余费用。
 
-## 新手提示（Web 界面）
+## 新手提示
 
-1. **Write 模式** → 侧边栏「全局文件」→ 编辑 `world.md`、`characters.md`，写好基础设定。
-2. **Plan 模式** → 「新建章节」→ 添加场景 → 填写 Scene Beat。
-3. 每写完一章 → **写书对话（Chat）模式** → 点击「生成概述」（等同 CLI 的 `/summary`）。
-4. 每写完 3–5 章 → **写书对话（Chat）模式** → 点击「连续性检查」（等同 `/check`）。
-5. 需要规划后续剧情 → **写书对话（Chat）模式** → 点击「续章灵感」（等同 `/outline`，需先有概述）。
-6. 有新人物或设定变更时：
-   - 推荐在侧边栏 **「设定库 Codex」** 新建独立条目（勾选后注入 AI，不易误改旧内容）；
-   - 或打开「全局文件 → 人物总表」，**滚到文件末尾追加**，不要改上方已有内容（等同 `/patch` 的只增不改习惯）。
-
-> 仍可使用 `python main.py` 命令行，上述 `/summary`、`/check`、`/outline`、`/patch` 命令在 CLI 中继续有效。详见 [用户手册](./docs/novel-writer-manual.md)。
+- **CLI**：`python main.py`，使用 `/summary`、`/check`、`/outline`、`/patch` 等命令（见上表）。
+- **API**：在 http://127.0.0.1:8765/docs 调用对应路由（如 `POST /api/summary`、`POST /api/check`）。
+- 书库与设定文件位于 `library/books/{id}/`（多书）或迁移前的 `data/`。详见 [用户手册](./docs/novel-writer-manual.md)（手册中部分 Web 顶栏说明针对已移除的旧 UI，以 CLI/API 为准）。
 
 ## 费用说明
 

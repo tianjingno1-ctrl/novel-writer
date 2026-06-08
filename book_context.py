@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import shutil
 import uuid
@@ -10,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 
 import file_utils
+
+logger = logging.getLogger(__name__)
 
 _BASE = Path(__file__).resolve().parent
 LIBRARY_DIR = _BASE / "library"
@@ -19,6 +22,84 @@ RUNTIME_FILE = LIBRARY_DIR / "runtime.json"
 LEGACY_DATA_DIR = _BASE / "data"
 
 BOOK_TYPES = frozenset({"short", "world", "novel"})
+
+# 散 md 文件名 → book_archive.md 内 ### 小节标题
+ARCHIVE_SECTION_BY_FILENAME: dict[str, str] = {
+    "world.md": "世界观",
+    "style.md": "文风锚点",
+    "characters.md": "人物总表",
+    "char_static.md": "人物锚点（静态）",
+    "char_dynamic.md": "人物动态",
+    "summaries_recent.md": "近期概述",
+    "summaries_archive.md": "概述归档",
+    "plot_threads_locked.md": "已锁定细节",
+    "plot_threads_active.md": "活跃线索",
+}
+
+ARCHIVE_SECTION_ORDER: tuple[str, ...] = tuple(ARCHIVE_SECTION_BY_FILENAME.values())
+
+
+def _section_header_pattern(section_key: str) -> re.Pattern[str]:
+    return re.compile(rf"^###\s+{re.escape(section_key)}\s*\n", re.MULTILINE)
+
+
+def _section_body_bounds(text: str, section_key: str) -> tuple[int, int] | None:
+    """返回 section 正文在 text 中的 [start, end)，不含 ### 标题行。"""
+    markers: list[tuple[int, str, int]] = []
+    for key in ARCHIVE_SECTION_ORDER:
+        pat = _section_header_pattern(key)
+        for m in pat.finditer(text):
+            markers.append((m.start(), key, m.end()))
+    markers.sort(key=lambda x: x[0])
+    for i, (_pos, key, body_start) in enumerate(markers):
+        if key != section_key:
+            continue
+        if i + 1 < len(markers):
+            body_end = markers[i + 1][0]
+        else:
+            body_end = len(text)
+        return body_start, body_end
+    return None
+
+
+def archive_path_for_book(book_id: str) -> Path:
+    return BOOKS_DIR / book_id / "book_archive.md"
+
+
+def get_archive_section(book_id: str, section_key: str) -> str:
+    """从 book_archive.md 提取 ### section_key 下正文（含内部 ## 标题）。"""
+    path = archive_path_for_book(book_id)
+    if not path.exists():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    bounds = _section_body_bounds(text, section_key)
+    if not bounds:
+        return ""
+    start, end = bounds
+    return text[start:end].strip("\n")
+
+
+def update_archive_section(book_id: str, section_key: str, new_content: str) -> bool:
+    """替换 book_archive.md 中指定 ### 小节正文。"""
+    path = archive_path_for_book(book_id)
+    if not path.exists():
+        return False
+    text = path.read_text(encoding="utf-8")
+    bounds = _section_body_bounds(text, section_key)
+    if not bounds:
+        return False
+    start, end = bounds
+    body = new_content.rstrip("\n")
+    new_text = text[:start] + body + ("\n" if body else "\n") + text[end:]
+    file_utils.atomic_write_text(
+        path,
+        new_text if new_text.endswith("\n") else new_text + "\n",
+    )
+    return True
+
+
+def section_key_for_filename(filename: str) -> str | None:
+    return ARCHIVE_SECTION_BY_FILENAME.get(filename)
 
 DEFAULT_PROJECT = {
     "title": "未命名小说",
@@ -65,6 +146,7 @@ class BookContext:
         self.codex_active_file = book_dir / "codex" / "active.json"
         self.batch_jobs_dir = book_dir / "batch_jobs"
         self.quality_log_jsonl = book_dir / "quality_log.jsonl"
+        self.archive_file = book_dir / "book_archive.md"
 
     def codex_files_map(self) -> dict[str, Path]:
         return {
@@ -189,7 +271,7 @@ def _ensure_default_book() -> str:
         "version": 1,
         "active_book_id": book_id,
         "books": [entry],
-        "migrated_from_data": LEGACY_DATA_DIR.exists(),
+        "migrated_from_data": _legacy_data_has_book_files(),
     }
     _save_index(index)
     return book_id
@@ -231,6 +313,7 @@ def apply_paths_to_modules() -> None:
     main.PLOT_THREADS_ACTIVE_FILE = ctx.plot_threads_active_file
     main.OUTLINE_LATEST_FILE = ctx.outline_latest_file
     main.CHAT_PROMPTS_FILE = ctx.chat_prompts_file
+    main.ARCHIVE_FILE = ctx.archive_file
     main.CODEX_FILES = ctx.codex_files_map()
 
     novel_data.DATA_DIR = ctx.data_dir
@@ -239,6 +322,13 @@ def apply_paths_to_modules() -> None:
     novel_data.PROJECT_FILE = ctx.project_file
     novel_data.CODEX_DIR = ctx.codex_dir
     novel_data.CODEX_ACTIVE_FILE = ctx.codex_active_file
+
+    import core.context as writing_context
+
+    writing_context.bind(
+        writing_context.BookPaths.from_book_context(ctx),
+        read_text=main.read_text,
+    )
 
 
 def reset_session_state() -> None:
@@ -279,6 +369,46 @@ def _migrate_runtime_if_needed() -> None:
         shutil.copy2(legacy, RUNTIME_FILE)
 
 
+def _legacy_data_has_book_files() -> bool:
+    """legacy data/ 是否仍含书籍内容（非空目录即视为在用）。"""
+    if not LEGACY_DATA_DIR.is_dir():
+        return False
+    markers = (
+        LEGACY_DATA_DIR / "world.md",
+        LEGACY_DATA_DIR / "plan.json",
+        LEGACY_DATA_DIR / "chapters",
+    )
+    for p in markers:
+        if p.is_file() and p.stat().st_size > 0:
+            return True
+        if p.is_dir() and any(p.iterdir()):
+            return True
+    return False
+
+
+def warn_if_dual_data_roots(*, active_book_id: str | None = None) -> None:
+    """若 legacy data/ 与 library/ 同时有内容，打印警告（数据根应逐步统一到 library）。"""
+    legacy_active = _legacy_data_has_book_files()
+    library_active = INDEX_FILE.is_file() and BOOKS_DIR.is_dir() and any(BOOKS_DIR.iterdir())
+    if not (legacy_active and library_active):
+        return
+    try:
+        ctx = get_context()
+        read_root = str(ctx.data_dir)
+        active = active_book_id or ctx.book_id
+    except RuntimeError:
+        read_root = "(书库未初始化)"
+        active = active_book_id or "?"
+    logger.warning(
+        "检测到 data/ 与 library/ 同时存在书籍数据。"
+        " 当前读写目录: %s · active_book=%s · legacy=%s · library=%s",
+        read_root,
+        active,
+        LEGACY_DATA_DIR,
+        LIBRARY_DIR,
+    )
+
+
 def init_library(*, book_id: str | None = None) -> BookContext:
     """启动时初始化书库并激活一本书。"""
     LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
@@ -286,6 +416,7 @@ def init_library(*, book_id: str | None = None) -> BookContext:
     active = book_id or _ensure_default_book()
     ctx = _set_context(active)
     apply_paths_to_modules()
+    warn_if_dual_data_roots(active_book_id=active)
     return ctx
 
 

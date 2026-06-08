@@ -4,140 +4,44 @@ import json
 import re
 from pathlib import Path
 
-_PROMPT_DIR = Path(__file__).resolve().parent / "docs"
+from core.prompts import load_system
 
-WRITING_INSTRUCTION = """你是一位专业的小说写作助手。用户会提供当前章节的正文和你的写作指令。
-请根据指令协助创作：续写、修改、润色、扩写或回答写作相关问题。
-保持与已有世界观、人物设定和前文概述的一致性。
+WRITING_INSTRUCTION = load_system("writing")
+SUMMARY_SYSTEM = load_system("summary")
+CHECK_SYSTEM = load_system("check")
+CROSS_CHAPTER_CONTINUITY_SYSTEM = load_system("cross_chapter_continuity")
+READER_REVIEW_SYSTEM = load_system("reader_review")
+EDITOR_REVIEW_SYSTEM = load_system("editor_review")
+DECONSTRUCT_SYSTEM = load_system("deconstruct")
+WORLD_BATCH_CHUNK_REVIEW_SYSTEM = load_system("world_batch_chunk_review")
+WORLD_BATCH_MERGE_SYSTEM = load_system("world_batch_merge")
+OUTLINE_SYSTEM = load_system("outline")
+CHARACTER_DRIFT_SYSTEM = load_system("character_drift")
+DETAIL_EXTRACT_SYSTEM = load_system("detail_extract")
+REPETITION_CHECK_SYSTEM = load_system("repetition_check")
+PACING_CHECK_SYSTEM = load_system("pacing_check")
+OBSERVE_SYSTEM = load_system("observe")
+POST_CHAPTER_MAINTAIN_SYSTEM = load_system("post_chapter_maintain")
+QUALITY_CHECK_BUNDLE_SYSTEM = load_system("quality_check_bundle")
+WORLD_REMEDIATE_DIAGNOSE_SYSTEM = load_system("world_remediate_diagnose")
+BULK_ARCHIVE_SUMMARIES_SYSTEM = load_system("bulk_archive_summaries")
+BULK_ARCHIVE_STATE_SYSTEM = load_system("bulk_archive_state")
+WORLD_REMEDIATE_BULK_CHANGE_LOG_SYSTEM = load_system("world_remediate_bulk_change_log")
+WORLD_REMEDIATE_CHANGE_LOG_SYSTEM = load_system("world_remediate_change_log")
 
-文风与节奏（重要）：
-- 系统提示中已附带 style.md 文风锚点：必须遵守禁用词、示范句风格与节奏表。
-- char_static.md 含「性格锚点」与「禁止写法」：人物本质不得漂移；char_dynamic.md 含当前状态与表层软肋。
-- plot_threads_locked.md 含「已钉死的细节」：数字、日期、专名、外貌必须与清单一致，不得擅自改动。
-- 快穿题材对照 world.md 中当前世界的「五点骨架」「章节节拍」「爽点设计」，一章只推进一件核心事件。
-- Scene Beat 若标注【节奏档位】快/中/慢，须匹配对应段落长度与句式密度。
-- Scene Beat 若标注【情绪锚点】，本场必须让读者感受到该情绪，用指定的画面/动作落地，不得用心理描写替代。
-- 续写时优先：动作与对话 > 心理描写；爽点场景用短句 + 留白 + 围观反应。
+# LLM 结构化 JSON 解析：canonical 实现在 core.schemas.llm，此处 re-export 保持兼容。
+from core.schemas.llm import (
+    count_report_issues,
+    parse_bulk_state,
+    parse_bulk_summaries,
+    parse_observe_proposals,
+    parse_post_chapter_maintain,
+    parse_quality_bundle,
+    parse_remediate_bulk_change_log,
+    parse_remediate_change_log,
+    parse_remediate_diagnose,
+)
 
-【语言时代约束】（重要）
-- 须对照 world.md 当前世界的时代背景；角色处于古代/历史背景时：
-  - 禁止使用现代网络用语、互联网隐喻、职场黑话（如「窗口」「格局」「上线」「赛道」「复盘」「内卷」「刚需」等）
-  - 禁止现代口语俚语穿越到古代角色对话与内心（如「OK」「无语」「整个人都不好了」「社死」等）
-  - 叙述与对话须符合该朝代语言习惯，以白话章回体为基准：短白描、半文半白均可，不写晦涩骈文堆砌，也不写现代都市语感
-- 当代/娱乐圈等现代世界：沿用 style.md 都市爽文语感，仍须遵守禁用词表
-
-【反「文学腔」规则】
-爽文的情绪冲击 ≠ 文学性的优美描写。以下是硬性要求：
-
-1. 禁止「景物烘托情绪」套路
-   ❌ 夕阳的余晖洒在她肩头，像是某种无声的告别
-   ✅ 她把手机屏幕朝下扣在桌上。没有说话。
-
-2. 禁止「内心独白式感慨」
-   ❌ 她忽然明白，有些东西失去了就是失去了
-   ✅ 她笑了一下，转身走了。步子很稳。
-
-3. 爽点场景：用「外部反应」代替「内心感受」
-   ❌ 她感到一阵扬眉吐气，多年的委屈在这一刻得到了释放
-   ✅ 全场安静了三秒。然后有人开始鼓掌。
-      林晚没有看任何人，只是低头整理了一下话筒。
-
-4. 张力场景：用「动作的细节」制造情绪密度
-   ❌ 两人之间的气氛变得微妙而紧张
-   ✅ 他没有后退。她也没有。
-      两个人都在等对方先开口。
-
-5. 「留白」优于「解释」
-   - 写完动作，停。不要解释这个动作意味着什么。
-   - 读者自己会感受到。你解释了，情绪就泄了。
-
-【情感表达规则】
-- 禁止直接陈述角色情绪（如「她很难过」「他很感动」「她心疼」）
-- 必须用动作、细节、环境、对话来传递情绪
-- 示例：
-  ❌ 她心里很难过
-  ✅ 她站了很久，直到走廊的灯自动熄灭，才发现自己忘记动了
-
-【爽文情绪节拍】
-都市爽文的情绪冲击有固定节拍，必须遵守：
-
-- 「蓄力」：对手轻视/施压，用对话或动作展示，不要告诉读者"对手很嚣张"
-- 「引爆」：反击动作要干脆，一句话或一个动作，不要铺垫太多
-- 「余震」：围观者的反应 > 主角的内心感受，让读者通过别人的眼睛感受爽点
-- 「收」：主角不解释、不炫耀，做完就走或转移话题，留白制造强者感
-
-输出规则（重要）：
-- 当用户要求续写、扩写、润色、修改正文时：
-  1. 第一行必须是：【章节标题】简短标题（6-12 字，概括本章或本段核心，不要书名号）
-  2. 空一行后，只输出可直接写入章节的正文
-  3. 不要其他解释或元评论；标题行不会进入正文段落
-- 当用户只是提问、讨论设定、征求意见时：第一行必须以 [讨论]、[问答] 或 [建议] 开头，然后正常回答。"""
-
-SUMMARY_SYSTEM = """你是一位专业的小说编辑。请阅读用户提供的章节正文，生成 150-300 字的章节概述。
-
-严格使用以下格式（不要添加额外说明）：
-
-【第X章：标题】
-核心事件：...
-人物变化：...
-伏笔/关键信息：...
-
-如果正文中没有明确标题，可根据内容概括一个简短标题。"""
-
-CHECK_SYSTEM = """你是一位严谨的小说 continuity editor（连续性编辑）。
-对照用户提供的「世界观设定」「人物设定」「章节概述」三份参考资料，扫描「最新章节正文」中的矛盾与不一致。
-
-重点检查：
-1. 人物能力、物品、外貌与设定/前文矛盾
-2. char_static「性格锚点」是否被违反（人设漂移、主动示弱、过度解释等）
-3. plot_threads_locked「已钉死的细节」中的数字、日期、专名是否与正文一致
-4. 时间线冲突（事件顺序、年龄、季节等）
-5. 人名、称谓不一致
-6. 世界观规则违反（魔法体系、地理、社会规则等）
-7. 与章节概述已记录事实的冲突
-8. 语言时代错位：古代/历史背景下出现现代网络用语、互联网隐喻、职场黑话（如「窗口」「格局」「上线」「赛道」「复盘」「内卷」）或现代口语俚语（如「OK」「无语」「社死」）；对照 world.md 当前世界时代定位
-
-只输出问题清单，每条一行，格式：「- [类型] 具体问题描述」
-不要改写正文，不要输出无关内容。
-若未发现明显矛盾，仅回复：✅ 未发现明显矛盾"""
-
-CROSS_CHAPTER_CONTINUITY_SYSTEM = """你是一位严谨的小说 continuity editor（连续性编辑）。
-对照用户提供的设定、章节概述（非全文）、细节钉子与伏笔清单，
-检查指定章节范围内的逻辑是否自洽。
-
-重点检查：
-1. 时间线是否自洽（事件顺序、时间跨度、季节等）
-2. 伏笔是否有头无尾（plot_threads_active 未回收与概述是否矛盾）
-3. 人物位置/状态/关系是否连贯
-4. 世界规则、专名、数字是否与 plot_threads_locked 及概述一致
-5. 各章概述之间是否互相矛盾
-
-只输出问题清单，每条一行，格式：「- [类型] 具体问题描述」
-不要改写正文。若未发现明显矛盾，仅回复：✅ 未发现明显矛盾"""
-
-READER_REVIEW_SYSTEM = """你是一位资深网文读者，从追读体验角度审阅给定内容。
-关注：开篇是否抓人、钩子是否有效、节奏是否拖、情绪是否代入、有无出戏点、是否想继续读。
-
-输出格式：
-
-## 读者审阅
-### ✅ 读得顺的部分
-### ⚠️ 可能弃读/出戏点
-- （引用或概括具体位置 + 原因）
-### 📌 建议（不改设定，只谈阅读感受）
-"""
-
-EDITOR_REVIEW_SYSTEM = """你是一位商业网文编辑，从可刊稿与连载运营角度审阅。
-关注：主线是否清晰、冲突是否升级、人物动机、章末钩子、爽点是否落地、是否有注水段。
-
-输出格式：
-
-## 编辑审阅
-### ✅ 可保留的亮点
-### ⚠️ 需改稿的问题
-- （问题 + 建议方向，不直接改写正文）
-### 📌 下一章建议（可选）
-"""
 
 def get_female_fiction_review_system(
     *,
@@ -152,120 +56,6 @@ def get_female_fiction_review_system(
         profile_id, project=project, include_revise=include_revise
     )
     return text
-
-
-DECONSTRUCT_SYSTEM = """你是一位资深网文拆解教练，专门把「别人的正文」拆成可借鉴的结构报告。
-用户粘贴的是**外部参考文**（非用户本人作品），请客观分析写法，不要续写、不要改写原文。
-
-严格按以下 Markdown 结构输出（保留 emoji 与小节标题）：
-
-# 📊 拆解报告
-
-## 【基本信息】
-- 字数：（估算，约 xxx 字）
-- 节奏：快 / 中 / 慢（整体判断）
-- 类型：爽文 / 虐恋 / 甜宠 / 悬疑 / 其他（说明依据）
-
-## 【结构分析】
-- 开篇钩子：（概括 + 大致位置，如第 1–2 段）
-- 冲突建立：（概括 + 位置）
-- 爽点位置：第 x 段附近，类型：（打脸 / 逆袭 / 表白 / 揭秘 / 其他）
-- 结尾钩子：（概括）
-
-## 【节奏分析】
-- 对话占比：约 xx%（粗估）
-- 动作 / 场面占比：约 xx%
-- 心理 / 内心描写：约 xx%
-- 节奏变化：如 快→慢→快（标出大致段落区间）
-
-## 【爽点拆解】
-- 爽点1：…；触发方式：…；读者预期：…
-- 爽点2：（若无则写「本章以单爽点为主」）
-
-## 【可借鉴的点】
-- （3–5 条，写具体技法，不要空泛 praise）
-
-## 【你的书可以怎么用】
-- （若用户提供了本书 world/style 信息：对照给出 2–4 条可迁移建议；若未提供：写通用迁移思路）
-
-规则：
-- 引用原文时用「引号摘 1 句」或概括，不要大段复制
-- 数字、占比为粗估即可，但要给依据
-- 全文报告控制在 2500 字以内"""
-
-WORLD_BATCH_CHUNK_REVIEW_SYSTEM = """你是网文责编，正在按「阅读批次」审阅快穿/爽文的一个世界中的连续章节。
-用户会提供：世界观、人物、伏笔档案，以及本批次中若干章的**正文**（读者连读体验）。
-
-请从「读者一次性连读这批章节」的角度输出审阅，不要按单章孤立点评。
-
-输出格式（Markdown，务必简洁，单段报告总长不超过 3500 字）：
-
-## 分段审阅 · 第X–Y章
-### 三句话总评
-### 🔴 必须改（按章号列点，说明位置与原因）
-### 🟡 建议改
-### 跨章钩子与节奏（段内章与章之间是否顺）
-### 套话/重复（本段内）
-### 人物一致性（本段内）
-
-规则：
-- 无问题的小节可写「✅ 未发现明显问题」
-- 引用正文时用「第N章：…」定位，不要大段复述原文
-- 优先标出影响连读体验的断点、吃书、重复爽点
-"""
-
-WORLD_BATCH_MERGE_SYSTEM = """你是网文总编，正在汇总一个「世界批次」的分段审阅结果，形成给作者的一份总报告。
-用户会提供：世界标签、章节范围、各分段审阅摘要、跨章连续性检查结果。
-
-请合并为一份**可通读前扫一眼**的总报告，去重、按优先级排序，不要重复堆砌分段原文。
-
-输出格式（Markdown，总长不超过 5000 字）：
-
-# 世界批次审阅 · {世界名} · 第A–B章
-## 一句话结论（能否按此批次发布/还需大改）
-## 🔴 必须改（全局排序，按章号）
-## 🟡 建议改
-## 世界级弧线（起承转合是否完整；若批次未写完须注明「进行中」）
-## 跨段衔接（若有多段，段与段之间）
-## 设定/伏笔/人物（汇总）
-## 套话与文风
-## 读者发布建议（连更/攒稿/需补写）
-
-规则：合并时以具体问题为准，去掉重复；保留所有 🔴 项。
-"""
-
-OUTLINE_SYSTEM = """你是一位资深小说主编，擅长快穿/爽文叙事节奏与剧情规划。
-用户会提供「世界观设定（含各世界五点骨架、章节节拍、爽点表）」「人物当前状态」「已有章节概述」「未回收伏笔清单」。
-请基于这些已确立的事实，为接下来的 N 章设计剧情走向建议。
-
-要求：
-1. 必须承接已有伏笔与人物动机，不得引入与设定矛盾的新元素。
-2. 对照 world.md 当前世界的章节节拍表：明确本章在 10–15 章弧线中的位置，不跳步、不塞多事件。
-3. 每一章给出：章节定位、核心事件（仅一件）、情绪目标、爽点类型、冲突升级点、章末悬念钩子。
-4. 快穿爽点：每章至少标注一个爽点落点（打脸/逆袭/博弈/情感/能力等），高潮章与前章铺垫呼应。
-5. 至少推进或回收 1 条已有伏笔，并可埋设 1 条新伏笔。
-6. 节奏张弛交替：爽点章节奏快、铺垫章须有钩子；避免连续三章同情绪。
-7. 伏笔动向须引用 plot_threads 或概述中的具体条目原文或编号描述，不得凭空编造伏笔。
-
-严格使用以下格式输出（可输出多条，按顺序排列）：
-
-【后续第X章（建议）】
-定位：本章在主线/本世界节拍中的作用
-核心事件：...（仅一件）
-情绪目标：...（爽/甜/揪心/燃/好奇等）
-爽点类型：...（打脸/逆袭/博弈/情感/能力等）
-冲突/转折：...
-章末钩子：...
-伏笔动向：回收【...】 / 埋设【...】
-
-编号规则（重要）：
-- X 从 1 开始，表示「紧接用户当前章节之后的第 X 条建议」，不是全书绝对章号。
-- 用户当前为第 N 章、只建议下一章时，必须写【后续第1章（建议）】，禁止写【后续第2章】。
-- 建议连续 3 章时依次写【后续第1章】【后续第2章】【后续第3章】。
-
-最后附一行：
-【整体节奏提示】：对这 N 章整体走向的一句话点评。"""
-
 
 def build_summary_user_message(chapter_num: int, chapter_content: str) -> str:
     return f"请为以下第{chapter_num}章正文生成概述：\n\n{chapter_content}"
@@ -703,24 +493,6 @@ def build_observe_user_message(
     )
 
 
-def parse_observe_proposals(reply: str) -> tuple[list[dict], str]:
-    """解析 AI 回复中的 observe-json 块，返回 (items, 给用户看的 Markdown 摘要)。"""
-    text = reply.strip()
-    for pattern in (r"```observe-json\s*([\s\S]*?)```", r"```json\s*([\s\S]*?)```"):
-        match = re.search(pattern, text, re.IGNORECASE)
-        if not match:
-            continue
-        try:
-            data = json.loads(match.group(1).strip())
-            items = data.get("items", [])
-            if isinstance(items, list):
-                summary = text[: match.start()].strip()
-                return items, summary
-        except json.JSONDecodeError:
-            continue
-    return [], text
-
-
 POST_CHAPTER_MAINTAIN_SYSTEM = """你是章节维护助手。阅读用户提供的章节正文、角色档案与已有细节/伏笔清单后，一次性完成档案分析。
 
 任务彼此独立、可同时完成：
@@ -864,118 +636,6 @@ def build_quality_bundle_user_message(
         f"## 章节概述（已写章节）\n{truncate_context_tail(summaries) or '（暂无）'}\n\n"
         f"## 最新章节正文（第{chapter_num}章）\n{chapter_content}"
     )
-
-
-def _normalize_maintain_payload(data: dict) -> dict:
-    observe = data.get("observe")
-    if isinstance(observe, list):
-        observe = {"summary": "", "items": observe}
-    elif not isinstance(observe, dict):
-        observe = {"summary": "", "items": []}
-    items = observe.get("items", [])
-    if not isinstance(items, list):
-        items = []
-    return {
-        "summary": str(data.get("summary") or "").strip(),
-        "observe": {
-            "summary": str(observe.get("summary") or "").strip(),
-            "items": items,
-        },
-        "detail_locked": str(data.get("detail_locked") or "").strip(),
-        "plot_new_threads": str(data.get("plot_new_threads") or "").strip(),
-        "plot_advanced": str(data.get("plot_advanced") or "").strip(),
-        "plot_resolved": str(data.get("plot_resolved") or "").strip(),
-    }
-
-
-def _normalize_quality_payload(data: dict) -> dict:
-    return {
-        "continuity": str(data.get("continuity") or "").strip(),
-        "character_drift": str(data.get("character_drift") or "").strip(),
-        "repetition": str(data.get("repetition") or "").strip(),
-    }
-
-
-def count_report_issues(text: str) -> int:
-    """粗估报告中的问题条数（供前端展示）。"""
-    body = (text or "").strip()
-    if not body or "未发现明显矛盾" in body or "无明显漂移" in body:
-        return 0
-    count = 0
-    for line in body.splitlines():
-        s = line.strip()
-        if s.startswith("- [") or s.startswith("- 【") or "⚠️" in s:
-            count += 1
-    return count
-
-
-def parse_post_chapter_maintain(reply: str) -> tuple[dict | None, str]:
-    """解析章后维护 JSON。返回 (payload, 解析失败时的原文/备注)。"""
-    text = (reply or "").strip()
-    if not text:
-        return None, ""
-
-    for fence in ("post-chapter-json", "json"):
-        match = re.search(rf"```{re.escape(fence)}\s*([\s\S]*?)```", text, re.IGNORECASE)
-        if not match:
-            continue
-        try:
-            data = json.loads(match.group(1).strip())
-            if isinstance(data, dict) and (
-                data.get("summary")
-                or data.get("observe")
-                or data.get("detail_locked")
-                or data.get("plot_new_threads")
-            ):
-                return _normalize_maintain_payload(data), ""
-        except json.JSONDecodeError:
-            continue
-
-    brace = re.search(r"\{[\s\S]*\"summary\"[\s\S]*\}", text)
-    if brace:
-        try:
-            data = json.loads(brace.group(0))
-            if isinstance(data, dict):
-                return _normalize_maintain_payload(data), ""
-        except json.JSONDecodeError:
-            pass
-
-    return None, text
-
-
-def parse_quality_bundle(reply: str) -> tuple[dict | None, str]:
-    """解析质检 bundle JSON。"""
-    text = (reply or "").strip()
-    if not text:
-        return None, ""
-
-    for fence in ("quality-bundle-json", "json"):
-        match = re.search(rf"```{re.escape(fence)}\s*([\s\S]*?)```", text, re.IGNORECASE)
-        if not match:
-            continue
-        try:
-            data = json.loads(match.group(1).strip())
-            if isinstance(data, dict) and (
-                data.get("continuity")
-                or data.get("character_drift")
-                or data.get("repetition")
-            ):
-                return _normalize_quality_payload(data), ""
-        except json.JSONDecodeError:
-            continue
-
-    brace = re.search(
-        r"\{[\s\S]*\"continuity\"[\s\S]*\"character_drift\"[\s\S]*\}", text
-    )
-    if brace:
-        try:
-            data = json.loads(brace.group(0))
-            if isinstance(data, dict):
-                return _normalize_quality_payload(data), ""
-        except json.JSONDecodeError:
-            pass
-
-    return None, text
 
 
 WORLD_REMEDIATE_DIAGNOSE_SYSTEM = """你是网文责编，正在诊断单章正文问题，为自动改稿提供结构化意见。
@@ -1239,57 +899,6 @@ def build_remediate_bulk_change_log_user_message(
     return "\n".join(parts)
 
 
-def parse_bulk_summaries(reply: str) -> tuple[dict | None, str]:
-    text = (reply or "").strip()
-    for fence in ("bulk-summaries-json", "json"):
-        match = re.search(rf"```{fence}\s*([\s\S]*?)```", text, re.IGNORECASE)
-        if not match:
-            continue
-        try:
-            data = json.loads(match.group(1).strip())
-            if isinstance(data, dict):
-                rows = data.get("summaries")
-                if isinstance(rows, list):
-                    data["summaries"] = [r for r in rows if isinstance(r, dict)]
-                    return data, ""
-        except json.JSONDecodeError:
-            continue
-    return None, text
-
-
-def parse_bulk_state(reply: str) -> tuple[dict | None, str]:
-    text = (reply or "").strip()
-    for fence in ("bulk-state-json", "json"):
-        match = re.search(rf"```{fence}\s*([\s\S]*?)```", text, re.IGNORECASE)
-        if not match:
-            continue
-        try:
-            data = json.loads(match.group(1).strip())
-            if isinstance(data, dict):
-                return data, ""
-        except json.JSONDecodeError:
-            continue
-    return None, text
-
-
-def parse_remediate_bulk_change_log(reply: str) -> tuple[dict | None, str]:
-    text = (reply or "").strip()
-    for fence in ("remediate-bulk-change-json", "json"):
-        match = re.search(rf"```{fence}\s*([\s\S]*?)```", text, re.IGNORECASE)
-        if not match:
-            continue
-        try:
-            data = json.loads(match.group(1).strip())
-            if isinstance(data, dict):
-                chapters = data.get("chapters")
-                if isinstance(chapters, list):
-                    data["chapters"] = [c for c in chapters if isinstance(c, dict)]
-                    return data, ""
-        except json.JSONDecodeError:
-            continue
-    return None, text
-
-
 def build_remediate_change_log_user_message(
     chapter_num: int,
     diagnose: dict,
@@ -1303,49 +912,6 @@ def build_remediate_change_log_user_message(
         f"## 改前正文\n{before_text}\n\n"
         f"## 改后正文\n{after_text}"
     )
-
-
-def parse_remediate_diagnose(reply: str) -> tuple[dict | None, str]:
-    text = (reply or "").strip()
-    for fence in ("remediate-diagnose-json", "json"):
-        match = re.search(rf"```{fence}\s*([\s\S]*?)```", text, re.IGNORECASE)
-        if not match:
-            continue
-        try:
-            data = json.loads(match.group(1).strip())
-            if isinstance(data, dict):
-                action = str(data.get("action") or "patch").strip()
-                if action not in ("patch", "full_rewrite", "skip"):
-                    action = "patch"
-                data["action"] = action
-                data["issues"] = (
-                    data.get("issues") if isinstance(data.get("issues"), list) else []
-                )
-                return data, ""
-        except json.JSONDecodeError:
-            continue
-    return None, text
-
-
-def parse_remediate_change_log(reply: str) -> tuple[dict | None, str]:
-    text = (reply or "").strip()
-    for fence in ("remediate-change-json", "json"):
-        match = re.search(rf"```{fence}\s*([\s\S]*?)```", text, re.IGNORECASE)
-        if not match:
-            continue
-        try:
-            data = json.loads(match.group(1).strip())
-            if isinstance(data, dict):
-                data["changes"] = (
-                    data.get("changes") if isinstance(data.get("changes"), list) else []
-                )
-                data["skipped"] = (
-                    data.get("skipped") if isinstance(data.get("skipped"), list) else []
-                )
-                return data, ""
-        except json.JSONDecodeError:
-            continue
-    return None, text
 
 
 def format_remediate_closure_report(

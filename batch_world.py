@@ -926,7 +926,7 @@ def run_world_batch_finalize(
     )
 
     lines = [
-        f"# 世界批次定稿 · {label}",
+        f"# 批量档案同步 · {label}",
         f"范围：第{cf}–{ct}章 · 实际定稿：{len(targets)} 章（第{targets[0]}–{targets[-1]}章）",
         "",
         f"成功 {ok_count}/{len(targets)} 章",

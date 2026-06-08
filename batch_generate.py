@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 
 import batch_world
 import novel_data
+from pipeline.checkpoint import (
+    JOB_KIND_WORLD_GENERATE,
+    STATUS_DONE,
+    STATUS_FAILED,
+    STATUS_PAUSED,
+    STATUS_RUNNING,
+    create_job,
+    job_path,
+    load_job,
+    mark_job_done,
+    remaining_targets,
+    save_job,
+)
 
 PREV_TAIL_CHARS = 2400
 
@@ -101,6 +115,7 @@ def format_generate_report(
 
 def run_world_batch_generate(
     *,
+    data_dir: Path,
     read_chapter: Callable[[int], str],
     generate_chapter: Callable[..., dict],
     set_batch_job_running: Callable[[bool, str], None],
@@ -109,53 +124,110 @@ def run_world_batch_generate(
     chapter_to: int | None = None,
     overwrite: bool = False,
     skip_existing: bool = True,
+    resume_job_id: str | None = None,
 ) -> dict:
-    """按世界范围与 plan Beat 逐章生成正文。"""
-    cf, ct = batch_world.infer_world_chapter_range()
-    chapter_from = chapter_from or cf
-    chapter_to = chapter_to or ct
-    if chapter_from < 1 or chapter_to < chapter_from:
-        return {"ok": False, "error": "章节范围无效"}
+    """按世界范围与 plan Beat 逐章生成正文；支持 job 检查点续跑。"""
+    job: dict | None = None
+    if resume_job_id:
+        job = load_job(data_dir, resume_job_id)
+        if not job:
+            return {"ok": False, "error": f"续跑任务不存在: {resume_job_id}"}
+        if job.get("kind") != JOB_KIND_WORLD_GENERATE:
+            return {"ok": False, "error": "任务类型不是世界批量生成"}
+        if job.get("status") == STATUS_DONE:
+            return {"ok": False, "error": "该任务已完成，无需续跑", "job_id": resume_job_id}
+        chapter_from = int(job.get("chapter_from") or 0)
+        chapter_to = int(job.get("chapter_to") or 0)
+        label = (job.get("label") or "").strip() or "当前世界"
+        skipped = list(job.get("skipped") or [])
+        generated: list[dict] = list(job.get("generated") or [])
+        errors: list[str] = list(job.get("errors") or [])
+        total_cost = float(job.get("total_cost_usd") or 0.0)
+        targets = remaining_targets(job)
+        if not targets:
+            mark_job_done(job, partial=bool(errors))
+            save_job(data_dir, job)
+            return {
+                "ok": True,
+                "job_id": job["id"],
+                "resumed": True,
+                "message": "没有待续跑章节",
+                "generated": generated,
+                "errors": errors,
+            }
+        job_id = job["id"]
+    else:
+        cf, ct = batch_world.infer_world_chapter_range()
+        chapter_from = chapter_from or cf
+        chapter_to = chapter_to or ct
+        if chapter_from < 1 or chapter_to < chapter_from:
+            return {"ok": False, "error": "章节范围无效"}
 
-    project = novel_data.get_project_meta()
-    label = (project.get("world_label") or "").strip() or "当前世界"
-    beat_nums = batch_world.chapters_with_beats(chapter_from, chapter_to)
-    if not beat_nums:
-        return {
-            "ok": False,
-            "error": "plan 中未找到覆盖该范围的 Scene Beat，请先在规划模式填写 Beat（如「第1-2章」）",
-        }
+        project = novel_data.get_project_meta()
+        label = (project.get("world_label") or "").strip() or "当前世界"
+        beat_nums = batch_world.chapters_with_beats(chapter_from, chapter_to)
+        if not beat_nums:
+            return {
+                "ok": False,
+                "error": "plan 中未找到覆盖该范围的 Scene Beat，请先在规划模式填写 Beat（如「第1-2章」）",
+            }
 
-    targets: list[int] = []
-    skipped: list[int] = []
-    for num in range(chapter_from, chapter_to + 1):
-        if num not in beat_nums:
-            continue
-        has_text = bool((read_chapter(num) or "").strip())
-        if has_text and skip_existing and not overwrite:
-            skipped.append(num)
-            continue
-        targets.append(num)
+        targets = []
+        skipped = []
+        for num in range(chapter_from, chapter_to + 1):
+            if num not in beat_nums:
+                continue
+            has_text = bool((read_chapter(num) or "").strip())
+            if has_text and skip_existing and not overwrite:
+                skipped.append(num)
+                continue
+            targets.append(num)
 
-    if not targets:
-        return {
-            "ok": False,
-            "error": "没有待生成章节（范围内章节均已有正文；勾选覆盖或清空后重试）",
-            "skipped": skipped,
-            "chapter_from": chapter_from,
-            "chapter_to": chapter_to,
-        }
+        if not targets:
+            return {
+                "ok": False,
+                "error": "没有待生成章节（范围内章节均已有正文；勾选覆盖或清空后重试）",
+                "skipped": skipped,
+                "chapter_from": chapter_from,
+                "chapter_to": chapter_to,
+            }
 
-    set_batch_job_running(True, "world_generate")
-    generated: list[dict] = []
-    errors: list[str] = []
-    total_cost = 0.0
+        job = create_job(
+            JOB_KIND_WORLD_GENERATE,
+            label=label,
+            chapter_from=chapter_from,
+            chapter_to=chapter_to,
+            targets=targets,
+            extra={
+                "skipped": skipped,
+                "overwrite": overwrite,
+                "skip_existing": skip_existing,
+            },
+        )
+        job_id = job["id"]
+        generated = []
+        errors = []
+        total_cost = 0.0
+        job_path(data_dir, job_id).mkdir(parents=True, exist_ok=True)
+        save_job(data_dir, job)
+
+    set_batch_job_running(True, job_id)
 
     try:
         for num in targets:
+            job["status"] = STATUS_RUNNING
+            job["progress"] = {
+                "current": len(job.get("completed") or []) + 1,
+                "total": len(job.get("targets") or []),
+            }
+            save_job(data_dir, job)
+
             meta = batch_world.resolve_beat_for_prose_chapter(num)
             if not meta or not meta.get("beat"):
-                errors.append(f"第{num}章：无 Beat")
+                err = f"第{num}章：无 Beat"
+                errors.append(err)
+                job["errors"] = errors
+                save_job(data_dir, job)
                 continue
 
             if meta.get("scene_id"):
@@ -178,27 +250,37 @@ def run_world_batch_generate(
             )
             cost = float(result.get("cost_usd") or 0)
             total_cost += cost
+            job["total_cost_usd"] = total_cost
 
             if not result.get("ok"):
-                errors.append(
-                    f"第{num}章：{result.get('error') or '生成失败'}"
-                )
+                err = f"第{num}章：{result.get('error') or '生成失败'}"
+                errors.append(err)
+                job["errors"] = errors
+                job["status"] = STATUS_PAUSED
+                save_job(data_dir, job)
                 continue
 
-            generated.append(
-                {
-                    "chapter_num": num,
-                    "chapter_title": result.get("chapter_title") or "",
-                    "chars": result.get("chars") or 0,
-                    "scene_id": meta.get("scene_id") or "",
-                }
-            )
-            # 刚写的章作为下一章 prev（内存中 read_chapter 可能未刷新若 generate 已写盘）
+            row = {
+                "chapter_num": num,
+                "chapter_title": result.get("chapter_title") or "",
+                "chars": result.get("chars") or 0,
+                "scene_id": meta.get("scene_id") or "",
+            }
+            generated.append(row)
+            completed = list(job.get("completed") or [])
+            if num not in completed:
+                completed.append(num)
+            job["completed"] = completed
+            job["generated"] = generated
+            save_job(data_dir, job)
     finally:
         set_batch_job_running(False, "")
 
-    ok = bool(generated) and not errors
-    partial = bool(generated) and bool(errors)
+    mark_job_done(job, partial=bool(generated) and bool(errors))
+    job["generated"] = generated
+    job["skipped"] = skipped
+    job["errors"] = errors
+    job["total_cost_usd"] = total_cost
     report = format_generate_report(
         label=label,
         chapter_from=chapter_from,
@@ -208,6 +290,12 @@ def run_world_batch_generate(
         errors=errors,
         total_cost_usd=total_cost,
     )
+    job["report"] = report
+    save_job(data_dir, job)
+    (job_path(data_dir, job_id) / "report.md").write_text(report, encoding="utf-8")
+
+    ok = bool(generated) and not errors
+    partial = bool(generated) and bool(errors)
     log_id = quality_log_entry(
         "world_batch_generate",
         generated[-1]["chapter_num"] if generated else chapter_from,
@@ -216,21 +304,25 @@ def run_world_batch_generate(
         persisted=bool(generated),
         persisted_detail=f"生成 {len(generated)} 章",
         extra={
+            "job_id": job_id,
             "chapter_from": chapter_from,
             "chapter_to": chapter_to,
             "generated": [g["chapter_num"] for g in generated],
             "skipped": skipped,
             "errors": errors,
             "total_cost_usd": total_cost,
+            "resumed": bool(resume_job_id),
         },
     )
     return {
         "ok": ok or partial,
         "partial": partial,
+        "job_id": job_id,
+        "resumed": bool(resume_job_id),
         "label": label,
         "chapter_from": chapter_from,
         "chapter_to": chapter_to,
-        "target_count": len(targets),
+        "target_count": len(job.get("targets") or []),
         "ok_count": len(generated),
         "skipped": skipped,
         "generated": generated,

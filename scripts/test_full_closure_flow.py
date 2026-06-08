@@ -52,26 +52,6 @@ def _flow_log(step: str, ok: bool, detail: dict | None = None) -> None:
     FLOW_LOG.parent.mkdir(parents=True, exist_ok=True)
     with open(FLOW_LOG, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    # #region agent log
-    try:
-        with open(DEBUG_LOG, "a", encoding="utf-8") as f:
-            f.write(
-                json.dumps(
-                    {
-                        "sessionId": "d92d85",
-                        "hypothesisId": "E2E",
-                        "location": "test_full_closure_flow",
-                        "message": step,
-                        "data": {"ok": ok, **(detail or {})},
-                        "timestamp": int(time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except OSError:
-        pass
-    # #endregion
 
 
 def main_flow() -> int:
@@ -101,8 +81,11 @@ def main_flow() -> int:
     _flow_log("chapters_check", True, {"count": len(chapters), "nums": nums})
 
     _sep("2. 续章灵感 / 大纲 outline")
+    from app.bootstrap import init_context
+    from core.orchestration import outline as orchestration_outline
+
     t0 = time.time()
-    outline_r = main.api_run_outline(next_count=1)
+    outline_r = orchestration_outline.run_outline(init_context(), next_count=1)
     elapsed = time.time() - t0
     if not outline_r.get("ok"):
         print("WARN:", outline_r.get("error", "大纲失败（可继续，若已有 plan）"))
@@ -121,7 +104,11 @@ def main_flow() -> int:
         )
 
     _sep("3. 世界批次 status")
-    status = main.api_get_world_batch_status()
+    from app.bootstrap import init_context
+    from core.orchestration import batch as orchestration_batch
+
+    ctx = init_context()
+    status = orchestration_batch.get_world_batch_status(ctx)
     print(
         f"{status.get('label')} · 正文 {status.get('written_count')} 章 "
         f"（第{status.get('written_from')}–{status.get('written_to')}）"
@@ -135,7 +122,7 @@ def main_flow() -> int:
     _sep("4. 仅诊断 · 世界审阅 review")
     print("开始调用…")
     t1 = time.time()
-    review_r = main.api_run_world_batch_review()
+    review_r = orchestration_batch.run_world_batch_review(ctx)
     elapsed = time.time() - t1
     if not review_r.get("ok") and not review_r.get("partial"):
         print("ERROR:", review_r.get("error"))
@@ -159,7 +146,7 @@ def main_flow() -> int:
     _sep("5. 世界闭环 remediate（诊断→改稿→档案→报告）")
     print("开始调用（耗时较长）…")
     t2 = time.time()
-    remediate_r = main.api_run_world_remediate()
+    remediate_r = orchestration_batch.run_world_remediate(ctx)
     elapsed = time.time() - t2
     if not remediate_r.get("ok") and not remediate_r.get("partial"):
         print("ERROR:", remediate_r.get("error"))
@@ -203,7 +190,7 @@ def main_flow() -> int:
     _sep("6. 善后 · accept job")
     job_id = remediate_r.get("job_id")
     if job_id:
-        acc = main.api_accept_batch_job(job_id)
+        acc = orchestration_batch.accept_batch_job(ctx, job_id)
         print(f"accept: {acc}")
         _flow_log("accept", acc.get("ok", False), {"job_id": job_id})
 

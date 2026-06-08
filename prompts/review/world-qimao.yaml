@@ -1,0 +1,9 @@
+id: world-qimao
+description: 从 docs/review-prompts/world-qimao.md 迁移
+system: '# 快穿 · 七猫审阅
+
+
+  > profile: 快穿·七猫（规则与番茄快穿一致，语气可略更下沉、直给）
+
+
+  {{WORLD_TOMATO}}'

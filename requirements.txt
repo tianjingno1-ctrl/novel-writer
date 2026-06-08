@@ -2,3 +2,4 @@ anthropic>=0.40.0
 openai>=1.40.0
 fastapi>=0.110.0
 uvicorn>=0.27.0
+pyyaml>=6.0.0

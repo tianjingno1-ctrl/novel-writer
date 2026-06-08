@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -23,15 +22,13 @@ from summarizer import (
 
 import batch_world
 import runtime_log
-
-
-def _dbg_remediate(
-    hypothesis_id: str,
-    location: str,
-    message: str,
-    data: dict | None = None,
-) -> None:
-    runtime_log.log_debug(location, message, data=data or {}, hypothesis_id=hypothesis_id)
+from pipeline.checkpoint import (
+    JOB_KIND_WORLD_REMEDIATE,
+    job_path,
+    load_job,
+    new_job_id,
+    save_job,
+)
 
 
 _ARCHIVE_BULK_NAMES = (
@@ -40,40 +37,6 @@ _ARCHIVE_BULK_NAMES = (
     "plot_threads_locked.md",
     "plot_threads_active.md",
 )
-
-
-def jobs_dir(data_dir: Path) -> Path:
-    return data_dir / "batch_jobs"
-
-
-def new_job_id() -> str:
-    return uuid.uuid4().hex[:12]
-
-
-def job_path(data_dir: Path, job_id: str) -> Path:
-    return jobs_dir(data_dir) / job_id
-
-
-def load_job(data_dir: Path, job_id: str) -> dict | None:
-    path = job_path(data_dir, job_id) / "job.json"
-    if not path.exists():
-        return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return None
-
-
-def save_job(data_dir: Path, job: dict) -> None:
-    jid = job.get("id")
-    if not jid:
-        raise ValueError("job 缺少 id")
-    root = job_path(data_dir, jid)
-    root.mkdir(parents=True, exist_ok=True)
-    (root / "job.json").write_text(
-        json.dumps(job, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
 
 
 def _chapter_beats(chapter_num: int) -> tuple[str, str]:
@@ -193,23 +156,12 @@ def run_world_remediate(
 
     label = status["label"]
     job_id = new_job_id()
-    _dbg_remediate(
-        "H1",
-        "batch_remediate:run_world_remediate",
-        "job start",
-        {
-            "job_id": job_id,
-            "label": label,
-            "cf": cf,
-            "ct": ct,
-            "targets": targets,
-        },
-    )
     job_root = job_path(data_dir, job_id)
     job_root.mkdir(parents=True, exist_ok=True)
 
     job: dict = {
         "id": job_id,
+        "kind": JOB_KIND_WORLD_REMEDIATE,
         "status": "running",
         "phase": "diagnose",
         "label": label,

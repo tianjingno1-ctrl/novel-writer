@@ -148,6 +148,75 @@ def ensure_chapter_plan(chapter_num: int, title: str = "") -> dict:
     return load_plan()
 
 
+def _workshop_beat_chapter_num(beat: dict) -> int | None:
+    """从工坊 beat 取章号。使用 beat.chapter（勿用 chapter_index）。"""
+    raw = beat.get("chapter")
+    if raw is None:
+        raw = beat.get("chapter_index")  # 旧字段兼容
+    try:
+        ch = int(raw or 0)
+    except (TypeError, ValueError):
+        return None
+    return ch if ch >= 1 else None
+
+
+def scene_from_workshop_beat(chapter_num: int, beat: dict) -> dict:
+    """将工坊 beat 转为 plan.json 的 scenes[] 单项。
+
+    输入 beat: { chapter, title, beat }
+    - beat.chapter → 归入 plan.chapters[str(chapter)]（不写入 scene 字段）
+    - beat.title   → scene.title
+    - beat.beat    → scene.beat
+    - pace / emotion_anchor / done 使用默认值
+    """
+    return {
+        "id": _new_scene_id(chapter_num),
+        "title": str(beat.get("title") or "").strip() or "新场景",
+        "beat": str(beat.get("beat") or "").strip(),
+        "pace": "中",
+        "summary": "",
+        "done": False,
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+        "emotion_anchor": {},
+    }
+
+
+def replace_scenes_from_workshop_beats(beats: list[dict]) -> bool:
+    """用工坊 beats 全量重建 plan.json 的 chapters/scenes（每 beat 一条 scene）。"""
+    parsed: list[dict] = []
+    for item in beats or []:
+        if not isinstance(item, dict):
+            continue
+        ch = _workshop_beat_chapter_num(item)
+        if ch is None:
+            continue
+        parsed.append({
+            "chapter": ch,
+            "title": str(item.get("title") or "").strip(),
+            "beat": str(item.get("beat") or "").strip(),
+        })
+    if not parsed:
+        return False
+
+    def edit(plan: dict) -> None:
+        by_ch: dict[int, list[dict]] = {}
+        for item in parsed:
+            by_ch.setdefault(item["chapter"], []).append(item)
+        plan["chapters"] = {}
+        for ch_num in sorted(by_ch.keys()):
+            key = str(ch_num)
+            items = by_ch[ch_num]
+            ch_title = items[0]["title"] if len(items) == 1 else f"第{ch_num}章"
+            scenes = [scene_from_workshop_beat(ch_num, item) for item in items]
+            plan["chapters"][key] = {"title": ch_title, "scenes": scenes}
+        first_ch = str(sorted(by_ch.keys())[0])
+        first_scenes = plan["chapters"][first_ch].get("scenes") or []
+        plan["active_scene_id"] = first_scenes[0]["id"] if first_scenes else None
+
+    _mutate_plan(edit)
+    return True
+
+
 def list_plan_chapters() -> list[dict]:
     plan = load_plan()
     items = []

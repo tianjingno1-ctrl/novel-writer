@@ -186,14 +186,27 @@ class APIClient:
         messages: list[dict],
         *,
         max_tokens: int,
+        temperature: float | None = None,
         provider: str | None = None,
     ) -> tuple[str, TokenUsage]:
         pid = config.resolve_provider(provider)
         cfg = config.get_provider_config(pid)
 
         if cfg["client"] == "anthropic":
-            return self._call_anthropic(system, messages, max_tokens=max_tokens, provider=pid)
-        return self._call_openai(system, messages, max_tokens=max_tokens, provider=pid)
+            return self._call_anthropic(
+                system,
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                provider=pid,
+            )
+        return self._call_openai(
+            system,
+            messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            provider=pid,
+        )
 
     def iter_message(
         self,
@@ -201,14 +214,27 @@ class APIClient:
         messages: list[dict],
         *,
         max_tokens: int,
+        temperature: float | None = None,
         provider: str | None = None,
     ) -> Iterator[str]:
         pid = config.resolve_provider(provider)
         cfg = config.get_provider_config(pid)
         if cfg["client"] == "anthropic":
-            yield from self._iter_anthropic(system, messages, max_tokens=max_tokens, provider=pid)
+            yield from self._iter_anthropic(
+                system,
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                provider=pid,
+            )
         else:
-            yield from self._iter_openai(system, messages, max_tokens=max_tokens, provider=pid)
+            yield from self._iter_openai(
+                system,
+                messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                provider=pid,
+            )
 
     def _iter_anthropic(
         self,
@@ -216,6 +242,7 @@ class APIClient:
         messages: list[dict],
         *,
         max_tokens: int,
+        temperature: float | None = None,
         provider: str,
     ) -> Iterator[str]:
         kwargs: dict = {
@@ -223,6 +250,8 @@ class APIClient:
             "max_tokens": max_tokens,
             "messages": messages,
         }
+        if temperature is not None:
+            kwargs["temperature"] = temperature
         if _has_system(system):
             kwargs["system"] = system
         try:
@@ -245,6 +274,7 @@ class APIClient:
         messages: list[dict],
         *,
         max_tokens: int,
+        temperature: float | None = None,
         provider: str,
     ) -> Iterator[str]:
         openai_messages: list[dict] = []
@@ -258,6 +288,8 @@ class APIClient:
             "messages": openai_messages,
             "stream": True,
         }
+        if temperature is not None:
+            create_kwargs["temperature"] = temperature
         # DeepSeek 流式对 stream_options 支持不稳定，直接走基础流式
         if provider != "deepseek":
             create_kwargs["stream_options"] = {"include_usage": True}
@@ -306,6 +338,7 @@ class APIClient:
         messages: list[dict],
         *,
         max_tokens: int,
+        temperature: float | None = None,
         provider: str,
     ) -> tuple[str, TokenUsage]:
         kwargs: dict = {
@@ -313,6 +346,8 @@ class APIClient:
             "max_tokens": max_tokens,
             "messages": messages,
         }
+        if temperature is not None:
+            kwargs["temperature"] = temperature
         if _has_system(system):
             kwargs["system"] = system
         try:
@@ -342,6 +377,7 @@ class APIClient:
         messages: list[dict],
         *,
         max_tokens: int,
+        temperature: float | None = None,
         provider: str,
     ) -> tuple[str, TokenUsage]:
         openai_messages: list[dict] = []
@@ -350,11 +386,17 @@ class APIClient:
             openai_messages.append({"role": "system", "content": system_text})
         openai_messages.extend(messages)
 
+        create_kwargs: dict = {
+            "model": config.get_model(provider),
+            "max_tokens": max_tokens,
+            "messages": openai_messages,
+        }
+        if temperature is not None:
+            create_kwargs["temperature"] = temperature
+
         try:
             response = self._get_openai(provider).chat.completions.create(
-                model=config.get_model(provider),
-                max_tokens=max_tokens,
-                messages=openai_messages,
+                **create_kwargs
             )
         except Exception as e:
             raise _classify_api_error(e) from e
