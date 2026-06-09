@@ -1335,46 +1335,14 @@ def save_chapter_after_reply(
     instruction: str = "",
 ) -> dict | None:
     """AI 回复后自动保存到目标章节。"""
-    if not should_append_to_chapter(reply):
-        if not config.AUTO_APPEND_CHAPTER:
-            return None
-        print("💡 本条为讨论/说明，未写入章节（如需保存请手动编辑章节文件）")
-        return None
+    from app import writing_chat as wc
 
-    if not config.AUTO_APPEND_CHAPTER:
-        pending = count_unsaved_chapter_turns()
-        print(f"💡 本条正文尚未写入章节，输入 /save 保存（待保存 {pending} 条）")
-        return None
-
-    chapter_num, chapter_path = get_or_create_write_chapter(write_chapter_num)
-    mode = instruction_save_mode(instruction)
-    if mode == "append":
-        chars, title = append_to_chapter(
-            reply, chapter_path, msg_index=msg_index, chapter_num=chapter_num
-        )
-        state.appended_indices.add(msg_index)
-        title_note = f" · 《{title}》" if title else ""
-        print(
-            f"💾 已追加到 data/chapters/ch{chapter_num:03d}.md{title_note}（+{chars} 字）"
-        )
-        if not title:
-            title = sync_chapter_title_from_file(chapter_num)
-        _invalidate_chapter_injection(chapter_num)
-        return {"mode": "append", "title": title, "chapter_num": chapter_num}
-
-    chars, title = replace_chapter_content(
-        reply, chapter_path, chapter_num, msg_index=msg_index
+    return wc.save_chapter_after_reply(
+        reply,
+        msg_index,
+        write_chapter_num=write_chapter_num,
+        instruction=instruction,
     )
-    _clear_assistant_appended_indices()
-    state.appended_indices.add(msg_index)
-    title_note = f" · 《{title}》" if title else ""
-    print(
-        f"💾 已覆盖保存到 data/chapters/ch{chapter_num:03d}.md{title_note}（{chars} 字）"
-    )
-    if not title:
-        title = sync_chapter_title_from_file(chapter_num)
-    _invalidate_chapter_injection(chapter_num)
-    return {"mode": "replace", "title": title, "chapter_num": chapter_num}
 
 
 def count_summaries() -> int:
@@ -1572,136 +1540,9 @@ def writing_chat(
     chapter_num: int | None = None,
 ) -> dict:
     """Web/API：结构化写作对话，返回 JSON 友好结果。"""
-    prep = _prepare_writing_turn(
-        instruction, scene_beat, scene_id, chapter_num=chapter_num
-    )
-    if not prep.get("ok"):
-        return prep
+    from app import writing_chat as wc
 
-    reply = call_api(prep["system"], prep["messages"], silent=True)
-    if reply is None:
-        _rollback_failed_writing_turn(prep)
-        info = get_last_call_info()
-        return {"ok": False, "error": info.get("error", "API 调用失败")}
-
-    return _finalize_writing_turn(
-        reply,
-        write_chapter_num=prep["write_chapter_num"],
-        instruction=prep.get("full_instruction", prep.get("instruction", "")),
-    )
-
-
-def _prepare_writing_turn(
-    instruction: str,
-    scene_beat: str = "",
-    scene_id: str = "",
-    chapter_num: int | None = None,
-) -> dict:
-    """追加用户消息并构建 API 请求上下文。"""
-    if batch_state.is_batch_job_running():
-        return {"ok": False, "error": "世界闭环任务进行中，请稍后再使用写书对话"}
-    beat_text = scene_beat.strip()
-    if not beat_text and scene_id:
-        scene = novel_data.get_scene(scene_id)
-        if scene:
-            beat_text = scene.get("beat", "")
-            novel_data.set_active_scene(scene_id)
-    elif scene_id:
-        novel_data.set_active_scene(scene_id)
-
-    parts = []
-    if beat_text:
-        parts.append(f"【场景指令 Scene Beat】\n{beat_text}")
-    if instruction.strip():
-        parts.append(instruction.strip())
-    full_instruction = "\n\n".join(parts)
-    if not full_instruction:
-        return {"ok": False, "error": "指令不能为空"}
-
-    write_num = resolve_write_chapter_num(chapter_num, scene_id)
-    state.write_chapter_num = write_num
-    injection_snapshot = {
-        "session_includes_chapter": state.session_includes_chapter,
-        "last_injected_chapter_num": state.last_injected_chapter_num,
-    }
-    if write_num != state.last_injected_chapter_num:
-        state.session_includes_chapter = False
-
-    chapter_content = read_chapter_content(write_num)
-    if not chapter_content.strip():
-        chapter_content = "（本章尚无正文）"
-
-    injected_this_turn = False
-    if not state.session_includes_chapter:
-        user_content = (
-            f"【当前章节：第{write_num}章】\n\n"
-            f"{chapter_content}\n\n"
-            f"【写作指令】\n{full_instruction}"
-        )
-        state.session_includes_chapter = True
-        state.last_injected_chapter_num = write_num
-        injected_this_turn = True
-    else:
-        user_content = full_instruction
-
-    state.conversation_history.append({"role": "user", "content": user_content})
-    return {
-        "ok": True,
-        "write_chapter_num": write_num,
-        "instruction": instruction.strip(),
-        "full_instruction": full_instruction,
-        "injected_chapter_block": injected_this_turn,
-        "injection_snapshot": injection_snapshot,
-        "system": build_cached_system(
-            WRITING_INSTRUCTION,
-            include_scene_context=not beat_text,
-        ),
-        "messages": prepare_messages_for_context(state.conversation_history),
-    }
-
-
-def _rollback_failed_writing_turn(prep: dict) -> None:
-    """API 失败时回滚本轮追加的用户消息与章节注入标记。"""
-    if state.conversation_history and state.conversation_history[-1].get("role") == "user":
-        state.conversation_history.pop()
-    snap = prep.get("injection_snapshot") or {}
-    if prep.get("injected_chapter_block"):
-        state.session_includes_chapter = snap.get("session_includes_chapter", False)
-        state.last_injected_chapter_num = int(snap.get("last_injected_chapter_num") or 0)
-
-
-def _finalize_writing_turn(
-    reply: str,
-    *,
-    write_chapter_num: int,
-    instruction: str = "",
-) -> dict:
-    reply = sanitize_chapter_text(reply)
-    state.conversation_history.append({"role": "assistant", "content": reply})
-    msg_index = len(state.conversation_history) - 1
-    save_info = save_chapter_after_reply(
-        reply,
-        msg_index,
-        write_chapter_num=write_chapter_num,
-        instruction=instruction,
-    )
-    save_session("auto", silent=True)
-
-    chapter_saved = msg_index in state.appended_indices
-    active_scene = novel_data.get_active_scene()
-    return {
-        "ok": True,
-        "reply": reply,
-        "chapter_num": write_chapter_num,
-        "chapter_saved": chapter_saved,
-        "chapter_save_mode": save_info.get("mode") if save_info else None,
-        "chapter_title": save_info.get("title") if save_info else None,
-        "context_turns": config.CHAT_CONTEXT_TURNS,
-        "context_mode": config.CONTEXT_MODE,
-        "active_scene_id": active_scene.get("id") if active_scene else None,
-        "history_len": len(state.conversation_history),
-        **get_last_call_info(),
-    }
+    return wc.writing_chat(instruction, scene_beat, scene_id, chapter_num)
 
 
 def writing_chat_stream(
@@ -1711,107 +1552,9 @@ def writing_chat_stream(
     chapter_num: int | None = None,
 ):
     """流式写作对话，yield JSON 字符串事件。"""
-    t_stream_start = time.time()
-    prep = _prepare_writing_turn(
-        instruction, scene_beat, scene_id, chapter_num=chapter_num
-    )
-    prep_ms = int((time.time() - t_stream_start) * 1000)
-    if not prep.get("ok"):
-        yield json.dumps({"type": "error", "message": prep["error"]}, ensure_ascii=False)
-        return
+    from app import writing_chat as wc
 
-    pid = config.resolve_provider(None)
-    key_ok = config.is_api_key_configured(pid)
-    if not key_ok:
-        _rollback_failed_writing_turn(prep)
-        cfg = config.get_provider_config(pid)
-        err = f"请设置 {cfg['api_key_env']}，或在 .env / config.py 中填写 API Key"
-        yield json.dumps({"type": "error", "message": err}, ensure_ascii=False)
-        return
-
-    chunks: list[str] = []
-    try:
-        log_request_context(
-            prep["system"],
-            prep["messages"],
-            tag="写书对话",
-            provider=pid,
-        )
-        t_before_lock = time.time()
-        with _request_lock:
-            lock_wait_ms = int((time.time() - t_before_lock) * 1000)
-            usage: TokenUsage | None = None
-            try:
-                t_before_api = time.time()
-                first_chunk_logged = False
-                stream_opts = CallOptions(max_tokens=config.MAX_TOKENS, provider=pid)
-                for chunk in stream(
-                    prep["system"],
-                    prep["messages"],
-                    options=stream_opts,
-                ):
-                    if not first_chunk_logged:
-                        first_chunk_logged = True
-                    chunks.append(chunk)
-                    yield json.dumps(
-                        {"type": "chunk", "text": chunk}, ensure_ascii=False
-                    )
-                usage = get_client().pop_stream_usage()
-            except Exception as stream_exc:
-                if chunks or not _is_stream_disconnect_error(stream_exc):
-                    raise
-                reset_client(pid)
-                text, usage = complete(
-                    prep["system"],
-                    prep["messages"],
-                    options=stream_opts,
-                )
-                chunks = [text] if text else []
-                if text:
-                    yield json.dumps(
-                        {"type": "chunk", "text": text}, ensure_ascii=False
-                    )
-            if usage is not None:
-                _record_call_usage(usage, pid)
-    except APIError as e:
-        _rollback_failed_writing_turn(prep)
-        yield json.dumps(
-            {"type": "error", "message": _api_error_message(e)},
-            ensure_ascii=False,
-        )
-        return
-    except Exception as e:
-        _rollback_failed_writing_turn(prep)
-        yield json.dumps({"type": "error", "message": str(e)}, ensure_ascii=False)
-        return
-
-    reply = "".join(chunks)
-    result = _finalize_writing_turn(
-        reply,
-        write_chapter_num=prep["write_chapter_num"],
-        instruction=prep.get("full_instruction", prep.get("instruction", "")),
-    )
-    yield json.dumps(
-        {
-            "type": "done",
-            "chapter_num": result["chapter_num"],
-            "chapter_saved": result["chapter_saved"],
-            "chapter_save_mode": result.get("chapter_save_mode"),
-            "chapter_title": result.get("chapter_title"),
-            "cost": state.last_call_info.get("cost", 0),
-            "cost_no_cache": state.last_call_info.get("cost_no_cache"),
-            "cost_saved": state.last_call_info.get("cost_saved"),
-            "cache_savings_pct": state.last_call_info.get("cache_savings_pct"),
-            "cache_write_at": state.last_call_info.get("cache_write_at"),
-            "cache_ttl_remaining": state.last_call_info.get("cache_ttl_remaining"),
-            "total_cost": state.total_cost,
-            "usage": state.last_call_info.get("usage"),
-            "model": state.last_call_info.get("model"),
-            "provider": pid,
-            "writing_cache_supported": config.supports_prompt_cache(pid),
-        },
-        ensure_ascii=False,
-    )
+    return wc.writing_chat_stream(instruction, scene_beat, scene_id, chapter_num)
 
 
 def get_chat_history() -> list[dict]:

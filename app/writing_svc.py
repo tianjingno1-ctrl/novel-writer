@@ -1,9 +1,10 @@
-"""writing 路由适配层（P3-4b/c）。session 走 writing_session；chat 主链暂留 main。"""
+"""writing 路由适配层（P3-4b/c/d）。session → writing_session；chat → writing_chat。"""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 
+from app import writing_chat as wc
 from app import writing_session as ws
 
 
@@ -25,9 +26,7 @@ def writing_chat(
     scene_id: str = "",
     chapter_num: int | None = None,
 ) -> dict:
-    import main
-
-    return main.writing_chat(instruction, scene_beat, scene_id, chapter_num)
+    return wc.writing_chat(instruction, scene_beat, scene_id, chapter_num)
 
 
 def writing_chat_stream(
@@ -36,9 +35,7 @@ def writing_chat_stream(
     scene_id: str = "",
     chapter_num: int | None = None,
 ) -> Iterator[str]:
-    import main
-
-    return main.writing_chat_stream(instruction, scene_beat, scene_id, chapter_num)
+    return wc.writing_chat_stream(instruction, scene_beat, scene_id, chapter_num)
 
 
 def clear_chat_session() -> None:
