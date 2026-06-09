@@ -13,18 +13,18 @@ def configure(ctx: AppContext) -> None:
 
 
 def init_context() -> AppContext:
-    """从 main 工厂组装 AppContext 并注册（CLI / API 启动时调用）。"""
-    import main
+    """从工厂组装 AppContext 并注册（CLI / API 启动时调用）。"""
+    from app import factories
 
-    store = main._book_store()
+    store = factories.book_store()
     ctx = AppContext(
         store=store,
-        reviewer_deps=main._reviewer_deps(store),
-        maintain_deps=main._maintain_deps(store),
-        generator_deps=main._generator_deps(store),
-        resolve_chapter=main._resolve_chapter_num,
-        quality_log_entry=main._quality_log_entry,
-        short_story_skip=main._short_story_archive_skip,
+        reviewer_deps=factories.reviewer_deps(store),
+        maintain_deps=factories.maintain_deps(store),
+        generator_deps=factories.generator_deps(store),
+        resolve_chapter=factories.resolve_chapter_num,
+        quality_log_entry=factories.quality_log_entry,
+        short_story_skip=factories.short_story_archive_skip,
     )
     assert ctx.reviewer_deps.store is ctx.store, "store 引用不一致"
     assert ctx.maintain_deps.store is ctx.store, "store 引用不一致"

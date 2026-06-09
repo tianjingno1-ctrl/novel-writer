@@ -488,8 +488,9 @@ def switch_book(book_id: str) -> dict:
     _save_index(index)
 
     import main
+    from app.free_chat import load_free_chat
 
-    main.load_free_chat()
+    load_free_chat()
     return {
         "ok": True,
         "book_id": book_id,
@@ -546,9 +547,10 @@ def create_book(
     apply_paths_to_modules()
 
     import main
+    from app.free_chat import load_free_chat
 
     main.init_data_dirs()
     reinit_book_services()
-    main.load_free_chat()
+    load_free_chat()
 
     return {"ok": True, "book_id": book_id, "book": entry}

@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import sys
-import time
 from contextlib import asynccontextmanager
 
 import config
 import main as core
-import novel_data
 import runtime_log
 from api.routes import batch as batch_routes
 from api.routes import chapters as chapters_routes
@@ -21,17 +18,20 @@ from api.routes import free_chat as free_chat_routes
 from api.routes import guide as guide_routes
 from api.routes import history as history_routes
 from api.routes import library as library_routes
+from api.routes import logs as logs_routes
 from api.routes import maintain as maintain_routes
+from api.routes import meta as meta_routes
 from api.routes import outline as outline_routes
 from api.routes import plan as plan_routes
+from api.routes import project as project_routes
 from api.routes import review as review_routes
 from api.routes import stats as stats_routes
 from api.routes import workshop as workshop_routes
 from api.routes import writing as writing_routes
 from app.bootstrap import init_context
+from app.free_chat import load_free_chat
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse
 
 _LOCAL_CLIENTS = frozenset({
     "127.0.0.1",
@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
     core.init_data_dirs()
     config.load_runtime_settings()
     core.set_total_cost(core.load_total_cost())
-    core.load_free_chat()
+    load_free_chat()
     if core.auto_restore_session_if_needed():
         _safe_print("[OK] 已从磁盘恢复写书对话（session_autosave.json）")
     if config.WEB_TOKEN:
@@ -104,6 +104,9 @@ app.include_router(writing_routes.router)
 app.include_router(stats_routes.router)
 app.include_router(history_routes.router)
 app.include_router(config_routes.router)
+app.include_router(meta_routes.router)
+app.include_router(project_routes.router)
+app.include_router(logs_routes.router)
 
 
 @app.middleware("http")
@@ -162,79 +165,6 @@ async def runtime_error_middleware(request: Request, call_next):
             exc=exc,
         )
         raise
-
-
-# ── 路由 ──────────────────────────────────────────
-@app.get("/", include_in_schema=False)
-def root() -> RedirectResponse:
-    return RedirectResponse(url="/docs", status_code=302)
-
-
-@app.get("/api/status")
-def status() -> dict:
-    status_data = core.get_app_status()
-    last = core.get_last_call_info()
-    if last:
-        status_data["last_call"] = last
-    return status_data
-
-
-@app.get("/api/debug/last_context")
-def debug_last_context() -> dict:
-    return core.get_last_context_debug()
-
-
-class ProjectUpdate(BaseModel):
-    title: str | None = None
-    world_label: str | None = None
-    tagline: str | None = None
-    notes: str | None = None
-    type: str | None = None
-    platform: str | None = None
-
-
-@app.get("/api/project")
-def get_project() -> dict:
-    return novel_data.get_project_meta()
-
-
-@app.put("/api/project")
-def put_project(body: ProjectUpdate) -> dict:
-    fields = body.model_dump(exclude_unset=True)
-    return novel_data.save_project_meta(**fields)
-
-
-@app.get("/api/quality/log")
-def quality_log_list(kind: str | None = None, limit: int = 80) -> dict:
-    import quality_log
-
-    return {"entries": quality_log.list_entries(limit=limit, kind=kind)}
-
-
-@app.get("/api/quality/log/{entry_id}")
-def quality_log_get(entry_id: str) -> dict:
-    import quality_log
-
-    row = quality_log.get_entry(entry_id)
-    if not row:
-        raise HTTPException(404, "记录不存在")
-    return row
-
-
-@app.get("/api/runtime-logs")
-def runtime_logs_list(level: str | None = None, category: str | None = None, limit: int = 80) -> dict:
-    return {
-        "status": runtime_log.get_status(),
-        "entries": runtime_log.list_entries(limit=limit, level=level, category=category),
-    }
-
-
-@app.get("/api/runtime-logs/{entry_id}")
-def runtime_logs_get(entry_id: str) -> dict:
-    row = runtime_log.get_entry(entry_id)
-    if not row:
-        raise HTTPException(404, "日志不存在")
-    return row
 
 
 def run(host: str = "127.0.0.1", port: int = 8765, open_browser: bool = True) -> None:

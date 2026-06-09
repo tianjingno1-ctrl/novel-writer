@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import main as core
+from app import free_chat as svc
 from fastapi import APIRouter
 from pydantic import BaseModel, field_validator
 
@@ -54,12 +55,12 @@ class ProviderSwitch(BaseModel):
 
 @router.get("/api/free-chat/history")
 def free_chat_history() -> dict:
-    return core.get_free_chat_state()
+    return svc.get_free_chat_state()
 
 
 @router.put("/api/free-chat/provider")
 def set_free_chat_provider(body: ProviderSwitch) -> dict:
-    require_ok(core.set_free_chat_provider(body.provider), "切换失败")
+    require_ok(svc.set_free_chat_provider(body.provider), "切换失败")
     from providers import reset_client
 
     reset_client(body.provider)
@@ -70,20 +71,20 @@ def set_free_chat_provider(body: ProviderSwitch) -> dict:
 def free_chat_send(body: FreeChatRequest) -> dict:
     core.touch_user_active()
     return require_ok(
-        core.free_chat(body.content, provider=body.provider),
+        svc.free_chat(body.content, provider=body.provider),
         "自由聊失败",
     )
 
 
 @router.post("/api/free-chat/clear")
 def free_chat_clear() -> dict:
-    return core.clear_free_chat()
+    return svc.clear_free_chat()
 
 
 @router.delete("/api/free-chat/messages/{index}")
 def free_chat_delete_message(index: int) -> dict:
     return require_ok(
-        core.delete_free_chat_message(index),
+        svc.delete_free_chat_message(index),
         "删除消息失败",
     )
 
@@ -92,7 +93,7 @@ def free_chat_delete_message(index: int) -> dict:
 def free_chat_thread_create(body: FreeChatThreadCreate) -> dict:
     title = body.title or None
     return require_ok(
-        core.create_free_chat_thread(title),
+        svc.create_free_chat_thread(title),
         "创建话题失败",
     )
 
@@ -102,7 +103,7 @@ def free_chat_thread_rename(
     thread_id: str, body: FreeChatThreadRename
 ) -> dict:
     return require_ok(
-        core.rename_free_chat_thread(thread_id, body.title),
+        svc.rename_free_chat_thread(thread_id, body.title),
         "重命名失败",
     )
 
@@ -110,7 +111,7 @@ def free_chat_thread_rename(
 @router.put("/api/free-chat/active-thread")
 def free_chat_thread_switch(body: FreeChatThreadSwitch) -> dict:
     return require_ok(
-        core.switch_free_chat_thread(body.thread_id),
+        svc.switch_free_chat_thread(body.thread_id),
         "切换话题失败",
     )
 
@@ -118,6 +119,6 @@ def free_chat_thread_switch(body: FreeChatThreadSwitch) -> dict:
 @router.delete("/api/free-chat/threads/{thread_id}")
 def free_chat_thread_delete(thread_id: str) -> dict:
     return require_ok(
-        core.delete_free_chat_thread(thread_id),
+        svc.delete_free_chat_thread(thread_id),
         "删除话题失败",
     )

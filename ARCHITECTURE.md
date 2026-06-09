@@ -47,8 +47,14 @@ app/                 → bootstrap、AppContext、CLI（不含业务编排）
 | 3 | 删 `services/` | 完成 |
 | 4 | `finalize` → `core/orchestration/finalize.py` | 完成 |
 | 5 | `review` → `core/orchestration/review.py` | 完成 |
-| 6 | `web_app.py` → `api/routes/*` | 进行中（`finalize` + `review` + `maintain` + `library` 已迁） |
+| 6 | `web_app.py` → `api/routes/*` | ✅ 已完成 |
 | 7 | `main.py` → `app/cli.py` | 待做 |
 | 8 | 清理 `*Deps`、`summarizer` re-export | 待做 |
+
+### Step 6 — 路由收拢 ✅ 已完成
+
+- `web_app.py`：210 行，0 条内联路由，20 个 `include_router`
+- `api/routes/`：20 个路由模块，覆盖全部 HTTP 端点
+- 测试：117 passed，零回归
 
 详见 `docs/schemas.md`、`docs/deps-audit.md`。
