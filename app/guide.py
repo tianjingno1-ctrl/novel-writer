@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 
 import novel_data
+from app import book_io as bio
 from app import paths as _paths
+from app import writing_ctx as _wctx
 from app_state import state
 
 
@@ -89,7 +91,7 @@ def get_guide_status() -> dict:
     )
     has_plan = scene_count > 0
 
-    latest = main.get_latest_chapter()
+    latest = _wctx.get_latest_chapter()
     latest_chapter_num = latest[0] if latest else 0
 
     def _last_update_chapter(file_key: str) -> int:
@@ -121,7 +123,7 @@ def get_guide_status() -> dict:
     recent_raw = bio.read_text(_paths.resolved("SUMMARIES_RECENT_FILE"))
     summaries_recent_count = len(re.findall(r"【第\d+章", recent_raw))
 
-    combined_summaries = main.get_summaries_combined()
+    combined_summaries = _wctx.get_summaries_combined()
     summary_nums = {int(n) for n in re.findall(r"【第(\d+)章", combined_summaries)}
     last_summary_chapter = max(summary_nums) if summary_nums else 0
     latest_chapter_has_summary = (

@@ -12,7 +12,6 @@ from pathlib import Path
 
 from app import book_io as bio
 from app import paths as _paths
-from app.chapters_api import list_chapters
 from app_state import state
 from core import context as writing_context
 
@@ -64,6 +63,8 @@ def _read_plot_active() -> str:
 
 
 def get_latest_chapter() -> tuple[int, Path, str] | None:
+    from app.chapters_api import list_chapters
+
     chapters = list_chapters()
     if not chapters:
         return None

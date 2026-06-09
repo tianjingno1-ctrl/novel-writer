@@ -1,4 +1,4 @@
-"""CLI 入口（P3-5b）：REPL 循环 + do_* 命令。LLM/章节 helper 仍 lazy import main。"""
+"""CLI 入口（P3-5b）：REPL 循环 + do_* 命令。"""
 
 from __future__ import annotations
 
@@ -8,9 +8,12 @@ import signal
 from datetime import datetime
 
 import config
-from app import chapter_io as ch
 from app import book_io as bio
+from app import chapter_io as ch
+from app import llm as _llm
 from app import paths as _paths
+from app import writing_chat as _wchat
+from app import writing_ctx as _wctx
 from app import writing_session as ws
 from app import writing_turns as wt
 from app_state import state
@@ -50,10 +53,9 @@ def do_save() -> None:
 
 
 def do_writing(instruction: str) -> None:
-    import main as m
     from summarizer import WRITING_INSTRUCTION
 
-    latest = m.get_latest_chapter()
+    latest = _wctx.get_latest_chapter()
     if latest is None:
         print("提示：data/chapters/ 中尚无章节文件，将仅根据指令回复。")
         chapter_num, chapter_content = 0, "（尚无章节正文）"
@@ -75,16 +77,18 @@ def do_writing(instruction: str) -> None:
 
     state.conversation_history.append({"role": "user", "content": user_content})
 
-    system = m.build_cached_system(WRITING_INSTRUCTION)
-    reply = m.call_api(system, m.prepare_messages_for_context(state.conversation_history))
+    system = _llm.build_cached_system(WRITING_INSTRUCTION)
+    reply = _llm.call_api(
+        system, _llm.prepare_messages_for_context(state.conversation_history)
+    )
     if reply is None:
         state.conversation_history.pop()
         return
 
-    reply = m.sanitize_chapter_text(reply)
+    reply = ch.sanitize_chapter_text(reply)
     print(f"\n{reply}\n")
     state.conversation_history.append({"role": "assistant", "content": reply})
-    m.save_chapter_after_reply(
+    _wchat.save_chapter_after_reply(
         reply,
         len(state.conversation_history) - 1,
         write_chapter_num=chapter_num if chapter_num > 0 else None,
@@ -94,10 +98,9 @@ def do_writing(instruction: str) -> None:
 
 
 def do_summary() -> None:
-    import main as m
     from summarizer import SUMMARY_SYSTEM, build_summary_user_message
 
-    latest = m.get_latest_chapter()
+    latest = _wctx.get_latest_chapter()
     if latest is None:
         print("错误：没有找到章节文件（data/chapters/ch001.md 等）")
         return
@@ -109,9 +112,9 @@ def do_summary() -> None:
 
     pid = config.SUMMARY_PROVIDER
     cfg = config.get_provider_config(pid)
-    system = m.build_cached_system(SUMMARY_SYSTEM, provider=pid)
+    system = _llm.build_cached_system(SUMMARY_SYSTEM, provider=pid)
     messages = [{"role": "user", "content": build_summary_user_message(chapter_num, content)}]
-    reply = m.call_api(system, messages, provider=pid, tag="概述")
+    reply = _llm.call_api(system, messages, provider=pid, tag="概述")
     if reply is None:
         return
 
@@ -135,10 +138,9 @@ def do_summary() -> None:
 
 
 def do_check() -> None:
-    import main as m
     from summarizer import CHECK_SYSTEM, build_check_user_message
 
-    latest = m.get_latest_chapter()
+    latest = _wctx.get_latest_chapter()
     if latest is None:
         print("错误：没有找到章节文件")
         return
@@ -147,30 +149,29 @@ def do_check() -> None:
     world = bio.read_text(_paths.resolved("WORLD_FILE"))
     characters = bio.read_text(_paths.resolved("CHARACTERS_FILE"))
     pid = config.CHECK_PROVIDER
-    system = m.build_cached_system(CHECK_SYSTEM, provider=pid)
+    system = _llm.build_cached_system(CHECK_SYSTEM, provider=pid)
     messages = [
         {
             "role": "user",
             "content": build_check_user_message(
                 world,
                 characters,
-                m.get_char_context_for_check(),
-                m.get_summaries_combined(),
+                _wctx.get_char_context_for_check(),
+                _wctx.get_summaries_combined(),
                 chapter_num,
                 chapter_content,
             ),
         }
     ]
-    reply = m.call_api(system, messages, provider=pid, tag="检查")
+    reply = _llm.call_api(system, messages, provider=pid, tag="检查")
     if reply is not None:
         print(f"\n{reply}\n")
 
 
 def do_outline(next_count: int = 3) -> None:
-    import main as m
     from summarizer import OUTLINE_SYSTEM, build_outline_user_message
 
-    err = m._outline_context_ready()
+    err = _wctx._outline_context_ready()
     if err:
         print(f"错误：{err}")
         return
@@ -178,27 +179,25 @@ def do_outline(next_count: int = 3) -> None:
     n = max(1, min(10, next_count))
     pid = config.OUTLINE_PROVIDER
     cfg = config.get_provider_config(pid)
-    system = m.build_cached_system(OUTLINE_SYSTEM, provider=pid)
+    system = _llm.build_cached_system(OUTLINE_SYSTEM, provider=pid)
     messages = [
         {
             "role": "user",
             "content": build_outline_user_message(
                 bio.read_text(_paths.resolved("WORLD_FILE")),
-                m.get_char_context_for_check(),
-                m.get_summaries_combined(),
-                m._read_plot_active(),
+                _wctx.get_char_context_for_check(),
+                _wctx.get_summaries_combined(),
+                _wctx._read_plot_active(),
                 n,
             ),
         }
     ]
-    reply = m.call_api(system, messages, provider=pid, tag="续章灵感")
+    reply = _llm.call_api(system, messages, provider=pid, tag="续章灵感")
     if reply is not None:
         print(f"\n（{cfg['name']} · 后续 {n} 章建议）\n{reply}\n")
 
 
 def do_patch(content: str) -> None:
-    import main as m
-
     if not content.strip():
         print("用法：/patch 补充内容...")
         return
@@ -359,11 +358,9 @@ def setup_exit_handlers() -> None:
 
 
 def print_startup_banner() -> None:
-    import main as m
-
-    latest = m.get_latest_chapter()
+    latest = _wctx.get_latest_chapter()
     chapter_str = f"第{latest[0]}章" if latest else "（尚无章节）"
-    summary_count = m.count_summaries()
+    summary_count = _wctx.count_summaries()
 
     cfg = config.get_provider_config()
     sum_cfg = config.get_provider_config(config.SUMMARY_PROVIDER)

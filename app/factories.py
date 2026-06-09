@@ -1,4 +1,4 @@
-"""AppContext hook 与工厂（bootstrap 组装入口；部分符号仍懒 import main）。"""
+"""AppContext hook 与工厂（bootstrap 组装入口）。"""
 
 from __future__ import annotations
 
@@ -49,7 +49,7 @@ def quality_log_entry(
 
 
 def resolve_chapter_num(chapter_num: int | None) -> tuple[int, str] | dict:
-    import main
+    from app import writing_ctx as _wctx
     from app_state import state
 
     if chapter_num and chapter_num > 0:
@@ -65,7 +65,7 @@ def resolve_chapter_num(chapter_num: int | None) -> tuple[int, str] | dict:
         content = chapter_io.read_chapter_content(state.write_chapter_num)
         if content.strip():
             return state.write_chapter_num, content
-    latest = main.get_latest_chapter()
+    latest = _wctx.get_latest_chapter()
     if latest is None:
         return {"ok": False, "error": "没有找到章节文件"}
     num, _, content = latest
@@ -99,7 +99,7 @@ def book_store() -> BookStore:
     """当前书存储入口（路径由 main 全局注入 BookStore，core 不 import main）。"""
     import book_context
     from app import book_io as bio
-    import main
+    from app import writing_session as _wsess
 
     try:
         ctx = book_context.get_context()
@@ -109,7 +109,7 @@ def book_store() -> BookStore:
         book_paths_view(),
         read_text=bio.read_text,
         write_text=bio.write_text,
-        session_chapter_num=main._session_chapter_num,
+        session_chapter_num=_wsess._session_chapter_num,
         book_context=ctx,
     )
 

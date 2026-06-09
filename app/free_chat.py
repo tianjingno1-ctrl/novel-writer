@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 import config
+from app import llm as _llm
 from app import paths as _paths
 from app_state import state
 
@@ -318,8 +319,6 @@ def delete_free_chat_message(index: int) -> dict:
 
 def free_chat(message: str, provider: str | None = None) -> dict:
     """自由聊天：无系统提示词，纯对话，不写章节。"""
-    import main
-
     text = message.strip()
     if not text:
         return {"ok": False, "error": "消息不能为空"}
@@ -338,7 +337,7 @@ def free_chat(message: str, provider: str | None = None) -> dict:
 
     state.free_chat_history.append({"role": "user", "content": text})
     trimmed = _trim_free_history()
-    reply = main.call_api(
+    reply = _llm.call_api(
         None,
         trimmed,
         max_tokens=config.FREE_CHAT_MAX_TOKENS,
@@ -348,7 +347,7 @@ def free_chat(message: str, provider: str | None = None) -> dict:
     )
     if reply is None:
         state.free_chat_history.pop()
-        return {"ok": False, "error": main.get_last_call_info().get("error", "发送失败")}
+        return {"ok": False, "error": _llm.get_last_call_info().get("error", "发送失败")}
 
     state.free_chat_history.append({"role": "assistant", "content": reply})
     thread["updated_at"] = _free_chat_now()
@@ -357,5 +356,5 @@ def free_chat(message: str, provider: str | None = None) -> dict:
         "ok": True,
         "reply": reply,
         "provider": pid,
-        **main.get_last_call_info(),
+        **_llm.get_last_call_info(),
     }

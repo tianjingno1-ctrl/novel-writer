@@ -8,7 +8,6 @@ from pathlib import Path
 import file_utils
 import novel_data
 from app import paths as _paths
-from app.factories import invalidate_chapter_injection
 from core import chapters as chapter_text
 
 
@@ -36,14 +35,15 @@ def get_chapter_by_num(num: int) -> dict | None:
 
 
 def save_chapter_by_num(num: int, content: str) -> dict:
-    import main
     from app import book_io as bio
+    from app import chapter_io as _cio
+    from app.factories import invalidate_chapter_injection
 
     path = _chapters_dir() / f"ch{num:03d}.md"
-    content = main.sanitize_chapter_text(content)
+    content = _cio.sanitize_chapter_text(content)
     changed = bio.write_text(path, content, append=False, chapter_num=num)
     invalidate_chapter_injection(num)
-    chapter_title = main.sync_chapter_title_from_file(num)
+    chapter_title = _cio.sync_chapter_title_from_file(num)
     return {"ok": True, "num": num, "chapter_title": chapter_title, "changed": changed}
 
 
