@@ -22,7 +22,6 @@ import novel_data
 from app_state import state
 from core.api import TokenUsage
 from core import chapters as chapter_text
-from core import context as writing_context
 from app import batch_state
 from app.bootstrap import init_context
 from app.factories import (
@@ -347,89 +346,27 @@ from app.book_io import (
     read_text,
     write_text,
 )
-
-
-def _bind_writing_context() -> None:
-    """将 main 模块路径同步到 core.context（测试 patch main.WORLD_FILE 时亦生效）。"""
-    writing_context.bind(
-        writing_context.BookPaths(
-            world_file=WORLD_FILE,
-            style_file=STYLE_FILE,
-            characters_file=CHARACTERS_FILE,
-            char_static_file=CHAR_STATIC_FILE,
-            char_dynamic_file=CHAR_DYNAMIC_FILE,
-            char_current_file=CHAR_CURRENT_FILE,
-            summaries_archive_file=SUMMARIES_ARCHIVE_FILE,
-            summaries_recent_file=SUMMARIES_RECENT_FILE,
-            summaries_file=SUMMARIES_FILE,
-            plot_threads_locked_file=PLOT_THREADS_LOCKED_FILE,
-            plot_threads_active_file=PLOT_THREADS_ACTIVE_FILE,
-            plot_threads_file=PLOT_THREADS_FILE,
-        ),
-        read_text=read_text,
-    )
-
-
-def cache_block(text: str) -> dict:
-    return writing_context.cache_block(text)
-
-
-def _read_char_static() -> str:
-    _bind_writing_context()
-    return writing_context.read_char_static()
-
-
-def _read_plot_locked() -> str:
-    _bind_writing_context()
-    return writing_context.read_plot_locked()
-
-
-def _read_plot_active() -> str:
-    _bind_writing_context()
-    return writing_context.read_plot_active()
-
-
-def _outline_context_ready() -> str | None:
-    if get_latest_chapter() is None:
-        return "没有找到章节文件"
-    if count_summaries() == 0:
-        return "请先生成章节概述（/summary 或 Web「生成概述」）"
-    return None
-
-
-def get_characters_block() -> str:
-    _bind_writing_context()
-    return writing_context.get_characters_block()
-
-
-def get_stable_archive_block() -> str:
-    _bind_writing_context()
-    return writing_context.get_stable_archive_block()
-
-
-def _collect_dynamic_layer_parts() -> list[dict]:
-    _bind_writing_context()
-    return writing_context.collect_dynamic_layer_parts()
-
-
-def get_dynamic_context_block() -> str:
-    _bind_writing_context()
-    return writing_context.get_dynamic_context_block()
-
-
-def get_char_context_for_check() -> str:
-    _bind_writing_context()
-    return writing_context.get_char_context_for_check()
-
-
-def get_summaries_combined() -> str:
-    _bind_writing_context()
-    return writing_context.get_summaries_combined()
-
-
-def get_world_block() -> str:
-    _bind_writing_context()
-    return writing_context.get_world_block()
+from app.writing_ctx import (
+    _USER_CHAPTER_BLOCK_RE,
+    _bind_writing_context,
+    _collect_dynamic_layer_parts,
+    _outline_context_ready,
+    _read_char_static,
+    _read_plot_active,
+    _read_plot_locked,
+    _record_context_debug,
+    cache_block,
+    count_summaries,
+    extract_chapter_body_from_user_message,
+    get_char_context_for_check,
+    get_characters_block,
+    get_dynamic_context_block,
+    get_last_context_debug,
+    get_latest_chapter,
+    get_stable_archive_block,
+    get_summaries_combined,
+    get_world_block,
+)
 
 
 def build_cached_system(
@@ -445,34 +382,6 @@ def build_cached_system(
         provider,
         include_scene_context=include_scene_context,
     )
-
-
-def _record_context_debug(
-    layers: list[dict],
-    *,
-    provider: str | None = None,
-    messages: list[dict] | None = None,
-    tag: str = "",
-) -> None:
-    from app import llm
-
-    _bind_writing_context()
-    writing_context.record_context_debug(
-        layers,
-        provider=provider,
-        messages=messages,
-        tag=tag,
-        summarize_messages=llm._summarize_messages,
-    )
-
-
-def get_last_context_debug() -> dict:
-    if not state.last_context_debug:
-        return {"ok": False, "error": "尚无请求记录，请先发送一次写书对话、自由聊或检查类请求"}
-    data = dict(state.last_context_debug)
-    data["ok"] = True
-    data["last_call"] = get_last_call_info()
-    return data
 
 
 def _estimate_tokens(text: str) -> int:
@@ -519,12 +428,6 @@ def log_request_context(
     return llm.log_request_context(
         system, messages, tag=tag, provider=provider
     )
-
-
-_USER_CHAPTER_BLOCK_RE = re.compile(
-    r"^【当前章节：第(\d+)章】\s*\n+(.*?)(?:\n+【写作指令】|\Z)",
-    re.DOTALL,
-)
 
 
 def prepare_messages_for_context(history: list[dict]) -> list[dict]:
@@ -584,14 +487,6 @@ def call_api(
         provider=provider,
         silent=silent,
     )
-
-
-def get_latest_chapter() -> tuple[int, Path, str] | None:
-    chapters = list_chapters()
-    if not chapters:
-        return None
-    num, path = chapters[-1]
-    return num, path, read_text(path)
 
 
 _APPEND_INSTRUCTION_KEYWORDS = (
@@ -693,15 +588,6 @@ def undo_last_chapter_append() -> dict:
     return wt.undo_last_chapter_append()
 
 
-def extract_chapter_body_from_user_message(content: str) -> str | None:
-    """从首轮用户消息中取出附带的章节正文（不含写作指令）。"""
-    m = _USER_CHAPTER_BLOCK_RE.match((content or "").strip())
-    if not m:
-        return None
-    body = m.group(2).strip()
-    return body or None
-
-
 def parse_chapter_header_line(line: str) -> str | None:
     return chapter_text.parse_chapter_header_line(line)
 
@@ -794,11 +680,6 @@ def save_chapter_after_reply(
         write_chapter_num=write_chapter_num,
         instruction=instruction,
     )
-
-
-def count_summaries() -> int:
-    combined = get_summaries_combined()
-    return len(re.findall(r"【第\d+章", combined))
 
 
 def touch_user_active() -> None:

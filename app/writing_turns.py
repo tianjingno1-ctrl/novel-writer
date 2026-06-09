@@ -8,6 +8,7 @@ from pathlib import Path
 from app import paths as _paths
 from app import book_io as bio
 from app import chapter_io as ch
+from app import writing_ctx as _wctx
 from app.factories import invalidate_chapter_injection
 from app_state import state
 
@@ -77,7 +78,6 @@ def apply_assistant_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
 
 def apply_user_draft_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     """用首轮用户消息里附带的章节草稿替换整章正文。"""
-    import main
     from app import writing_session as ws
 
     path = _chapter_path(chapter_num)
@@ -89,7 +89,7 @@ def apply_user_draft_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     msg = state.conversation_history[msg_index]
     if msg["role"] != "user":
         return {"ok": False, "error": "只能选用用户消息中的章节草稿"}
-    body = main.extract_chapter_body_from_user_message(msg["content"])
+    body = _wctx.extract_chapter_body_from_user_message(msg["content"])
     if not body:
         return {"ok": False, "error": "该轮指令里没有附带章节正文（仅首轮带全文时可用）"}
 

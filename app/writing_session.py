@@ -11,6 +11,7 @@ import file_utils
 from app import chapter_io as chapter_io
 from app import book_io as bio
 from app import paths as _paths
+from app import writing_ctx as _wctx
 from app_state import state
 
 
@@ -27,11 +28,9 @@ def get_appended_indices() -> list[int]:
 
 
 def _session_chapter_num() -> int:
-    import main
-
     if state.write_chapter_num > 0:
         return state.write_chapter_num
-    latest = main.get_latest_chapter()
+    latest = _wctx.get_latest_chapter()
     return latest[0] if latest else 0
 
 

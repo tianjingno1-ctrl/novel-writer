@@ -8,6 +8,7 @@ from pathlib import Path
 import novel_data
 from app import paths as _paths
 from app import book_io as bio
+from app import writing_ctx as _wctx
 from app.chapter_titles import refresh_chapter_file_header
 from app.factories import apply_chapter_title
 from app_state import state
@@ -22,8 +23,6 @@ def resolve_write_chapter_num(
     chapter_num: int | None = None, scene_id: str = ""
 ) -> int:
     """确定本次写入/注入的目标章节：显式章号 > 场景章 > 会话章 > 最新章。"""
-    import main as m
-
     if chapter_num and chapter_num > 0:
         return chapter_num
     if scene_id:
@@ -32,7 +31,7 @@ def resolve_write_chapter_num(
             return int(scene["chapter_num"])
     if state.write_chapter_num > 0:
         return state.write_chapter_num
-    latest = m.get_latest_chapter()
+    latest = _wctx.get_latest_chapter()
     return latest[0] if latest else 1
 
 

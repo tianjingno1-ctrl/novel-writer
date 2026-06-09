@@ -18,6 +18,7 @@ import novel_data
 import runtime_log
 from app import cost as _cost
 from app import paths
+from app import writing_ctx as _wctx
 from app_state import state
 from core.api import APIError, CallOptions, TokenUsage, complete
 from core import context as writing_context
@@ -145,8 +146,6 @@ def log_request_context(
     provider: str | None = None,
 ) -> dict:
     """记录即将发出的 API 上下文体积，便于排查过长问题。"""
-    import main
-
     report = _build_context_report(system, messages, tag=tag, provider=provider)
     if isinstance(system, list):
         layers = []
@@ -168,10 +167,10 @@ def log_request_context(
                     "content": text,
                 }
             )
-        main._record_context_debug(layers, provider=provider, messages=messages, tag=tag)
+        _wctx._record_context_debug(layers, provider=provider, messages=messages, tag=tag)
     elif system:
         text = str(system)
-        main._record_context_debug(
+        _wctx._record_context_debug(
             [
                 {
                     "id": "system",
@@ -185,7 +184,7 @@ def log_request_context(
             tag=tag,
         )
     else:
-        main._record_context_debug(
+        _wctx._record_context_debug(
             [
                 {
                     "id": "none",
@@ -233,9 +232,7 @@ def build_cached_system(
     *,
     include_scene_context: bool = True,
 ) -> list[dict] | str:
-    import main
-
-    main._bind_writing_context()
+    _wctx._bind_writing_context()
     return writing_context.build_cached_system(
         instruction,
         provider,
@@ -245,12 +242,10 @@ def build_cached_system(
 
 
 def _history_has_chapter_block(history: list[dict], chapter_num: int) -> bool:
-    import main
-
     for msg in history:
         if msg.get("role") != "user":
             continue
-        m = main._USER_CHAPTER_BLOCK_RE.match((msg.get("content") or "").strip())
+        m = _wctx._USER_CHAPTER_BLOCK_RE.match((msg.get("content") or "").strip())
         if m and int(m.group(1)) == chapter_num:
             return True
     return False
