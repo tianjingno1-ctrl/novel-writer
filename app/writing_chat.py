@@ -8,10 +8,12 @@ from collections.abc import Iterator
 import batch_state
 import config
 import novel_data
-from app import writing_session as ws
 from app import chapter_io as ch
+from app import llm
+from app import writing_session as ws
 from app.factories import invalidate_chapter_injection
 from app_state import state
+from core.api import APIError, CallOptions, TokenUsage, complete, get_client, reset_client, stream
 from summarizer import WRITING_INSTRUCTION
 
 
@@ -87,8 +89,6 @@ def _finalize_writing_turn(
     write_chapter_num: int,
     instruction: str = "",
 ) -> dict:
-    import main
-
     reply = ch.sanitize_chapter_text(reply)
     state.conversation_history.append({"role": "assistant", "content": reply})
     msg_index = len(state.conversation_history) - 1
@@ -113,7 +113,7 @@ def _finalize_writing_turn(
         "context_mode": config.CONTEXT_MODE,
         "active_scene_id": active_scene.get("id") if active_scene else None,
         "history_len": len(state.conversation_history),
-        **main.get_last_call_info(),
+        **llm.get_last_call_info(),
     }
 
 
@@ -124,8 +124,6 @@ def _prepare_writing_turn(
     chapter_num: int | None = None,
 ) -> dict:
     """追加用户消息并构建 API 请求上下文。"""
-    import main
-
     if batch_state.is_batch_job_running():
         return {"ok": False, "error": "世界闭环任务进行中，请稍后再使用写书对话"}
     beat_text = scene_beat.strip()
@@ -180,11 +178,11 @@ def _prepare_writing_turn(
         "full_instruction": full_instruction,
         "injected_chapter_block": injected_this_turn,
         "injection_snapshot": injection_snapshot,
-        "system": main.build_cached_system(
+        "system": llm.build_cached_system(
             WRITING_INSTRUCTION,
             include_scene_context=not beat_text,
         ),
-        "messages": main.prepare_messages_for_context(state.conversation_history),
+        "messages": llm.prepare_messages_for_context(state.conversation_history),
     }
 
 
@@ -195,18 +193,16 @@ def writing_chat(
     chapter_num: int | None = None,
 ) -> dict:
     """Web/API：结构化写作对话，返回 JSON 友好结果。"""
-    import main
-
     prep = _prepare_writing_turn(
         instruction, scene_beat, scene_id, chapter_num=chapter_num
     )
     if not prep.get("ok"):
         return prep
 
-    reply = main.call_api(prep["system"], prep["messages"], silent=True)
+    reply = llm.call_api(prep["system"], prep["messages"], silent=True)
     if reply is None:
         _rollback_failed_writing_turn(prep)
-        info = main.get_last_call_info()
+        info = llm.get_last_call_info()
         return {"ok": False, "error": info.get("error", "API 调用失败")}
 
     return _finalize_writing_turn(
@@ -223,17 +219,6 @@ def writing_chat_stream(
     chapter_num: int | None = None,
 ) -> Iterator[str]:
     """流式写作对话，yield JSON 字符串事件（同步 generator）。"""
-    import main
-    from providers import (
-        APIError,
-        CallOptions,
-        TokenUsage,
-        complete,
-        get_client,
-        reset_client,
-        stream,
-    )
-
     prep = _prepare_writing_turn(
         instruction, scene_beat, scene_id, chapter_num=chapter_num
     )
@@ -252,13 +237,13 @@ def writing_chat_stream(
 
     chunks: list[str] = []
     try:
-        main.log_request_context(
+        llm.log_request_context(
             prep["system"],
             prep["messages"],
             tag="写书对话",
             provider=pid,
         )
-        with main._request_lock:
+        with llm._request_lock:
             usage: TokenUsage | None = None
             try:
                 stream_opts = CallOptions(max_tokens=config.MAX_TOKENS, provider=pid)
@@ -273,7 +258,7 @@ def writing_chat_stream(
                     )
                 usage = get_client().pop_stream_usage()
             except Exception as stream_exc:
-                if chunks or not main._is_stream_disconnect_error(stream_exc):
+                if chunks or not llm._is_stream_disconnect_error(stream_exc):
                     raise
                 reset_client(pid)
                 text, usage = complete(
@@ -287,11 +272,11 @@ def writing_chat_stream(
                         {"type": "chunk", "text": text}, ensure_ascii=False
                     )
             if usage is not None:
-                main._record_call_usage(usage, pid)
+                llm._record_call_usage(usage, pid)
     except APIError as e:
         _rollback_failed_writing_turn(prep)
         yield json.dumps(
-            {"type": "error", "message": main._api_error_message(e)},
+            {"type": "error", "message": llm._api_error_message(e)},
             ensure_ascii=False,
         )
         return
