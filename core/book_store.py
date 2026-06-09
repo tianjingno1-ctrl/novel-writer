@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from core.schemas.service import BookSnapshot, PersistOutcome, SnapshotPurpose
 
 if TYPE_CHECKING:
-    from book_context import BookContext
+    from core.data.book_context import BookContext
 
 SUMMARIES_RECENT_KEEP = 4
 

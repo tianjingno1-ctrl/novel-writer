@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app import book_io as bio
+from infra import file_utils as bio
 from app.chapters_api import list_chapters
 from core import chapters as chapter_text
 

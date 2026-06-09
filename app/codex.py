@@ -18,7 +18,7 @@ def codex_file_names() -> list[str]:
 
 
 def get_codex(name: str) -> dict | None:
-    from app import book_io as bio
+    from infra import file_utils as bio
 
     path = _codex_files().get(name)
     if path is None:
@@ -27,7 +27,7 @@ def get_codex(name: str) -> dict | None:
 
 
 def save_codex(name: str, content: str, chapter_num: int | None = None) -> dict:
-    from app import book_io as bio
+    from infra import file_utils as bio
     from app import writing_session as ws
 
     path = _codex_files().get(name)

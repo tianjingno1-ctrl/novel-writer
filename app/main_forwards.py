@@ -8,20 +8,20 @@ from typing import Any
 # module path → 同名属性；特殊映射见 _ALIASES
 _MODULES: dict[str, str] = {
     # app.llm
-    "build_cached_system": "app.llm",
-    "_estimate_tokens": "app.llm",
-    "_analyze_system": "app.llm",
-    "_summarize_messages": "app.llm",
-    "_build_context_report": "app.llm",
-    "log_request_context": "app.llm",
-    "prepare_messages_for_context": "app.llm",
-    "trim_history": "app.llm",
-    "get_last_call_info": "app.llm",
-    "_is_stream_disconnect_error": "app.llm",
-    "_record_call_usage": "app.llm",
-    "_api_error_message": "app.llm",
-    "call_api": "app.llm",
-    # app.chapter_io
+    "build_cached_system": "core.llm",
+    "_estimate_tokens": "core.llm",
+    "_analyze_system": "core.llm",
+    "_summarize_messages": "core.llm",
+    "_build_context_report": "core.llm",
+    "log_request_context": "core.llm",
+    "prepare_messages_for_context": "core.llm",
+    "trim_history": "core.llm",
+    "get_last_call_info": "core.llm",
+    "_is_stream_disconnect_error": "core.llm",
+    "_record_call_usage": "core.llm",
+    "_api_error_message": "core.llm",
+    "call_api": "core.llm",
+    # app.chapter_io（shim 注入 configure）
     "resolve_write_chapter_num": "app.chapter_io",
     "get_chapter_path": "app.chapter_io",
     "read_chapter_content": "app.chapter_io",
@@ -39,6 +39,22 @@ _MODULES: dict[str, str] = {
     "count_unsaved_chapter_turns": "app.chapter_io",
     "flush_chapter_writes": "app.chapter_io",
     "get_chapters_text_for_scope": "app.chapter_io",
+    # core.context
+    "get_last_context_debug": "core.context",
+    "get_world_block": "core.context",
+    "get_characters_block": "core.context",
+    "extract_chapter_body_from_user_message": "core.context",
+    # app.codex / guide / chapters_api / bootstrap_data / free_chat
+    "save_codex": "app.codex",
+    "get_codex": "app.codex",
+    "get_guide_status": "app.guide",
+    "save_chapter_by_num": "app.chapters_api",
+    "get_chapter_by_num": "app.chapters_api",
+    "list_chapters": "app.chapters_api",
+    "create_next_chapter": "app.chapters_api",
+    "load_free_chat": "app.free_chat",
+    "INITIAL_FILE_TEMPLATES": "app.bootstrap_data",
+    "DEFAULT_CHAT_PROMPTS": "app.bootstrap_data",
     # app.writing_turns
     "undo_last_chapter_append": "app.writing_turns",
     "apply_assistant_turn_to_chapter": "app.writing_turns",
@@ -112,6 +128,12 @@ _MODULES: dict[str, str] = {
 
 _ALIASES: dict[str, tuple[str, str]] = {
     "ensure_chapter_file": ("app.chapters_api", "_ensure_chapter_file"),
+    "_book_store": ("app.factories", "book_store"),
+    "_resolve_chapter_num": ("app.factories", "resolve_chapter_num"),
+    "_generator_deps": ("app.factories", "generator_deps"),
+    "_reviewer_deps": ("app.factories", "reviewer_deps"),
+    "_maintain_deps": ("app.factories", "maintain_deps"),
+    "apply_chapter_title": ("app.factories", "apply_chapter_title"),
 }
 
 _mod_cache: dict[str, object] = {}

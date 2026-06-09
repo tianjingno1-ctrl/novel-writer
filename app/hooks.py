@@ -19,7 +19,7 @@ def _ensure_context():
 
 
 def build_finalize_hooks() -> FinalizeHooks:
-    from app import book_io as bio
+    from infra import file_utils as bio
     from app import chapter_io as _cio
 
     ctx = _ensure_context()

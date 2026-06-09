@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 import batch_world
-import novel_data
+from core.data import novel_data
 from pipeline.checkpoint import (
     JOB_KIND_WORLD_GENERATE,
     STATUS_DONE,

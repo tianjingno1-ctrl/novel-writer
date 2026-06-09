@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import novel_data
+from core.data import novel_data
 import review_prompts
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel

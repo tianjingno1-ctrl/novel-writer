@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-import config
+import infra.config as config
 from core.book_store import BookStore, parse_markdown_list_items
 from core.deps import MaintainDeps
 from core.schemas.llm import MaintainPayload, parse_post_chapter_maintain

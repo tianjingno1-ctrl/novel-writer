@@ -3,11 +3,11 @@ import logging
 import os
 from pathlib import Path
 
-import file_utils
+from infra import file_utils
 
 logger = logging.getLogger(__name__)
 
-_CONFIG_DIR = Path(__file__).resolve().parent
+_CONFIG_DIR = Path(__file__).resolve().parents[1]
 _ENV_CANDIDATES = (_CONFIG_DIR / ".env", _CONFIG_DIR / ".evn")
 # 用户级偏好（换书不重置）；见 book_context.LIBRARY_DIR
 RUNTIME_FILE = _CONFIG_DIR / "library" / "runtime.json"

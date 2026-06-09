@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import config
+import infra.config as config
 from app import runtime as rt
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -49,7 +49,7 @@ def set_provider(body: ProviderSwitch) -> dict:
         raise HTTPException(400, f"未知提供商: {body.provider}")
     config.PROVIDER = body.provider
     config.save_runtime_settings()
-    from providers import reset_client
+    from infra.providers import reset_client
 
     reset_client(body.provider)
     return {"ok": True, **rt.get_app_status()}

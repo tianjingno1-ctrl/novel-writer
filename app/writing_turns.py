@@ -6,11 +6,11 @@ import re
 from pathlib import Path
 
 from app import paths as _paths
-from app import book_io as bio
+from infra import file_utils as bio
 from app import chapter_io as ch
 from app import writing_ctx as _wctx
 from app.factories import invalidate_chapter_injection
-from app_state import state
+from infra.state import state
 
 
 def _chapter_path(chapter_num: int) -> Path:

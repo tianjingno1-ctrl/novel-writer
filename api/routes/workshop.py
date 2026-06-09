@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import time
 
-import app_state
-import book_context
+from infra import state as app_state
+from core.data import book_context
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, field_validator, model_validator
 

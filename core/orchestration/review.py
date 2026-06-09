@@ -262,7 +262,7 @@ def run_deconstruct(
     source_label: str = "",
     include_book_context: bool = True,
 ) -> dict:
-    import novel_data
+    from core.data import novel_data
 
     store = ctx.store
     p = store.paths

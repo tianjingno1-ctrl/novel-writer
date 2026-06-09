@@ -6,8 +6,8 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-import config
-import novel_data
+import infra.config as config
+from core.data import novel_data
 from core import chapters as chapter_text
 from summarizer import OUTLINE_SYSTEM, build_outline_user_message
 

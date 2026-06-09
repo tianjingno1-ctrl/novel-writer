@@ -5,10 +5,10 @@ from __future__ import annotations
 import threading
 import time
 
-import config
-import novel_data
-import runtime_log
-from app_state import state
+import infra.config as config
+from core.data import novel_data
+from infra.logs import runtime as runtime_log
+from infra.state import state
 
 _exiting = False
 _heartbeat_stop = threading.Event()
@@ -25,7 +25,7 @@ def get_app_status() -> dict:
     book_id = ""
     book_type = "novel"
     try:
-        import book_context
+        from core.data import book_context
 
         book_id = book_context.get_context().book_id
         book_type = book_context.get_book_type()
@@ -85,7 +85,7 @@ def get_app_status() -> dict:
 
 
 def send_heartbeat() -> None:
-    from app import llm
+    from core import llm
     from summarizer import WRITING_INSTRUCTION
 
     system = llm.build_cached_system(WRITING_INSTRUCTION)

@@ -36,25 +36,36 @@ def init_context() -> AppContext:
 
 def bootstrap_library() -> None:
     """初始化书库并绑定当前书路径（启动时调用一次）。"""
-    import book_context
-    import runtime_log
+    from core.data import book_context
+    from infra.logs import runtime as runtime_log
     from app import paths as _paths
 
     runtime_log.init_runtime_log(_paths.resolved("BASE_DIR"))
     book_context.init_library()
+    from infra import file_utils
+    from core import context as writing_context
+    from core import chapter_io as cio
+
+    writing_context.install_path_resolver(_paths.resolved, file_utils.read_text)
     init_context()
+    from app import factories
+
+    cio.configure(
+        store_provider=factories.book_store,
+        path_resolver=_paths.resolved,
+    )
 
 
 def init_data_dirs() -> None:
     """首次运行：创建目录与空文件。"""
-    import book_context
-    import change_history
-    import file_utils
-    import novel_data
-    import quality_log
+    from core.data import book_context
+    from core.data import change_history
+    from infra import file_utils
+    from core.data import novel_data
+    from infra.logs import quality as quality_log
     from app import paths as _paths
     from app.bootstrap_data import DEFAULT_CHAT_PROMPTS, INITIAL_FILE_TEMPLATES
-    from app.cost import _register_change_history
+    from infra.billing import _register_change_history
 
     _paths.resolved("CHAPTERS_DIR").mkdir(parents=True, exist_ok=True)
     _paths.resolved("BACKUPS_DIR").mkdir(parents=True, exist_ok=True)

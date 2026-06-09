@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
-import config
+import infra.config as config
 from core import maintain as archive_maintain
 from core.book_store import parse_markdown_list_items
 from core.deps import LlmHooks, MaintainDeps

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import app_state
-import config
-import novel_data
+from infra import state as app_state
+import infra.config as config
+from core.data import novel_data
 from core import workshop as workshop_text
 
 if TYPE_CHECKING:

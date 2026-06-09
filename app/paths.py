@@ -1,19 +1,20 @@
-"""单一路径来源（P3-1d）。切书经 sync_from_context；mirror_to_main 兼容测试 patch main.*。"""
-
+"""路径 source of truth（P4-B）。切书经 sync_from_context；mirror_to_main 同步 main 兼容层。"""
 from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from book_context import BookContext
+    from core.data.book_context import BookContext
+
+_ROOT = Path(__file__).resolve().parent.parent
 
 # 全局固定（切书不变）
 BASE_DIR: Path | None = None
 COST_LOG: Path | None = None
 COST_LOG_JSONL: Path | None = None
 
-# main 书相关路径（切书更新）
+# 书相关路径（切书更新）
 DATA_DIR: Path | None = None
 CHAPTERS_DIR: Path | None = None
 BACKUPS_DIR: Path | None = None
@@ -46,49 +47,103 @@ ND_PROJECT_FILE: Path | None = None
 ND_CODEX_DIR: Path | None = None
 ND_CODEX_ACTIVE_FILE: Path | None = None
 
-_fixed_initialized = False
+_initialized = False
+
+
+def init_default_paths() -> None:
+    """从项目根目录初始化默认路径（不依赖 main）。"""
+    global BASE_DIR, COST_LOG, COST_LOG_JSONL
+    global DATA_DIR, CHAPTERS_DIR, BACKUPS_DIR, CONTEXT_LOG_JSONL
+    global SESSION_FILE, SESSION_MD_FILE, FREE_CHAT_FILE
+    global WORLD_FILE, STYLE_FILE, CHARACTERS_FILE, CHAR_CURRENT_FILE
+    global CHAR_STATIC_FILE, CHAR_DYNAMIC_FILE
+    global SUMMARIES_FILE, SUMMARIES_ARCHIVE_FILE, SUMMARIES_RECENT_FILE
+    global PLOT_THREADS_FILE, PLOT_THREADS_LOCKED_FILE, PLOT_THREADS_ACTIVE_FILE
+    global OUTLINE_LATEST_FILE, CHAT_PROMPTS_FILE, ARCHIVE_FILE, CODEX_FILES
+    global ND_DATA_DIR, ND_BACKUPS_DIR, ND_PLAN_FILE, ND_PROJECT_FILE
+    global ND_CODEX_DIR, ND_CODEX_ACTIVE_FILE
+    global _initialized
+
+    BASE_DIR = _ROOT
+    DATA_DIR = BASE_DIR / "data"
+    CHAPTERS_DIR = DATA_DIR / "chapters"
+    BACKUPS_DIR = DATA_DIR / "backups"
+    COST_LOG = BASE_DIR / "cost_log.txt"
+    COST_LOG_JSONL = BASE_DIR / "cost_log.jsonl"
+    CONTEXT_LOG_JSONL = DATA_DIR / "context_log.jsonl"
+    SESSION_FILE = DATA_DIR / "session_autosave.json"
+    SESSION_MD_FILE = DATA_DIR / "session_autosave.md"
+    FREE_CHAT_FILE = DATA_DIR / "free_chat.json"
+    WORLD_FILE = DATA_DIR / "world.md"
+    STYLE_FILE = DATA_DIR / "style.md"
+    CHARACTERS_FILE = DATA_DIR / "characters.md"
+    CHAR_CURRENT_FILE = DATA_DIR / "char_current.md"
+    CHAR_STATIC_FILE = DATA_DIR / "char_static.md"
+    CHAR_DYNAMIC_FILE = DATA_DIR / "char_dynamic.md"
+    SUMMARIES_FILE = DATA_DIR / "summaries.md"
+    SUMMARIES_ARCHIVE_FILE = DATA_DIR / "summaries_archive.md"
+    SUMMARIES_RECENT_FILE = DATA_DIR / "summaries_recent.md"
+    PLOT_THREADS_FILE = DATA_DIR / "plot_threads.md"
+    PLOT_THREADS_LOCKED_FILE = DATA_DIR / "plot_threads_locked.md"
+    PLOT_THREADS_ACTIVE_FILE = DATA_DIR / "plot_threads_active.md"
+    OUTLINE_LATEST_FILE = DATA_DIR / "outline_latest.md"
+    CHAT_PROMPTS_FILE = DATA_DIR / "chat_prompts.json"
+    ARCHIVE_FILE = DATA_DIR / "book_archive.md"
+    CODEX_FILES = {
+        "world": WORLD_FILE,
+        "style": STYLE_FILE,
+        "characters": CHARACTERS_FILE,
+        "char_static": CHAR_STATIC_FILE,
+        "char_dynamic": CHAR_DYNAMIC_FILE,
+        "char_current": CHAR_CURRENT_FILE,
+        "summaries_archive": SUMMARIES_ARCHIVE_FILE,
+        "summaries_recent": SUMMARIES_RECENT_FILE,
+        "summaries": SUMMARIES_FILE,
+        "plot_threads_locked": PLOT_THREADS_LOCKED_FILE,
+        "plot_threads_active": PLOT_THREADS_ACTIVE_FILE,
+        "plot_threads": PLOT_THREADS_FILE,
+    }
+
+    ND_DATA_DIR = DATA_DIR
+    ND_BACKUPS_DIR = BACKUPS_DIR
+    ND_PLAN_FILE = DATA_DIR / "plan.json"
+    ND_PROJECT_FILE = DATA_DIR / "project.json"
+    ND_CODEX_DIR = DATA_DIR / "codex" / "entries"
+    ND_CODEX_ACTIVE_FILE = DATA_DIR / "codex" / "active.json"
+    _initialized = True
+
+
+def _ensure_initialized() -> None:
+    if not _initialized:
+        init_default_paths()
 
 
 def resolved(name: str) -> Path:
-    """paths 值；若测试 patch 了 main 且与 paths 不一致，优先 main。"""
-    import main
+    _ensure_initialized()
+    # 测试 patch main.* 时优先读 main（过渡期兼容）
+    try:
+        import main
 
-    local: Path | None = globals()[name]
-    main_val: Path = getattr(main, name)
-    if local is None:
-        return main_val
-    if main_val != local:
-        return main_val
-    return local
+        mval = getattr(main, name, None)
+        if isinstance(mval, Path):
+            return mval
+    except ImportError:
+        pass
+    val = globals().get(name)
+    if val is None:
+        raise KeyError(f"未知路径名: {name}")
+    return val  # type: ignore[return-value]
 
 
 def resolved_codex_files() -> dict[str, Path]:
-    """CODEX_FILES；若测试 patch 了 main.CODEX_FILES 引用，优先 main。"""
-    import main
-
-    local = CODEX_FILES
-    main_val = main.CODEX_FILES
-    if local is None:
-        return main_val
-    if main_val is not local:
-        return main_val
-    return local
+    _ensure_initialized()
+    assert CODEX_FILES is not None
+    return CODEX_FILES
 
 
 def init_defaults() -> None:
-    """启动时从 main 读取 BASE_DIR / COST_LOG（切书不变的路径）。"""
-    global BASE_DIR, COST_LOG, COST_LOG_JSONL, _fixed_initialized
-    import main
-
-    BASE_DIR = main.BASE_DIR
-    COST_LOG = main.COST_LOG
-    COST_LOG_JSONL = main.COST_LOG_JSONL
-    _fixed_initialized = True
-
-
-def _ensure_fixed_paths() -> None:
-    if not _fixed_initialized:
-        init_defaults()
+    """兼容旧名：初始化默认路径。"""
+    init_default_paths()
 
 
 def sync_from_context(ctx: BookContext) -> None:
@@ -103,7 +158,7 @@ def sync_from_context(ctx: BookContext) -> None:
     global ND_DATA_DIR, ND_BACKUPS_DIR, ND_PLAN_FILE, ND_PROJECT_FILE
     global ND_CODEX_DIR, ND_CODEX_ACTIVE_FILE
 
-    _ensure_fixed_paths()
+    _ensure_initialized()
 
     DATA_DIR = ctx.data_dir
     CHAPTERS_DIR = ctx.chapters_dir
@@ -140,11 +195,15 @@ def sync_from_context(ctx: BookContext) -> None:
 def mirror_to_main() -> None:
     """写回 main.* + novel_data.*（测试 patch main.CHAPTERS_DIR 仍有效）。"""
     import main
-    import novel_data
+    from core.data import novel_data
 
+    _ensure_initialized()
+    main.BASE_DIR = BASE_DIR
     main.DATA_DIR = DATA_DIR
     main.CHAPTERS_DIR = CHAPTERS_DIR
     main.BACKUPS_DIR = BACKUPS_DIR
+    main.COST_LOG = COST_LOG
+    main.COST_LOG_JSONL = COST_LOG_JSONL
     main.CONTEXT_LOG_JSONL = CONTEXT_LOG_JSONL
     main.SESSION_FILE = SESSION_FILE
     main.SESSION_MD_FILE = SESSION_MD_FILE
@@ -172,3 +231,7 @@ def mirror_to_main() -> None:
     novel_data.PROJECT_FILE = ND_PROJECT_FILE
     novel_data.CODEX_DIR = ND_CODEX_DIR
     novel_data.CODEX_ACTIVE_FILE = ND_CODEX_ACTIVE_FILE
+
+
+# 模块加载时初始化
+init_default_paths()

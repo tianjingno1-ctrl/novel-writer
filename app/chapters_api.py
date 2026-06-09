@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import file_utils
-import novel_data
+from infra import file_utils
+from core.data import novel_data
 from app import paths as _paths
 from core import chapters as chapter_text
 
@@ -26,7 +26,7 @@ def list_chapters() -> list[tuple[int, Path]]:
 
 
 def get_chapter_by_num(num: int) -> dict | None:
-    from app import book_io as bio
+    from infra import file_utils as bio
 
     path = _chapters_dir() / f"ch{num:03d}.md"
     if not path.exists():
@@ -35,7 +35,7 @@ def get_chapter_by_num(num: int) -> dict | None:
 
 
 def save_chapter_by_num(num: int, content: str) -> dict:
-    from app import book_io as bio
+    from infra import file_utils as bio
     from app import chapter_io as _cio
     from app.factories import invalidate_chapter_injection
 

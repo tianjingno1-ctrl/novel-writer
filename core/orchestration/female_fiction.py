@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import novel_data
+from core.data import novel_data
 import review_prompts
 from core import chapters as chapter_text
 from core import reviewer as quality_reviewer
@@ -273,7 +273,7 @@ def accept_female_fiction_rewrite(
     *,
     sync_archive: bool = True,
 ) -> dict:
-    import quality_log
+    from infra.logs import quality as quality_log
 
     row = quality_log.get_entry((log_id or "").strip())
     if not row:

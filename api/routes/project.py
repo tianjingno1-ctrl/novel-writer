@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import novel_data
+from core.orchestration import project as orchestration_project
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -20,10 +20,10 @@ class ProjectUpdate(BaseModel):
 
 @router.get("/api/project")
 def get_project() -> dict:
-    return novel_data.get_project_meta()
+    return orchestration_project.get_project_meta()
 
 
 @router.put("/api/project")
 def put_project(body: ProjectUpdate) -> dict:
     fields = body.model_dump(exclude_unset=True)
-    return novel_data.save_project_meta(**fields)
+    return orchestration_project.save_project_meta(**fields)

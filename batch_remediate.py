@@ -7,8 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-import config
-import novel_data
+import infra.config as config
+from core.data import novel_data
 from summarizer import (
     WORLD_REMEDIATE_BULK_CHANGE_LOG_SYSTEM,
     WORLD_REMEDIATE_DIAGNOSE_SYSTEM,
@@ -21,7 +21,7 @@ from summarizer import (
 )
 
 import batch_world
-import runtime_log
+from infra.logs import runtime as runtime_log
 from pipeline.checkpoint import (
     JOB_KIND_WORLD_REMEDIATE,
     job_path,

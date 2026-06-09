@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import TypeAlias
 
 ApplyTitleFn: TypeAlias = Callable[[int, str | None], str | None]
@@ -25,6 +26,32 @@ _CHAPTER_MD_HEADER_RE = re.compile(
     r"^#\s*第(?:\d+|[一二三四五六七八九十百零]+)章"
     r"(?:\s*[·•\-—]\s*|\s+)(.+?)\s*$"
 )
+
+
+def list_chapter_files(chapters_dir: Path) -> list[tuple[int, Path]]:
+    chapters: list[tuple[int, Path]] = []
+    for p in chapters_dir.glob("ch*.md"):
+        m = re.match(r"ch(\d+)\.md$", p.name, re.IGNORECASE)
+        if m:
+            chapters.append((int(m.group(1)), p))
+    chapters.sort(key=lambda x: x[0])
+    return chapters
+
+
+def apply_chapter_title(chapter_num: int, title: str | None) -> str | None:
+    """将标题同步到 plan.json（并确保章节规划存在）。"""
+    from core.data import novel_data
+
+    if not title:
+        return None
+    clean = title.strip().strip("《》「」\"' ")
+    if not clean or clean in {f"第{chapter_num}章", f"第{chapter_cn(chapter_num)}章"}:
+        return None
+    if len(clean) > 48:
+        clean = clean[:48].rstrip()
+    novel_data.ensure_chapter_plan(chapter_num, title=clean)
+    novel_data.update_chapter_title(chapter_num, clean)
+    return clean
 
 
 def chapter_cn(n: int) -> str:

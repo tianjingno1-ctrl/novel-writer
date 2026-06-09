@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import threading
 
-import novel_data
-from app import book_io as bio
-from app import cost as _cost
+from core.data import novel_data
+from infra import file_utils as bio
+from infra import billing as _cost
 from app import paths as _paths
 from app import writing_ctx as _wctx
 from app.chapters_api import list_chapters
@@ -44,7 +44,7 @@ def cached_stats() -> dict:
 
 def bookshelf_overview() -> dict:
     """GET /api/overview。"""
-    import book_context
+    from core.data import book_context
 
     chapters = list_chapters()
     stats = stats_core.compute_stats(

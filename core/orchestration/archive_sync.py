@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-import config
+import infra.config as config
 from core import maintain as archive_maintain
 from core.book_store import BookStore
 from summarizer import (

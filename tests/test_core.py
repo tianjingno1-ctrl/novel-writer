@@ -13,11 +13,12 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import config  # noqa: E402
-import file_utils  # noqa: E402
+import infra.config as config  # noqa: E402
+import infra.file_utils as file_utils  # noqa: E402
 import main  # noqa: E402
+from tests.support.path_fixture import patch_paths  # noqa: E402
 from core import maintain as archive_maintain  # noqa: E402
-from providers import TokenUsage  # noqa: E402
+from infra.providers import TokenUsage  # noqa: E402
 
 
 class FileUtilsTests(unittest.TestCase):
@@ -174,7 +175,7 @@ class PromptLoaderTests(unittest.TestCase):
 
 class HistoryTests(unittest.TestCase):
     def test_baseline_and_save_with_history(self) -> None:
-        import change_history
+        from core.data import change_history
 
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)
@@ -425,7 +426,7 @@ class MaintainTests(unittest.TestCase):
                 "STA": main.CHAR_STATIC_FILE,
                 "DATA": main.DATA_DIR,
             }
-            import change_history
+            from core.data import change_history
 
             try:
                 main.CHAPTERS_DIR = ch_dir
@@ -447,7 +448,7 @@ class MaintainTests(unittest.TestCase):
                     },
                     backups_dir=data / "backups",
                 )
-                import quality_log
+                from infra.logs import quality as quality_log
 
                 quality_log.init_quality_log(data)
                 from app.hooks import build_finalize_hooks
@@ -523,7 +524,7 @@ class ObserveTests(unittest.TestCase):
                 main.CHAR_DYNAMIC_FILE = orig_d
 
     def test_save_codex_unchanged_reports_false(self) -> None:
-        import change_history
+        from core.data import change_history
 
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)
@@ -556,7 +557,7 @@ class ObserveTests(unittest.TestCase):
 
 class QualityLogTests(unittest.TestCase):
     def test_append_and_list(self) -> None:
-        import quality_log
+        from infra.logs import quality as quality_log
 
         with tempfile.TemporaryDirectory() as tmp:
             quality_log.init_quality_log(Path(tmp))
@@ -578,7 +579,7 @@ class QualityLogTests(unittest.TestCase):
 
 class PaceTests(unittest.TestCase):
     def test_resolve_scene_pace_from_field(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         self.assertEqual(
             novel_data.resolve_scene_pace({"pace": "快", "beat": ""}),
@@ -586,13 +587,13 @@ class PaceTests(unittest.TestCase):
         )
 
     def test_resolve_scene_pace_from_beat(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         beat = "【场景目的】打脸\n【节奏档位】慢\n【结尾钩子】…"
         self.assertEqual(novel_data.resolve_scene_pace({"beat": beat}), "慢")
 
     def test_format_emotion_anchor_from_field(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         scene = {
             "emotion_anchor": {
@@ -605,7 +606,7 @@ class PaceTests(unittest.TestCase):
         self.assertIn("鼓掌", text)
 
     def test_get_scene_context_includes_emotion(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         def fake_active():
             return {
@@ -737,7 +738,7 @@ class StyleInjectionTests(unittest.TestCase):
 
 class PlanLockTests(unittest.TestCase):
     def test_mutate_plan_serializes(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         novel_data._mutate_plan(lambda p: p.setdefault("chapters", {}))
         plan = novel_data.load_plan()
@@ -746,7 +747,7 @@ class PlanLockTests(unittest.TestCase):
 
 class CodexTests(unittest.TestCase):
     def test_sanitize_codex_name(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         self.assertEqual(novel_data._sanitize_codex_name("a/b"), "a_b")
         self.assertEqual(novel_data._sanitize_codex_name('x:y'), "x_y")
@@ -813,7 +814,7 @@ class ApplyTurnTests(unittest.TestCase):
         self.assertIn("第三天晚上", body)
 
     def test_sync_chapter_title_from_file(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -846,7 +847,7 @@ class ApplyTurnTests(unittest.TestCase):
                 novel_data._plan_lock = orig_plan_lock
 
     def test_derive_chapter_title(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         title = novel_data.derive_chapter_title_from_suggestion({
             "定位": "试探升级，关系进入拉锯",
@@ -873,7 +874,7 @@ class ApplyTurnTests(unittest.TestCase):
                 main.CHAPTERS_DIR = orig
 
     def test_parse_outline_suggestions(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         text = """【后续第1章（建议）】
 定位：试探升级
@@ -889,7 +890,7 @@ class ApplyTurnTests(unittest.TestCase):
         self.assertIn("示弱", items[0]["核心事件"])
 
     def test_parse_outline_ignores_book_chapter_label(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         text = """【后续第2章】
 定位：换打法后的第一次实战
@@ -902,7 +903,7 @@ class ApplyTurnTests(unittest.TestCase):
         self.assertEqual(items[0]["offset"], 1)
 
     def test_apply_outline_wrong_label_targets_next_chapter(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -935,7 +936,7 @@ class ApplyTurnTests(unittest.TestCase):
                 novel_data.PLAN_FILE = orig_plan_file
 
     def test_restore_chat_session(self) -> None:
-        from app_state import state
+        from infra.state import state
 
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -968,7 +969,7 @@ class ApplyTurnTests(unittest.TestCase):
                 main.SESSION_MD_FILE = orig_session_md_file
 
     def test_delete_codex_entry(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -996,14 +997,14 @@ class ApplyTurnTests(unittest.TestCase):
 
 class APIErrorTests(unittest.TestCase):
     def test_classify_auth(self) -> None:
-        from providers import APIError, _classify_api_error
+        from infra.providers import APIError, _classify_api_error
 
         err = _classify_api_error(Exception("401 Unauthorized"))
         self.assertEqual(err.kind, "auth")
         self.assertIsInstance(err, APIError)
 
     def test_classify_server_error(self) -> None:
-        from providers import APIError, _classify_api_error
+        from infra.providers import APIError, _classify_api_error
 
         raw = (
             "Error code: 500 - {'type': 'error', 'error': "
@@ -1015,7 +1016,7 @@ class APIErrorTests(unittest.TestCase):
 
     def test_classify_stream_disconnect(self) -> None:
         from main import _is_stream_disconnect_error
-        from providers import APIError, _classify_api_error
+        from infra.providers import APIError, _classify_api_error
 
         peer = (
             "peer closed connection without sending complete message body "
@@ -1047,7 +1048,7 @@ class ChapterSaveTests(unittest.TestCase):
         self.assertEqual(main.instruction_save_mode(beat_instruction), "append")
 
     def test_resolve_write_chapter_from_scene(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         prev_w = main.state.write_chapter_num
         try:
@@ -1414,7 +1415,7 @@ class BatchWorldTests(unittest.TestCase):
 
     def test_infer_world_range_from_plan(self) -> None:
         import batch_world
-        import novel_data
+        from core.data import novel_data
 
         with tempfile.TemporaryDirectory() as tmp:
             plan_path = Path(tmp) / "plan.json"
@@ -1454,7 +1455,7 @@ class BatchWorldTests(unittest.TestCase):
 
     def test_review_plan_token_estimate(self) -> None:
         import batch_world
-        import novel_data
+        from core.data import novel_data
 
         prose = "正文" * 1600  # 3200 字/章
 
@@ -1642,7 +1643,7 @@ class TestWorldRemediate(unittest.TestCase):
             ch_file.write_text("# 第1章 · 旧\n\n旧内容。\n", encoding="utf-8")
 
             orig_chapters = main.CHAPTERS_DIR
-            from app import llm as llm_mod
+            from core import llm as llm_mod
 
             orig_call = llm_mod.call_api
             orig_info = llm_mod.get_last_call_info
@@ -1692,7 +1693,7 @@ class DeconstructPromptTests(unittest.TestCase):
 
 class BookContextTests(unittest.TestCase):
     def test_create_and_switch_book(self) -> None:
-        import book_context
+        from core.data import book_context
 
         with tempfile.TemporaryDirectory() as tmp:
             lib = Path(tmp) / "library"
@@ -1758,7 +1759,7 @@ class ReviewPromptTests(unittest.TestCase):
 
     def test_resolve_beat_for_prose_chapter(self) -> None:
         import batch_world
-        import novel_data
+        from core.data import novel_data
 
         plan = {
             "active_scene_id": None,
@@ -1877,7 +1878,7 @@ class TestRuntimeLog(unittest.TestCase):
     def test_env_detection_and_entries(self) -> None:
         import os
         import tempfile
-        import runtime_log
+        from infra.logs import runtime as runtime_log
         from pathlib import Path
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -1916,7 +1917,7 @@ class TestRuntimeLog(unittest.TestCase):
 
 class WorkshopBeatMappingTests(unittest.TestCase):
     def test_scene_from_workshop_beat_defaults(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         scene = novel_data.scene_from_workshop_beat(2, {
             "chapter": 2,
@@ -1931,7 +1932,7 @@ class WorkshopBeatMappingTests(unittest.TestCase):
         self.assertTrue(scene["id"].startswith("ch2_"))
 
     def test_workshop_beat_chapter_not_chapter_index_field_on_scene(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         self.assertEqual(
             novel_data._workshop_beat_chapter_num({"chapter": 3, "title": "x", "beat": "y"}),
@@ -1944,7 +1945,7 @@ class WorkshopBeatMappingTests(unittest.TestCase):
         self.assertIsNone(novel_data._workshop_beat_chapter_num({"title": "x", "beat": "y"}))
 
     def test_replace_scenes_from_workshop_beats(self) -> None:
-        import novel_data
+        from core.data import novel_data
 
         with tempfile.TemporaryDirectory() as tmp:
             plan_path = Path(tmp) / "plan.json"

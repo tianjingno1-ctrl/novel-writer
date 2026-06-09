@@ -2,19 +2,26 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-import config
-import novel_data
-from app_state import state
+import infra.config as config
+from core.data import novel_data
+from infra.state import state
 
 ReadTextFn = Callable[[Path], str]
 
 _paths: BookPaths | None = None
 _read_text: ReadTextFn | None = None
+_path_resolver: Callable[[str], Path] | None = None
+
+_USER_CHAPTER_BLOCK_RE = re.compile(
+    r"^【当前章节：第(\d+)章】\s*\n+(.*?)(?:\n+【写作指令】|\Z)",
+    re.DOTALL,
+)
 
 
 @dataclass
@@ -52,10 +59,55 @@ class BookPaths:
         )
 
 
+def install_path_resolver(
+    resolver: Callable[[str], Path], read_text: ReadTextFn
+) -> None:
+    """由 bootstrap 注入路径解析器（测试 patch main.*_FILE 时经 paths.resolved 生效）。"""
+    global _path_resolver, _read_text
+    _path_resolver = resolver
+    _read_text = read_text
+
+
 def bind(paths: BookPaths, *, read_text: ReadTextFn) -> None:
     global _paths, _read_text
     _paths = paths
     _read_text = read_text
+
+
+def bind_writing_context() -> None:
+    """从 install_path_resolver 注册的解析器同步路径到 bind()。"""
+    if _path_resolver is None or _read_text is None:
+        return
+    bind(
+        BookPaths(
+            world_file=_path_resolver("WORLD_FILE"),
+            style_file=_path_resolver("STYLE_FILE"),
+            characters_file=_path_resolver("CHARACTERS_FILE"),
+            char_static_file=_path_resolver("CHAR_STATIC_FILE"),
+            char_dynamic_file=_path_resolver("CHAR_DYNAMIC_FILE"),
+            char_current_file=_path_resolver("CHAR_CURRENT_FILE"),
+            summaries_archive_file=_path_resolver("SUMMARIES_ARCHIVE_FILE"),
+            summaries_recent_file=_path_resolver("SUMMARIES_RECENT_FILE"),
+            summaries_file=_path_resolver("SUMMARIES_FILE"),
+            plot_threads_locked_file=_path_resolver("PLOT_THREADS_LOCKED_FILE"),
+            plot_threads_active_file=_path_resolver("PLOT_THREADS_ACTIVE_FILE"),
+            plot_threads_file=_path_resolver("PLOT_THREADS_FILE"),
+        ),
+        read_text=_read_text,
+    )
+
+
+def _maybe_bind() -> None:
+    global _path_resolver, _read_text
+    if _path_resolver is None:
+        try:
+            from app import paths as book_paths
+            from infra import file_utils as bio
+
+            install_path_resolver(book_paths.resolved, bio.read_text)
+        except ImportError:
+            return
+    bind_writing_context()
 
 
 def get_paths() -> BookPaths:
@@ -140,6 +192,7 @@ def read_plot_active() -> str:
 
 
 def get_characters_block() -> str:
+    _maybe_bind()
     p = get_paths()
     if config.CONTEXT_MODE == "codex" or novel_data.get_active_codex_ids():
         codex_text = novel_data.format_active_codex_text()
@@ -159,6 +212,7 @@ def get_characters_block() -> str:
 
 
 def get_stable_archive_block() -> str:
+    _maybe_bind()
     p = get_paths()
     parts: list[str] = []
     archive = _read(p.summaries_archive_file).strip()
@@ -171,6 +225,7 @@ def get_stable_archive_block() -> str:
 
 
 def collect_dynamic_layer_parts() -> list[dict]:
+    _maybe_bind()
     p = get_paths()
     parts: list[dict] = []
     dynamic = _read(p.char_dynamic_file).strip()
@@ -220,6 +275,7 @@ def get_dynamic_context_block() -> str:
 
 
 def get_char_context_for_check() -> str:
+    _maybe_bind()
     p = get_paths()
     static = _read_char_static()
     dynamic = _read(p.char_dynamic_file).strip()
@@ -236,6 +292,7 @@ def get_char_context_for_check() -> str:
 
 
 def get_summaries_combined() -> str:
+    _maybe_bind()
     p = get_paths()
     parts: list[str] = []
     archive = _read(p.summaries_archive_file).strip()
@@ -250,6 +307,7 @@ def get_summaries_combined() -> str:
 
 
 def get_world_block() -> str:
+    _maybe_bind()
     p = get_paths()
     world = _read(p.world_file)
     style = _read(p.style_file).strip()
@@ -320,6 +378,7 @@ def build_cached_system(
     summarize_messages: Callable[[list[dict]], list[dict]] | None = None,
     messages: list[dict] | None = None,
 ) -> list[dict] | str:
+    _maybe_bind()
     world = get_world_block()
     characters = get_characters_block()
     stable = get_stable_archive_block()
@@ -420,4 +479,74 @@ def build_cached_system(
         f"# 人物设定\n{characters}\n\n"
         f"{stable_section}"
         f"# 当前任务\n{full_instruction}"
+    )
+
+
+def get_latest_chapter() -> tuple[int, Path, str] | None:
+    """返回最新章节 (num, path, content)。"""
+    _maybe_bind()
+    if _path_resolver is None:
+        raise RuntimeError("路径解析器未安装")
+    from core.chapters import list_chapter_files
+
+    chapters_dir = _path_resolver("CHAPTERS_DIR")
+    chapters = list_chapter_files(chapters_dir)
+    if not chapters:
+        return None
+    num, path = chapters[-1]
+    return num, path, _read(path)
+
+
+def count_summaries() -> int:
+    combined = get_summaries_combined()
+    return len(re.findall(r"【第\d+章", combined))
+
+
+def _outline_context_ready() -> str | None:
+    if get_latest_chapter() is None:
+        return "没有找到章节文件"
+    if count_summaries() == 0:
+        return "请先生成章节概述（/summary 或 Web「生成概述」）"
+    return None
+
+
+def get_last_context_debug() -> dict:
+    from core import llm
+
+    if not state.last_context_debug:
+        return {
+            "ok": False,
+            "error": "尚无请求记录，请先发送一次写书对话、自由聊或检查类请求",
+        }
+    data = dict(state.last_context_debug)
+    data["ok"] = True
+    data["last_call"] = llm.get_last_call_info()
+    return data
+
+
+def extract_chapter_body_from_user_message(content: str) -> str | None:
+    """从首轮用户消息中取出附带的章节正文（不含写作指令）。"""
+    m = _USER_CHAPTER_BLOCK_RE.match((content or "").strip())
+    if not m:
+        return None
+    body = m.group(2).strip()
+    return body or None
+
+
+def record_context_debug_bound(
+    layers: list[dict],
+    *,
+    provider: str | None = None,
+    messages: list[dict] | None = None,
+    tag: str = "",
+) -> None:
+    from core import llm
+
+    _maybe_bind()
+    record_context_debug(
+        layers,
+        provider=provider,
+        messages=messages,
+        tag=tag,
+        summarize_messages=llm._summarize_messages,
     )

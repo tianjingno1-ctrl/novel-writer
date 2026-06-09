@@ -9,9 +9,9 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-import file_utils
+from infra import file_utils
 
-_BASE = Path(__file__).resolve().parent
+_BASE = Path(__file__).resolve().parents[2]
 DATA_DIR = _BASE / "data"
 BACKUPS_DIR = DATA_DIR / "backups"
 PLAN_FILE = DATA_DIR / "plan.json"
@@ -86,7 +86,7 @@ def _save_json(
     chapter_num: int | None = None,
 ) -> None:
     content = json.dumps(data, ensure_ascii=False, indent=2)
-    import change_history
+    from core.data import change_history
 
     if change_history.resolve_key(path) == "plan":
         ch = chapter_num if chapter_num is not None else _active_chapter_from_plan(data)

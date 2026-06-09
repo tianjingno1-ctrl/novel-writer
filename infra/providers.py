@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
-import config
+import infra.config as config
 
 
 def _or_zero(obj: object | None, attr: str) -> int:

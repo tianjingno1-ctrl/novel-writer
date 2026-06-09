@@ -10,11 +10,11 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-import file_utils
+from infra import file_utils
 
 logger = logging.getLogger(__name__)
 
-_BASE = Path(__file__).resolve().parent
+_BASE = Path(__file__).resolve().parents[2]
 LIBRARY_DIR = _BASE / "library"
 BOOKS_DIR = LIBRARY_DIR / "books"
 INDEX_FILE = LIBRARY_DIR / "index.json"
@@ -295,7 +295,7 @@ def apply_paths_to_modules() -> None:
     book_paths.mirror_to_main()
 
     import core.context as writing_context
-    from app import book_io as bio
+    from infra import file_utils as bio
 
     writing_context.bind(
         writing_context.BookPaths.from_book_context(ctx),
@@ -305,7 +305,7 @@ def apply_paths_to_modules() -> None:
 
 def reset_session_state() -> None:
     """切换书籍时清空进程内写作/对话状态。"""
-    from app_state import state
+    from infra.state import state
 
     state.conversation_history.clear()
     state.free_chat_history.clear()
@@ -323,9 +323,9 @@ def reset_session_state() -> None:
 
 def reinit_book_services() -> None:
     """切换书后重新绑定 change_history / quality_log 等。"""
-    import change_history
-    import quality_log
-    from app.cost import _register_change_history
+    from core.data import change_history
+    from infra.logs import quality as quality_log
+    from infra.billing import _register_change_history
 
     ctx = get_context()
     _register_change_history()
@@ -436,7 +436,7 @@ def get_book_type(book_id: str | None = None) -> str:
     try:
         return _read_project_type(get_context().project_file)
     except RuntimeError:
-        import novel_data
+        from core.data import novel_data
 
         return _read_project_type(novel_data.PROJECT_FILE)
 

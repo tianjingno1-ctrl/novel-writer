@@ -28,9 +28,9 @@ os.environ.setdefault("NOVEL_QUALITY_PROVIDER", "deepseek")
 os.environ.setdefault("NOVEL_MAINTAIN_PROVIDER", "deepseek")
 os.environ.setdefault("NOVEL_OUTLINE_PROVIDER", "deepseek")
 
-import config
-import quality_log
-from app import llm
+import infra.config as config
+from infra.logs import quality as quality_log
+from core import llm
 from app import paths as _paths
 from app.bootstrap import bootstrap_library, init_data_dirs
 from app.chapters_api import list_chapters

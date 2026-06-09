@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import novel_data
-from app import codex as codex_svc
+from core.orchestration import codex as orchestration_codex
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
@@ -56,14 +55,16 @@ class CodexActive(BaseModel):
 
 @router.get("/api/codex")
 def codex_list() -> dict:
-    return {"files": codex_svc.codex_file_names()}
+    return orchestration_codex.list_codex_files()
 
 
 @router.get("/api/codex/{name}")
 def get_codex(name: str) -> dict:
+    from app import codex as codex_svc
+
     if name not in codex_svc.valid_codex_names():
         raise HTTPException(400, "非法设定文件名")
-    data = codex_svc.get_codex(name)
+    data = orchestration_codex.get_codex_file(name)
     if data is None:
         raise HTTPException(404, f"未知设定: {name}")
     return data
@@ -71,38 +72,35 @@ def get_codex(name: str) -> dict:
 
 @router.put("/api/codex/{name}")
 def put_codex(name: str, body: CodexContentBody) -> dict:
-    if name not in codex_svc.valid_codex_names():
-        raise HTTPException(400, "非法设定文件名")
     return require_ok(
-        codex_svc.save_codex(name, body.content, chapter_num=body.chapter_num),
+        orchestration_codex.save_codex_file(
+            name, body.content, chapter_num=body.chapter_num
+        ),
         "保存失败",
     )
 
 
 @router.get("/api/codex-entries")
 def codex_entries() -> dict:
-    return {
-        "entries": novel_data.list_codex_entries(),
-        "active": novel_data.get_active_codex_ids(),
-    }
+    return orchestration_codex.list_entries()
 
 
 @router.post("/api/codex-entries")
 def codex_entry_create(body: CodexCreate) -> dict:
     return require_ok(
-        novel_data.create_codex_entry(body.name, body.content),
+        orchestration_codex.create_entry(body.name, body.content),
         "创建失败",
     )
 
 
 @router.put("/api/codex-entries/active")
 def codex_set_active(body: CodexActive) -> dict:
-    return novel_data.set_active_codex_ids(body.active)
+    return orchestration_codex.set_active_ids(body.active)
 
 
 @router.get("/api/codex-entries/{entry_id}")
 def codex_entry_get(entry_id: str) -> dict:
-    entry = novel_data.get_codex_entry(entry_id)
+    entry = orchestration_codex.get_entry(entry_id)
     if entry is None:
         raise HTTPException(404, "条目不存在")
     return entry
@@ -111,7 +109,7 @@ def codex_entry_get(entry_id: str) -> dict:
 @router.put("/api/codex-entries/{entry_id}")
 def codex_entry_save(entry_id: str, body: CodexContentBody) -> dict:
     return require_ok(
-        novel_data.save_codex_entry(entry_id, body.content),
+        orchestration_codex.save_entry(entry_id, body.content),
         "保存失败",
     )
 
@@ -119,6 +117,6 @@ def codex_entry_save(entry_id: str, body: CodexContentBody) -> dict:
 @router.delete("/api/codex-entries/{entry_id}")
 def codex_entry_delete(entry_id: str) -> dict:
     return require_ok(
-        novel_data.delete_codex_entry(entry_id),
+        orchestration_codex.delete_entry(entry_id),
         "删除失败",
     )

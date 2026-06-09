@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Iterator
 
 if TYPE_CHECKING:
-    from book_context import BookContext
+    from core.data.book_context import BookContext
     from core.book_store import BookStore
 
 TEST_BOOK_ID = "test-book"
@@ -84,7 +84,7 @@ def store_only_library(tmp_path: Path) -> Iterator[tuple["BookContext", "BookSto
     在 tmp_path 下建完整书目录，构造 BookStore（轻量 hooks），不 apply_paths_to_modules。
     适用于：core.maintain.persist、BookStore 读写、load_snapshot(maintain)
     """
-    from book_context import BookContext
+    from core.data.book_context import BookContext
     from core.book_store import BookPathsView, BookStore
 
     book_dir = tmp_path / "library" / "books" / TEST_BOOK_ID

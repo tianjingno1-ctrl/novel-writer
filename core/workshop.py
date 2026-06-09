@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-import novel_data
+from core.data import novel_data
 
 WORKSHOP_DRAFT_SEP = "---DRAFT---"
 WORKSHOP_REPLY_SEP = "---REPLY---"

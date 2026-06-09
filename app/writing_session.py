@@ -7,12 +7,12 @@ import time
 import uuid
 from datetime import datetime
 
-import file_utils
+from infra import file_utils
 from app import chapter_io as chapter_io
-from app import book_io as bio
+from infra import file_utils as bio
 from app import paths as _paths
 from app import writing_ctx as _wctx
-from app_state import state
+from infra.state import state
 
 
 def touch_user_active() -> None:

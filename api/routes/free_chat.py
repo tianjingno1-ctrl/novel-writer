@@ -62,7 +62,7 @@ def free_chat_history() -> dict:
 @router.put("/api/free-chat/provider")
 def set_free_chat_provider(body: ProviderSwitch) -> dict:
     require_ok(svc.set_free_chat_provider(body.provider), "切换失败")
-    from providers import reset_client
+    from infra.providers import reset_client
 
     reset_client(body.provider)
     return {"ok": True, **rt.get_app_status()}

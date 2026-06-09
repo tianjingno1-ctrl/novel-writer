@@ -43,7 +43,7 @@ def build_world_batch_review_deps(ctx: AppContext) -> dict:
 
 
 def _sync_chapter_title_from_file(ctx: AppContext, chapter_num: int) -> str | None:
-    import novel_data
+    from core.data import novel_data
 
     text = ctx.store.read_chapter(chapter_num)
     if not text.strip():

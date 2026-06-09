@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import novel_data
-from app.chapter_titles import (
-    refresh_chapter_file_header,
-    sync_all_chapter_titles_from_files,
-)
+from core.orchestration import plan as orchestration_plan
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
@@ -78,77 +74,67 @@ class SceneReorder(BaseModel):
     scene_ids: list[str]
 
 
+def _plan_err(result: dict, default: str) -> None:
+    if result.get("ok", True):
+        return
+    status = int(result.get("status", 400))
+    raise HTTPException(status, result.get("error", default))
+
+
 @router.get("/api/plan")
 def plan_all() -> dict:
-    return {"chapters": novel_data.list_plan_chapters()}
+    return orchestration_plan.list_plan_chapters()
 
 
 @router.get("/api/plan/full")
 def plan_full() -> dict:
-    sync_all_chapter_titles_from_files()
-    return {"chapters": novel_data.list_plan_details()}
+    return orchestration_plan.list_plan_full()
 
 
 @router.put("/api/plan/{chapter_num}/title")
 def plan_update_chapter_title(
     chapter_num: int, body: ChapterTitleUpdate
 ) -> dict:
-    title = body.title.strip()
-    if not title:
-        raise HTTPException(400, "标题不能为空")
-    if novel_data.update_chapter_title(chapter_num, title) is None:
-        raise HTTPException(404, "章节不存在")
-    refresh_chapter_file_header(chapter_num, title)
-    return {"ok": True, "title": title}
+    result = orchestration_plan.update_chapter_title(chapter_num, body.title)
+    _plan_err(result, "更新失败")
+    return result
 
 
 @router.put("/api/plan/{chapter_num}/reorder")
 def plan_reorder_scenes(chapter_num: int, body: SceneReorder) -> dict:
-    if not novel_data.reorder_scenes(chapter_num, body.scene_ids):
-        raise HTTPException(404, "章节不存在")
-    return {"ok": True}
+    result = orchestration_plan.reorder_scenes(chapter_num, body.scene_ids)
+    _plan_err(result, "重排失败")
+    return result
 
 
 @router.get("/api/plan/{chapter_num}")
 def plan_chapter(chapter_num: int) -> dict:
-    ch = novel_data.get_chapter_plan(chapter_num)
-    if ch is None:
-        ch = novel_data.ensure_chapter_plan(chapter_num)["chapters"][
-            str(chapter_num)
-        ]
-        ch = {"num": chapter_num, **ch}
-    return ch
+    return orchestration_plan.get_chapter_plan(chapter_num)
 
 
 @router.post("/api/plan/scenes")
 def plan_add_scene(body: SceneCreate) -> dict:
-    title = body.title.strip()
-    if not title:
-        raise HTTPException(400, "场景标题不能为空")
-    scene = novel_data.add_scene(body.chapter_num, title, body.beat)
-    return {"ok": True, "scene": scene}
+    result = orchestration_plan.add_scene(body.chapter_num, body.title, body.beat)
+    _plan_err(result, "添加失败")
+    return result
 
 
 @router.put("/api/plan/scenes/{scene_id}")
 def plan_update_scene(scene_id: str, body: SceneUpdate) -> dict:
-    fields = body.model_dump(exclude_unset=True)
-    if "title" in fields and not str(fields["title"]).strip():
-        raise HTTPException(400, "场景标题不能为空")
-    scene = novel_data.update_scene(scene_id, **fields)
-    if scene is None:
-        raise HTTPException(404, "场景不存在")
-    return {"ok": True, "scene": scene}
+    result = orchestration_plan.update_scene(scene_id, **body.model_dump(exclude_unset=True))
+    _plan_err(result, "更新失败")
+    return result
 
 
 @router.delete("/api/plan/scenes/{scene_id}")
 def plan_delete_scene(scene_id: str) -> dict:
-    if not novel_data.delete_scene(scene_id):
-        raise HTTPException(404, "场景不存在")
-    return {"ok": True}
+    result = orchestration_plan.delete_scene(scene_id)
+    _plan_err(result, "删除失败")
+    return result
 
 
 @router.put("/api/plan/active/{scene_id}")
 def plan_set_active(scene_id: str) -> dict:
-    if novel_data.get_scene(scene_id) is None:
-        raise HTTPException(404, "场景不存在")
-    return novel_data.set_active_scene(scene_id)
+    result = orchestration_plan.set_active_scene(scene_id)
+    _plan_err(result, "设置失败")
+    return result

@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-import file_utils
+from infra import file_utils
 
 _history_lock = threading.Lock()
 _data_dir: Path | None = None
@@ -303,7 +303,7 @@ def revert_entry(entry_id: str, *, chapter_num: int | None = None) -> dict:
         backups = _backups_dir or path.parent / "backups"
         file_utils.backup_file(path, backups)
         if key == "plan":
-            import novel_data
+            from core.data import novel_data
 
             novel_data.restore_plan_json_text(before)
         else:

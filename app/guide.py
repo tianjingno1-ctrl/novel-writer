@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import re
 
-import novel_data
-from app import book_io as bio
+from core.data import novel_data
+from infra import file_utils as bio
 from app import paths as _paths
 from app import writing_ctx as _wctx
 from app.bootstrap_data import INITIAL_FILE_TEMPLATES
-from app_state import state
+from infra.state import state
 
 
 def _maint_file_has_user_content(file_key: str) -> bool:
@@ -59,7 +59,7 @@ def _maint_file_has_user_content(file_key: str) -> bool:
 
 def get_guide_status() -> dict:
     """写作引导：地基文件、规划、章后待办等状态（供 /api/guide/status）。"""
-    import change_history
+    from core.data import change_history
 
     track_keys = (
         "world",

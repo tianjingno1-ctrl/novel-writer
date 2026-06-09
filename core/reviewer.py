@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import config
+import infra.config as config
 from core.deps import ReviewerDeps
 from core.maintain import observe_items_for_auto_apply
 from core.schemas.service import ChapterWork

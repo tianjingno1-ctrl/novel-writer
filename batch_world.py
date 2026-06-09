@@ -5,8 +5,8 @@ from __future__ import annotations
 import re
 from typing import Callable
 
-import config
-import novel_data
+import infra.config as config
+from core.data import novel_data
 from summarizer import (
     CROSS_CHAPTER_CONTINUITY_SYSTEM,
     WORLD_BATCH_CHUNK_REVIEW_SYSTEM,

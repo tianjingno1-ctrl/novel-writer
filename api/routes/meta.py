@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app import llm
+from core import llm
 from app import runtime as rt
 from app import writing_ctx as _wctx
 from fastapi import APIRouter

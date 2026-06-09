@@ -5,10 +5,10 @@ from __future__ import annotations
 import sys
 from contextlib import asynccontextmanager
 
-import config
-import runtime_log
+import infra.config as config
+from infra.logs import runtime as runtime_log
 from app.bootstrap import bootstrap_library, init_data_dirs, init_context
-from app.cost import load_total_cost, set_total_cost
+from infra.billing import load_total_cost, set_total_cost
 from app import writing_session as ws
 from app.free_chat import load_free_chat
 from api.routes import batch as batch_routes

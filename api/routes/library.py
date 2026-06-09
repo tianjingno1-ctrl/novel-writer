@@ -31,21 +31,21 @@ def _refresh_app_context(request: Request) -> None:
 
 @router.get("/api/library")
 def library_list() -> dict:
-    import book_context
+    from core.data import book_context
 
     return book_context.list_books()
 
 
 @router.get("/api/library/active")
 def library_active() -> dict:
-    import book_context
+    from core.data import book_context
 
     return book_context.get_active_book_meta()
 
 
 @router.post("/api/library/books")
 def library_create_book(body: CreateBookBody, request: Request) -> dict:
-    import book_context
+    from core.data import book_context
 
     result = book_context.create_book(
         title=body.title,
@@ -61,7 +61,7 @@ def library_create_book(body: CreateBookBody, request: Request) -> dict:
 
 @router.post("/api/library/switch")
 def library_switch(body: SwitchBookBody, request: Request) -> dict:
-    import book_context
+    from core.data import book_context
 
     if is_batch_job_running():
         raise HTTPException(409, "批量任务进行中，请完成后再切换书籍")

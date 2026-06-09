@@ -39,7 +39,7 @@ class MockLlmTests(unittest.TestCase):
     def test_mock_llm_complete_returns_tuple(self) -> None:
         """mock_llm patch 后 core.api.complete 返回 (str, TokenUsage)"""
         from tests.support.mock_llm import mock_llm
-        import core.api as api
+        import core.llm as api
 
         with mock_llm(["hello"]):
             text, usage = api.complete(None, [{"role": "user", "content": "hi"}])
@@ -49,7 +49,7 @@ class MockLlmTests(unittest.TestCase):
     def test_mock_llm_cycles_responses(self) -> None:
         """list[str] 循环消费"""
         from tests.support.mock_llm import mock_llm
-        import core.api as api
+        import core.llm as api
 
         with mock_llm(["a", "b"]):
             t1, _ = api.complete(None, [])
@@ -83,7 +83,7 @@ class MockLlmTests(unittest.TestCase):
 
     def test_mock_llm_does_not_pollute_after_exit(self) -> None:
         """with 块退出后 patch 已撤销"""
-        import core.api as api
+        import core.llm as api
         from tests.support.mock_llm import mock_llm
 
         original = api.complete

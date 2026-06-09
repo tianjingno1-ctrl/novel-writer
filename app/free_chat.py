@@ -8,10 +8,10 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-import config
-from app import llm as _llm
+import infra.config as config
+from core import llm as _llm
 from app import paths as _paths
-from app_state import state
+from infra.state import state
 
 
 def _free_chat_file() -> Path:

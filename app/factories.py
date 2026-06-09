@@ -14,7 +14,7 @@ if TYPE_CHECKING:
 
 
 def short_story_archive_skip(feature: str) -> dict | None:
-    import book_context
+    from core.data import book_context
 
     if book_context.is_short_book():
         return {
@@ -35,7 +35,7 @@ def quality_log_entry(
     persisted_detail: str = "",
     extra: dict | None = None,
 ) -> str:
-    import quality_log
+    from infra.logs import quality as quality_log
 
     return quality_log.append_entry(
         kind,
@@ -50,7 +50,7 @@ def quality_log_entry(
 
 def resolve_chapter_num(chapter_num: int | None) -> tuple[int, str] | dict:
     from app import writing_ctx as _wctx
-    from app_state import state
+    from infra.state import state
 
     if chapter_num and chapter_num > 0:
         import app.chapter_io as chapter_io
@@ -97,8 +97,8 @@ def book_paths_view() -> BookPathsView:
 
 def book_store() -> BookStore:
     """当前书存储入口（路径由 main 全局注入 BookStore，core 不 import main）。"""
-    import book_context
-    from app import book_io as bio
+    from core.data import book_context
+    from infra import file_utils as bio
     from app import writing_session as _wsess
 
     try:
@@ -116,7 +116,7 @@ def book_store() -> BookStore:
 
 def invalidate_chapter_injection(chapter_num: int | None = None) -> None:
     """章节文件变更或需重新注入时，清除「已含章节正文」标记。"""
-    from app_state import state
+    from infra.state import state
 
     if chapter_num is None or chapter_num <= 0:
         state.session_includes_chapter = False
@@ -126,24 +126,13 @@ def invalidate_chapter_injection(chapter_num: int | None = None) -> None:
 
 
 def apply_chapter_title(chapter_num: int, title: str | None) -> str | None:
-    """将标题同步到 plan.json（并确保章节规划存在）。"""
-    import novel_data
     from core import chapters as chapter_text
 
-    if not title:
-        return None
-    clean = title.strip().strip("《》「」\"' ")
-    if not clean or clean in {f"第{chapter_num}章", f"第{chapter_text.chapter_cn(chapter_num)}章"}:
-        return None
-    if len(clean) > 48:
-        clean = clean[:48].rstrip()
-    novel_data.ensure_chapter_plan(chapter_num, title=clean)
-    novel_data.update_chapter_title(chapter_num, clean)
-    return clean
+    return chapter_text.apply_chapter_title(chapter_num, title)
 
 
 def _llm_hooks() -> LlmHooks:
-    from app import llm
+    from core import llm
 
     return LlmHooks(
         build_cached_system=llm.build_cached_system,

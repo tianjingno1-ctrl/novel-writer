@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-import novel_data
-from app import chapters_api as ch_svc
-from app import writing_turns as wt
+from core.orchestration import chapters as orchestration_chapters
+from core.orchestration import writing as orchestration_writing
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
@@ -34,7 +33,7 @@ class ContentBody(BaseModel):
 
 class ApplyTurnBody(BaseModel):
     msg_index: int
-    source: str = "assistant"  # assistant | user_draft
+    source: str = "assistant"
 
     @field_validator("msg_index")
     @classmethod
@@ -46,42 +45,37 @@ class ApplyTurnBody(BaseModel):
 
 @router.get("/api/chapters")
 def chapters_list() -> dict:
-    items = [{"num": n, "file": p.name} for n, p in ch_svc.list_chapters()]
-    return {"chapters": items}
+    return orchestration_chapters.list_chapters()
 
 
 @router.get("/api/chapters/{num}")
 def get_chapter(num: int) -> dict:
-    ch = ch_svc.get_chapter_by_num(num)
+    ch = orchestration_chapters.get_chapter(num)
     if ch is None:
         raise HTTPException(404, f"章节 ch{num:03d} 不存在")
-    plan = novel_data.get_chapter_plan(num)
-    return {**ch, "plan": plan}
+    return ch
 
 
 @router.put("/api/chapters/{num}")
 def put_chapter(num: int, body: ContentBody) -> dict:
-    return ch_svc.save_chapter_by_num(num, body.content)
+    return orchestration_chapters.save_chapter(num, body.content)
 
 
 @router.post("/api/chapters/new")
 def new_chapter() -> dict:
-    r = ch_svc.create_next_chapter()
-    novel_data.ensure_chapter_plan(r["num"])
-    return r
+    return orchestration_chapters.create_next_chapter()
 
 
 @router.post("/api/chapters/undo-last")
 def undo_last_chapter_write() -> dict:
-    return require_ok(wt.undo_last_chapter_append(), "撤销失败")
+    return require_ok(orchestration_writing.undo_last_chapter_write(), "撤销失败")
 
 
 @router.post("/api/chapters/{num}/apply-turn")
 def apply_chapter_turn(num: int, body: ApplyTurnBody) -> dict:
-    if body.source == "user_draft":
-        result = wt.apply_user_draft_turn_to_chapter(num, body.msg_index)
-    elif body.source == "assistant":
-        result = wt.apply_assistant_turn_to_chapter(num, body.msg_index)
-    else:
-        raise HTTPException(400, "source 必须是 assistant 或 user_draft")
+    result = orchestration_writing.apply_chapter_turn(
+        num, body.msg_index, body.source
+    )
+    if not result.get("ok") and result.get("error") == "source 必须是 assistant 或 user_draft":
+        raise HTTPException(400, result["error"])
     return require_ok(result, "替换章节失败")

@@ -6,14 +6,14 @@ import json
 from collections.abc import Iterator
 
 import batch_state
-import config
-import novel_data
+import infra.config as config
+from core.data import novel_data
 from app import chapter_io as ch
-from app import llm
+from core import llm
 from app import writing_session as ws
 from app.factories import invalidate_chapter_injection
-from app_state import state
-from core.api import APIError, CallOptions, TokenUsage, complete, get_client, reset_client, stream
+from infra.state import state
+from core.llm import APIError, CallOptions, TokenUsage, complete, get_client, reset_client, stream
 from summarizer import WRITING_INSTRUCTION
 
 

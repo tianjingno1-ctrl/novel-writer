@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-import novel_data
+from core.data import novel_data
 
 
 def build_stats_sig(

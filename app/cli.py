@@ -7,18 +7,18 @@ import re
 import signal
 from datetime import datetime
 
-import config
-from app import book_io as bio
+import infra.config as config
+from infra import file_utils as bio
 from app import chapter_io as ch
-from app import llm as _llm
-from app.cost import load_total_cost
+from core import llm as _llm
+from infra.billing import load_total_cost
 from app import paths as _paths
 from app import runtime as rt
 from app import writing_chat as _wchat
 from app import writing_ctx as _wctx
 from app import writing_session as ws
 from app import writing_turns as wt
-from app_state import state
+from infra.state import state
 
 
 def do_undo() -> None:
@@ -222,7 +222,7 @@ def do_heartbeat_toggle() -> None:
 
 
 def do_provider(arg: str) -> None:
-    from providers import reset_client
+    from infra.providers import reset_client
 
     arg = arg.strip().lower()
     if not arg:

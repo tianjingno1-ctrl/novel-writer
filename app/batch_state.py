@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import app_state
+from infra import state as app_state
 
 
 def is_batch_job_running() -> bool:
