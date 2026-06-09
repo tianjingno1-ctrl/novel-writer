@@ -147,6 +147,9 @@ class BookContext:
         self.batch_jobs_dir = book_dir / "batch_jobs"
         self.quality_log_jsonl = book_dir / "quality_log.jsonl"
         self.archive_file = book_dir / "book_archive.md"
+        self.brief_file = book_dir / "brief.md"
+        self.prompt_overrides_file = book_dir / "prompt_overrides.yaml"
+        self.taste_file = book_dir / "taste.json"
 
     def codex_files_map(self) -> dict[str, Path]:
         return {

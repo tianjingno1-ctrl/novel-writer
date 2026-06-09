@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING
 from core.data import novel_data
 import review_prompts
 from core import chapters as chapter_text
+from core import criteria_resolver
+from core import chapter_precheck
+from core import plan_product
 from core import reviewer as quality_reviewer
 from core.orchestration import archive_sync as orchestration_archive
 from core.reviewer import DECONSTRUCT_MAX_CHARS
@@ -109,6 +112,25 @@ def _build_review_body(
     return num, body
 
 
+def _criteria_context_block(ctx: AppContext) -> str:
+    plan = novel_data.load_plan()
+    resolved = criteria_resolver.resolve_review_criteria(
+        plan, book_dir=ctx.store.paths.data_dir,
+    )
+    lines = ["## 审阅标准（差距分析须逐项对照）", ""]
+    if resolved.get("hard"):
+        lines.append("**硬性**")
+        for row in resolved["hard"]:
+            lines.append(f"- [{row.get('ref', '')}] {row.get('content', '')}")
+        lines.append("")
+    if resolved.get("soft"):
+        lines.append("**软性**")
+        for row in resolved["soft"]:
+            lines.append(f"- [{row.get('ref', '')}] {row.get('content', '')}")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
 def run_female_fiction_review(
     ctx: AppContext,
     *,
@@ -119,6 +141,7 @@ def run_female_fiction_review(
     revise: bool = False,
     write_back: bool = False,
     sync_archive: bool = True,
+    skip_precheck: bool = False,
 ) -> dict:
     if mode not in _FEMALE_REVIEW_MODES:
         return {"ok": False, "error": "mode 必须是 chapter / outline / characters"}
@@ -137,6 +160,23 @@ def run_female_fiction_review(
         return built
     num, body = built
 
+    if mode == "chapter" and num > 0 and not skip_precheck:
+        project = novel_data.get_project_meta()
+        pre = chapter_precheck.run_precheck(
+            chapter_num=num,
+            content=body,
+            plan=novel_data.load_plan(),
+            project=project,
+        )
+        if not pre.get("ok"):
+            return {
+                "ok": False,
+                "error": "机器预检未通过，请先改稿再审阅",
+                "precheck": pre,
+                "chapter_num": num,
+                "should_rewrite": True,
+            }
+
     project = novel_data.get_project_meta()
     book_title = (project.get("title") or "").strip()
     world_excerpt = ctx.store.read(ctx.store.paths.world_file).strip()[:3000]
@@ -153,6 +193,13 @@ def run_female_fiction_review(
     if profile_id:
         profile_meta = {**profile_meta, "rewrite_only": rewrite_only}
 
+    from core.orchestration import taste as orchestration_taste
+
+    taste_block = orchestration_taste.context_block(ctx)
+    criteria_block = _criteria_context_block(ctx)
+    if criteria_block:
+        taste_block = f"{taste_block}\n\n{criteria_block}".strip() if taste_block else criteria_block
+
     llm_r = quality_reviewer.run_female_fiction_review(
         mode,
         body,
@@ -165,6 +212,7 @@ def run_female_fiction_review(
         write_back=write_back,
         profile_id=profile_id,
         project=project,
+        taste_excerpt=taste_block,
     )
     if not llm_r.get("ok"):
         return llm_r
@@ -189,6 +237,10 @@ def run_female_fiction_review(
         if write_r.get("ok"):
             written_back = True
             chapter_title = write_r.get("chapter_title") or ""
+            try:
+                plan_product.set_chapter_status(num, "drafting")
+            except ValueError:
+                pass
 
     archive_result: dict | None = None
     archive_synced = False
@@ -199,6 +251,14 @@ def run_female_fiction_review(
     pending_accept = bool(
         (rewrite_only or revise) and (revised_text or display_reply).strip() and not written_back
     )
+    from core import prompt_nodes
+
+    review_prompt = prompt_nodes.resolve_node(
+        "review.platform",
+        book_dir=ctx.store.paths.data_dir,
+        project=project,
+        include_revise=revise and not rewrite_only,
+    )
     log_kind = "female_fiction_revise" if rewrite_only else "female_fiction_review"
     log_body = display_reply if rewrite_only else (review_text if revise else display_reply)
     log_id = ctx.quality_log_entry(
@@ -208,6 +268,9 @@ def run_female_fiction_review(
         summary=f"{tag} · {profile_label} · {book_title or '未命名'}"[:120],
         persisted=written_back,
         persisted_detail="已写回章节" if written_back else ("待采纳" if pending_accept else ""),
+        prompt_node=review_prompt.node_id,
+        prompt_hash=review_prompt.prompt_hash,
+        prompt_source=review_prompt.prompt_source,
         extra={
             "mode": mode,
             "input_chars": len(body),
@@ -229,6 +292,9 @@ def run_female_fiction_review(
             summary=f"女频改稿 · 第{num}章 · {profile_label}"[:120],
             persisted=written_back,
             persisted_detail="已写回章节" if written_back else ("待采纳" if pending_accept else ""),
+            prompt_node=review_prompt.node_id,
+            prompt_hash=review_prompt.prompt_hash,
+            prompt_source=review_prompt.prompt_source,
             extra={
                 "profile_id": active_profile,
                 "write_back": written_back,
@@ -304,6 +370,11 @@ def accept_female_fiction_rewrite(
     )
     if not write_r.get("ok"):
         return write_r
+
+    try:
+        plan_product.set_chapter_status(num, "drafting")
+    except ValueError:
+        pass
 
     archive_result: dict | None = None
     archive_synced = False

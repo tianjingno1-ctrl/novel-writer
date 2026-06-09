@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from core.orchestration import logs as orchestration_logs
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 router = APIRouter(tags=["logs"])
 
@@ -19,6 +20,29 @@ def quality_log_get(entry_id: str) -> dict:
     if not row:
         raise HTTPException(404, "记录不存在")
     return row
+
+
+class QualityJudgmentBody(BaseModel):
+    outcome: str
+    issue_tags: list[str] | None = None
+    note: str = ""
+
+
+@router.post("/api/quality/log/{entry_id}/judgment")
+def quality_log_judgment(entry_id: str, body: QualityJudgmentBody, request: Request) -> dict:
+    from app.bootstrap import get_app_context
+
+    ctx = request.app.state.ctx or get_app_context()
+    result = orchestration_logs.record_quality_judgment(
+        entry_id,
+        outcome=body.outcome,
+        issue_tags=body.issue_tags,
+        note=body.note,
+        ctx=ctx,
+    )
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error", "记录失败"))
+    return result
 
 
 @router.get("/api/runtime-logs")

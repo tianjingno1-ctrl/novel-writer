@@ -41,6 +41,9 @@ def bootstrap_library() -> None:
     from app import paths as _paths
 
     runtime_log.init_runtime_log(_paths.resolved("BASE_DIR"))
+    from core import taste as taste_store
+
+    taste_store.ensure_taste_dir()
     book_context.init_library()
     from infra import file_utils
     from core import context as writing_context
@@ -89,6 +92,11 @@ def init_data_dirs() -> None:
     _register_change_history()
     quality_log.init_quality_log(_paths.resolved("DATA_DIR"))
     change_history.ensure_baseline_snapshot()
+    from core.data import book_context
+
+    from core import plan_product
+
+    plan_product.migrate_legacy_brief(_paths.resolved("DATA_DIR"))
 
 
 def rebuild_context() -> AppContext:

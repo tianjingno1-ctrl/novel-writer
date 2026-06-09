@@ -1,6 +1,6 @@
 # LLM JSON Fence 索引
 
-> 机器可读的类型定义见 `core/schemas/llm.py`；磁盘格式见 `core/schemas/persist.py`。
+> 机器可读的类型定义见 `core/schemas/llm.py`；磁盘格式见 `core/schemas/persist.py`；**产品数据 Schema** 见 [data-schema.md](./data-schema.md)。
 
 本文档列出项目中所有 **LLM 回复里用 fence 标记包裹的 JSON 块**，便于新功能对齐格式、避免重复造 parser。
 

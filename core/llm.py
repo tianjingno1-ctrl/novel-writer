@@ -35,6 +35,8 @@ class CallOptions:
     max_tokens: int | None = None
     temperature: float | None = None
     provider: str | None = None
+    model: str | None = None
+    node_id: str | None = None
 
 
 def _resolve_max_tokens(options: CallOptions | None) -> int:
@@ -47,6 +49,16 @@ def _resolve_temperature(options: CallOptions | None) -> float | None:
     return opts.temperature
 
 
+def _resolve_call_target(options: CallOptions | None) -> tuple[str, str]:
+    from core import model_routing
+
+    opts = options or CallOptions()
+    if opts.node_id:
+        return model_routing.resolve_for_node(opts.node_id)
+    pid = config.resolve_provider(opts.provider)
+    return pid, config.get_model(pid, model=opts.model)
+
+
 def complete(
     system: list[dict] | str | None,
     messages: list[dict],
@@ -55,12 +67,14 @@ def complete(
     client: APIClient | None = None,
 ) -> tuple[str, TokenUsage]:
     opts = options or CallOptions()
+    pid, model = _resolve_call_target(opts)
     return (client or get_client()).create_message(
         system,
         messages,
         max_tokens=_resolve_max_tokens(opts),
         temperature=_resolve_temperature(opts),
-        provider=opts.provider,
+        provider=pid,
+        model=model,
     )
 
 
@@ -72,12 +86,14 @@ def stream(
     client: APIClient | None = None,
 ) -> Iterator[str]:
     opts = options or CallOptions()
+    pid, model = _resolve_call_target(opts)
     yield from (client or get_client()).iter_message(
         system,
         messages,
         max_tokens=_resolve_max_tokens(opts),
         temperature=_resolve_temperature(opts),
-        provider=opts.provider,
+        provider=pid,
+        model=model,
     )
 
 _request_lock = threading.Lock()
@@ -344,11 +360,19 @@ def _is_stream_disconnect_error(exc: Exception) -> bool:
     return "peer closed" in lower or "incomplete chunked" in lower
 
 
-def _record_call_usage(usage: TokenUsage, pid: str, *, tag: str = "请求") -> None:
+def _record_call_usage(
+    usage: TokenUsage,
+    pid: str,
+    *,
+    tag: str = "请求",
+    model: str | None = None,
+) -> None:
     state.last_request_time = time.time()
     cost = _cost.calc_cost(usage, provider=pid)
     _cost.log_cost(usage, cost, tag, provider=pid, silent=True)
     state.last_call_info = _cost._build_last_call_info(usage, cost, pid)
+    if model:
+        state.last_call_info["model"] = model
 
 
 def _api_error_message(exc: Exception) -> str:
@@ -382,9 +406,17 @@ def call_api(
     temperature: float | None = None,
     tag: str = "请求",
     provider: str | None = None,
+    model: str | None = None,
+    node_id: str | None = None,
     silent: bool = False,
 ) -> str | None:
-    pid = config.resolve_provider(provider)
+    from core import model_routing
+
+    if node_id:
+        pid, eff_model = model_routing.resolve_for_node(node_id)
+    else:
+        pid = config.resolve_provider(provider)
+        eff_model = config.get_model(pid, model=model)
     if not config.is_api_key_configured(pid):
         cfg = config.get_provider_config(pid)
         err = (
@@ -404,6 +436,8 @@ def call_api(
         max_tokens=eff_max_tokens,
         temperature=temperature,
         provider=pid,
+        model=eff_model,
+        node_id=node_id,
     )
     try:
         log_request_context(system, messages, tag=tag, provider=pid)
@@ -418,6 +452,7 @@ def call_api(
         cost = _cost.calc_cost(usage, provider=pid)
         _cost.log_cost(usage, cost, tag, provider=pid, silent=silent)
         state.last_call_info = _cost._build_last_call_info(usage, cost, pid)
+        state.last_call_info["model"] = eff_model
         truncated = usage.stop_reason in ("max_tokens", "length") or (
             usage.output_tokens >= max(1, int(eff_max_tokens * 0.92))
         )

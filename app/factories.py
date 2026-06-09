@@ -34,6 +34,11 @@ def quality_log_entry(
     persisted: bool = False,
     persisted_detail: str = "",
     extra: dict | None = None,
+    prompt_node: str | None = None,
+    prompt_hash: str | None = None,
+    prompt_source: str | None = None,
+    outcome: str | None = None,
+    issue_tags: list[str] | None = None,
 ) -> str:
     from infra.logs import quality as quality_log
 
@@ -45,6 +50,11 @@ def quality_log_entry(
         persisted=persisted,
         persisted_detail=persisted_detail,
         extra=extra,
+        prompt_node=prompt_node,
+        prompt_hash=prompt_hash,
+        prompt_source=prompt_source,
+        outcome=outcome,
+        issue_tags=issue_tags,
     )
 
 

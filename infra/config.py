@@ -220,15 +220,23 @@ def _load_prices_from_file() -> None:
 _load_prices_from_file()
 
 
-def load_runtime_settings() -> None:
-    """从 library/runtime.json 恢复 Web 端修改过的 provider / 上下文配置。"""
-    global PROVIDER, CONTEXT_MODE, CHAT_CONTEXT_TURNS, FREE_CHAT_CONTEXT_TURNS
+def _read_runtime_data() -> dict:
     if not RUNTIME_FILE.exists():
-        return
+        return {}
     try:
         data = json.loads(RUNTIME_FILE.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("无法读取 runtime.json: %s", e)
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def load_runtime_settings() -> None:
+    """从 library/runtime.json 恢复 Web 端修改过的 provider / 上下文配置。"""
+    global PROVIDER, CONTEXT_MODE, CHAT_CONTEXT_TURNS, FREE_CHAT_CONTEXT_TURNS
+    global HEARTBEAT_ENABLED
+    data = _read_runtime_data()
+    if not data:
         return
     provider = data.get("provider")
     if isinstance(provider, str) and provider in PROVIDERS:
@@ -242,6 +250,25 @@ def load_runtime_settings() -> None:
     free_turns = _coerce_turns(data.get("free_chat_context_turns"))
     if free_turns is not None:
         FREE_CHAT_CONTEXT_TURNS = free_turns
+    if isinstance(data.get("heartbeat_enabled"), bool):
+        HEARTBEAT_ENABLED = data["heartbeat_enabled"]
+    if isinstance(data.get("prompt_cache_auto_refresh"), bool):
+        from core import model_routing
+
+        model_routing.PROMPT_CACHE_AUTO_REFRESH = data["prompt_cache_auto_refresh"]
+    raw_nodes = data.get("node_models")
+    if isinstance(raw_nodes, dict):
+        from core import model_routing
+
+        cleaned: dict[str, dict[str, str]] = {}
+        for node_id, entry in raw_nodes.items():
+            try:
+                cleaned[node_id] = model_routing.validate_node_model_entry(
+                    str(node_id), entry if isinstance(entry, dict) else {},
+                )
+            except ValueError:
+                logger.warning("跳过无效 node_models 项: %s", node_id)
+        model_routing.set_node_overrides(cleaned)
 
 
 def _coerce_turns(value) -> int | None:
@@ -255,12 +282,18 @@ def _coerce_turns(value) -> int | None:
 
 
 def save_runtime_settings() -> None:
-    payload = {
+    from core import model_routing
+
+    payload = _read_runtime_data()
+    payload.update({
         "provider": PROVIDER,
         "context_mode": CONTEXT_MODE,
         "context_turns": CHAT_CONTEXT_TURNS,
         "free_chat_context_turns": FREE_CHAT_CONTEXT_TURNS,
-    }
+        "heartbeat_enabled": HEARTBEAT_ENABLED,
+        "prompt_cache_auto_refresh": model_routing.PROMPT_CACHE_AUTO_REFRESH,
+        "node_models": model_routing.NODE_MODEL_OVERRIDES,
+    })
     RUNTIME_FILE.parent.mkdir(parents=True, exist_ok=True)
     file_utils.atomic_write_text(
         RUNTIME_FILE,
@@ -284,7 +317,10 @@ def get_api_key(provider: str | None = None) -> str:
     return os.environ.get(cfg["api_key_env"], cfg["api_key_default"])
 
 
-def get_model(provider: str | None = None) -> str:
+def get_model(provider: str | None = None, *, model: str | None = None) -> str:
+    override = (model or "").strip()
+    if override:
+        return override
     return get_provider_config(provider)["model"]
 
 

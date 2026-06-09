@@ -22,6 +22,7 @@ class FemaleFictionReviewRequest(BaseModel):
     revise: bool = False
     write_back: bool = False
     sync_archive: bool = True
+    skip_precheck: bool = False
 
 
 class FemaleFictionAcceptRequest(BaseModel):
@@ -44,6 +45,7 @@ def female_fiction_review(
             revise=body.revise,
             write_back=body.write_back,
             sync_archive=body.sync_archive,
+            skip_precheck=body.skip_precheck,
         ),
         "女频审阅失败",
     )

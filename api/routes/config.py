@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import infra.config as config
 from app import runtime as rt
+from core import model_routing
 from fastapi import APIRouter, HTTPException
+from infra.providers import reset_client
 from pydantic import BaseModel
 
 router = APIRouter(tags=["config"])
@@ -18,6 +22,38 @@ class ContextConfig(BaseModel):
 
 class ProviderSwitch(BaseModel):
     provider: str
+
+
+class NodeModelsPatch(BaseModel):
+    node_models: dict[str, dict[str, Any] | None] | None = None
+
+
+@router.get("/api/config/models")
+def get_models_config() -> dict:
+    return {
+        "ok": True,
+        "nodes": model_routing.list_configurable_nodes(),
+        "providers": model_routing.list_provider_catalog(),
+        "node_models": dict(model_routing.NODE_MODEL_OVERRIDES),
+    }
+
+
+@router.put("/api/config/models")
+def set_models_config(body: NodeModelsPatch) -> dict:
+    try:
+        merged = model_routing.apply_node_models_patch(body.node_models or {})
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    config.save_runtime_settings()
+    for entry in merged.values():
+        pid = entry.get("provider")
+        if pid:
+            reset_client(pid)
+    return {
+        "ok": True,
+        "node_models": merged,
+        "nodes": model_routing.list_configurable_nodes(),
+    }
 
 
 @router.put("/api/config/context")

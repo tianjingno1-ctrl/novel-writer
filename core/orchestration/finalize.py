@@ -450,4 +450,17 @@ def run_post_chapter_finalize(
     }
     if not ok:
         result["error"] = "；".join(flat_errors) or "本章定稿未产生任何结果"
+        return result
+
+    summary_block = archive.get("summary") or {}
+    if summary_block.get("ok"):
+        from core import chapter_summary
+
+        body = str(summary_block.get("full_text") or summary_block.get("text") or "")
+        if body.strip():
+            chapter_summary.save_summary_draft(
+                hooks.maintain_deps.store.paths.data_dir,
+                num,
+                body,
+            )
     return result

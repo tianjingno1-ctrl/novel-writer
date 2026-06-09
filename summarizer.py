@@ -209,9 +209,13 @@ def build_deconstruct_user_message(
     book_title: str = "",
     world_excerpt: str = "",
     style_excerpt: str = "",
+    taste_excerpt: str = "",
 ) -> str:
     label = source_label.strip() or "外部参考文"
     parts = [f"请拆解以下「{label}」：\n"]
+    if taste_excerpt.strip():
+        parts.append(taste_excerpt.strip())
+        parts.append("")
     if book_title or world_excerpt.strip() or style_excerpt.strip():
         parts.append("## 用户正在写的书（供「你的书可以怎么用」对照）\n")
         if book_title:
@@ -268,6 +272,7 @@ def build_female_fiction_review_user_message(
     world_excerpt: str = "",
     revise: bool = False,
     rewrite_only: bool = False,
+    taste_excerpt: str = "",
 ) -> str:
     if rewrite_only and mode == "chapter":
         parts = [_FEMALE_REVIEW_REWRITE_ONLY_HINT, ""]
@@ -282,6 +287,9 @@ def build_female_fiction_review_user_message(
         parts.append(f"章节：第{chapter_num}章")
     if world_excerpt.strip():
         parts.append(f"\n## 世界观参考（节选）\n{world_excerpt.strip()[:3000]}\n")
+    if taste_excerpt.strip():
+        parts.append(taste_excerpt.strip())
+        parts.append("")
     parts.append("## 待审阅材料\n" if not rewrite_only else "## 待改稿正文\n")
     parts.append(body.strip())
     return "\n".join(parts)

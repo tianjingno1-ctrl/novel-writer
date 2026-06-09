@@ -1,6 +1,6 @@
 # AI 协作者指南
 
-本仓库是**长篇小说辅助写作工具**（Python），含 CLI 与 **HTTP API**（新 UI 待 `frontend/`）。接手改 bug 时请先读本文。
+本仓库是**长篇小说辅助写作工具**（Python），含 CLI、**HTTP API** 与 **React 前端**（`frontend/`）。接手改 bug 时请先读本文。
 
 ## 快速启动
 
@@ -12,6 +12,8 @@ pip install -r requirements.txt
 python web_app.py      # API: http://127.0.0.1:8765/docs
 # 或
 python main.py         # CLI
+# 前端（另开终端）
+cd frontend && npm install && npm run dev   # http://127.0.0.1:5173 ，/api 代理到 8765
 ```
 
 ## 目录结构
@@ -40,6 +42,9 @@ python main.py         # CLI
 
 | 文件 | 用途 |
 |------|------|
+| `docs/workflow.md` | **产品流程图**（定稿 + 五补丁） |
+| `docs/data-schema.md` | **产品数据 Schema**（真相源、RuleRef、迁移） |
+| `docs/product-plan.md` | 产品索引与 backlog |
 | `docs/novel-writer-manual.md` | **完整使用指南**（系统设定、写作流程；旧 Web 顶栏 UI 已移除） |
 | `docs/tech-intake.md` | 技术信息清单：栈、数据结构、上下文组装、API 索引 |
 | `docs/six-quality-features.md` | 六项质量功能 API 索引（用户说明已并入手册 §五） |
@@ -48,7 +53,7 @@ python main.py         # CLI
 
 旧 `web/` 静态页已删除。业务能力通过 `web_app.py` 的 `/api/*` 暴露；交互见 **http://127.0.0.1:8765/docs**。
 
-规划中的客户端模块：构思设定 → 写书 → 审阅 → 改写；数据管理（书架、Prompt、书类型、系统设置）。
+前端已实现 MVP：书架、开书向导（含拆文/审阅标准）、心流写作 + Gate 一章循环、归因抽屉、稿件/完结、口味库、设置（模型/Prompt Cache）。待接：自由聊、批量生成、Codex、六项质量、Prompt 节点编辑。
 
 ## 改 bug 时注意
 
@@ -59,7 +64,7 @@ python main.py         # CLI
 5. DeepSeek 不支持 Prompt Cache；kie 写作走 `build_cached_system()`。
 6. kie.ai Claude 须 `auth_token`（Bearer）+ 自定义 `User-Agent`（见 `providers._get_anthropic`），勿改回纯 `api_key`。
 6. 章节/会话写入用 `file_utils.atomic_write_text`；费用日志为 `cost_log.jsonl`。
-7. 新 UI 文案与交互在 `frontend/`（待建）；勿恢复已删除的 `web/app.js` 单页。
+7. 新 UI 在 `frontend/`（Vite + React）；勿恢复已删除的 `web/app.js` 单页。
 
 ## 架构红线（重构期）
 

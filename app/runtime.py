@@ -84,13 +84,69 @@ def get_app_status() -> dict:
     }
 
 
-def send_heartbeat() -> None:
+def get_prompt_cache_status() -> dict:
     from core import llm
+    from core import model_routing
+
+    pid, model = model_routing.resolve_for_node("writing.main")
+    last = llm.get_last_call_info() or {}
+    return {
+        "ok": True,
+        "writing_provider": pid,
+        "writing_model": model,
+        "cache_supported": config.supports_prompt_cache(pid),
+        "cache_enabled": config.cache_enabled(pid),
+        "heartbeat_enabled": config.HEARTBEAT_ENABLED,
+        "prompt_cache_auto_refresh": model_routing.PROMPT_CACHE_AUTO_REFRESH,
+        "last_call": last,
+        "cache_ttl_remaining": last.get("cache_ttl_remaining"),
+        "cache_write_at": last.get("cache_write_at"),
+    }
+
+
+def refresh_prompt_cache() -> dict:
+    """显式续命 Prompt Cache（原 CLI 心跳的单次触发）。"""
+    from core import llm
+    from core import model_routing
     from summarizer import WRITING_INSTRUCTION
 
-    system = llm.build_cached_system(WRITING_INSTRUCTION)
+    pid, model = model_routing.resolve_for_node("writing.main")
+    if not config.supports_prompt_cache(pid):
+        return {
+            "ok": False,
+            "error": f"当前写作模型 {pid}/{model} 不支持 Prompt Cache",
+            "cache_supported": False,
+        }
+    if not config.is_api_key_configured(pid):
+        return {"ok": False, "error": "写作模型 API Key 未配置"}
+
+    system = llm.build_cached_system(WRITING_INSTRUCTION, provider=pid)
     messages = [{"role": "user", "content": "."}]
-    llm.call_api(system, messages, max_tokens=1, tag="心跳", silent=True)
+    reply = llm.call_api(
+        system,
+        messages,
+        max_tokens=1,
+        tag="心跳",
+        node_id="writing.main",
+        silent=True,
+    )
+    last = llm.get_last_call_info() or {}
+    if reply is None and not last.get("ok"):
+        return {
+            "ok": False,
+            "error": last.get("error", "续命请求失败"),
+            "last_call": last,
+        }
+    return {
+        "ok": True,
+        "refreshed": True,
+        "last_call": last,
+        "cache_ttl_remaining": last.get("cache_ttl_remaining"),
+    }
+
+
+def send_heartbeat() -> None:
+    refresh_prompt_cache()
 
 
 def heartbeat_loop() -> None:
@@ -99,7 +155,15 @@ def heartbeat_loop() -> None:
         if _heartbeat_stop.is_set():
             break
 
-        if not config.HEARTBEAT_ENABLED or not config.cache_enabled():
+        from core import model_routing
+
+        auto = model_routing.PROMPT_CACHE_AUTO_REFRESH
+        pid, _ = model_routing.resolve_for_node("writing.main")
+        if (
+            not config.HEARTBEAT_ENABLED
+            or not auto
+            or not config.cache_enabled(pid)
+        ):
             continue
 
         now = time.time()

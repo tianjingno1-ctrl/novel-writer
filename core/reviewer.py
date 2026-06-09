@@ -72,13 +72,18 @@ def run_summary(work: ChapterWork, deps: ReviewerDeps) -> dict:
             skipped["chapter_num"] = work.ref.num
             return skipped
 
+    from core import model_routing
+
     num = work.ref.num
-    pid = config.SUMMARY_PROVIDER
+    node_id = "maintain.summary"
+    pid = model_routing.resolve_provider_for_node(node_id)
     system = deps.llm.build_cached_system(SUMMARY_SYSTEM, provider=pid)
     messages = [
         {"role": "user", "content": build_summary_user_message(num, work.body)}
     ]
-    reply = deps.llm.call_api(system, messages, provider=pid, tag="概述", silent=True)
+    reply = deps.llm.call_api(
+        system, messages, node_id=node_id, tag="概述", silent=True
+    )
     if reply is None:
         return {"ok": False, "error": deps.llm.get_last_call_info().get("error", "生成失败")}
 
@@ -108,9 +113,12 @@ def run_check(work: ChapterWork, scope: str, deps: ReviewerDeps) -> dict:
     if scope not in ("current", "recent3", "all"):
         return {"ok": False, "error": "scope 必须是 current / recent3 / all"}
 
+    from core import model_routing
+
     num = work.ref.num
     snap = deps.store.load_snapshot(num, for_purpose="check", chapter_body=work.body)
-    pid = config.CHECK_PROVIDER
+    node_id = "check.continuity"
+    pid = model_routing.resolve_provider_for_node(node_id)
     scope_lbl = scope_label(scope, num)
 
     if scope == "current":
@@ -143,7 +151,9 @@ def run_check(work: ChapterWork, scope: str, deps: ReviewerDeps) -> dict:
         tag = f"跨章连续性·{scope_lbl}"
 
     messages = [{"role": "user", "content": user_content}]
-    reply = deps.llm.call_api(system, messages, provider=pid, tag=tag, silent=True)
+    reply = deps.llm.call_api(
+        system, messages, node_id=node_id, tag=tag, silent=True
+    )
     if reply is None:
         return {"ok": False, "error": deps.llm.get_last_call_info().get("error", "检查失败")}
 
@@ -473,6 +483,7 @@ def run_deconstruct(
     book_title: str = "",
     world_excerpt: str = "",
     style_excerpt: str = "",
+    taste_excerpt: str = "",
 ) -> dict:
     """参考拆文：分析外部粘贴正文，输出结构化拆解报告。"""
     text = (source_text or "").strip()
@@ -481,7 +492,10 @@ def run_deconstruct(
     if len(text) > DECONSTRUCT_MAX_CHARS:
         text = text[:DECONSTRUCT_MAX_CHARS] + "\n\n…（后文已截断，请缩短粘贴范围）"
 
-    pid = config.CHECK_PROVIDER
+    from core import model_routing
+
+    node_id = "check.deconstruct"
+    pid = model_routing.resolve_provider_for_node(node_id)
     system = deps.llm.build_cached_system(DECONSTRUCT_SYSTEM, provider=pid)
     messages = [
         {
@@ -492,11 +506,12 @@ def run_deconstruct(
                 book_title=book_title if include_book_context else "",
                 world_excerpt=world_excerpt if include_book_context else "",
                 style_excerpt=style_excerpt if include_book_context else "",
+                taste_excerpt=taste_excerpt,
             ),
         }
     ]
     reply = deps.llm.call_api(
-        system, messages, provider=pid, tag="参考拆文", silent=True
+        system, messages, node_id=node_id, tag="参考拆文", silent=True
     )
     if reply is None:
         return {
@@ -538,14 +553,18 @@ def run_female_fiction_review(
     write_back: bool = False,
     profile_id: str | None = None,
     project: dict | None = None,
+    taste_excerpt: str = "",
 ) -> dict:
     """女频审阅纯 LLM：不读档、不写盘、不记 quality_log。"""
     project = project or {}
     system_text, active_profile = review_prompts.load_prompt_text(
         profile_id, project=project, include_revise=revise
     )
+    from core import model_routing
+
     use_writing = revise or rewrite_only
-    pid = config.PROVIDER if use_writing else config.CHECK_PROVIDER
+    node_id = "writing.main" if use_writing else "review.platform"
+    pid = model_routing.resolve_provider_for_node(node_id)
     system = deps.llm.build_cached_system(
         system_text,
         provider=pid,
@@ -562,6 +581,7 @@ def run_female_fiction_review(
                 world_excerpt=world_excerpt,
                 revise=revise and not rewrite_only,
                 rewrite_only=rewrite_only,
+                taste_excerpt=taste_excerpt,
             ),
         }
     ]
@@ -571,7 +591,9 @@ def run_female_fiction_review(
         "characters": "女频审阅·人物",
     }[mode]
     tag = f"{tag_base}+写回" if write_back else tag_base
-    reply = deps.llm.call_api(system, messages, provider=pid, tag=tag, silent=True)
+    reply = deps.llm.call_api(
+        system, messages, node_id=node_id, tag=tag, silent=True
+    )
     if reply is None:
         return {
             "ok": False,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 
-import batch_state
+from app import batch_state
 import infra.config as config
 from core.data import novel_data
 from app import chapter_io as ch
@@ -199,7 +199,12 @@ def writing_chat(
     if not prep.get("ok"):
         return prep
 
-    reply = llm.call_api(prep["system"], prep["messages"], silent=True)
+    reply = llm.call_api(
+        prep["system"],
+        prep["messages"],
+        node_id="writing.main",
+        silent=True,
+    )
     if reply is None:
         _rollback_failed_writing_turn(prep)
         info = llm.get_last_call_info()
@@ -226,7 +231,9 @@ def writing_chat_stream(
         yield json.dumps({"type": "error", "message": prep["error"]}, ensure_ascii=False)
         return
 
-    pid = config.resolve_provider(None)
+    from core import model_routing
+
+    pid, _ = model_routing.resolve_for_node("writing.main")
     key_ok = config.is_api_key_configured(pid)
     if not key_ok:
         _rollback_failed_writing_turn(prep)
@@ -246,7 +253,11 @@ def writing_chat_stream(
         with llm._request_lock:
             usage: TokenUsage | None = None
             try:
-                stream_opts = CallOptions(max_tokens=config.MAX_TOKENS, provider=pid)
+                stream_opts = CallOptions(
+                    max_tokens=config.MAX_TOKENS,
+                    provider=pid,
+                    node_id="writing.main",
+                )
                 for chunk in stream(
                     prep["system"],
                     prep["messages"],
@@ -272,7 +283,8 @@ def writing_chat_stream(
                         {"type": "chunk", "text": text}, ensure_ascii=False
                     )
             if usage is not None:
-                llm._record_call_usage(usage, pid)
+                _, eff_model = model_routing.resolve_for_node("writing.main")
+                llm._record_call_usage(usage, pid, model=eff_model)
     except APIError as e:
         _rollback_failed_writing_turn(prep)
         yield json.dumps(

@@ -1,0 +1,38 @@
+id: tomato_text_editor_v1
+platform: tomato
+platform_label: 番茄
+submission_target: text_editor
+book_types:
+  - short
+  - novel
+review_prompt_id: short-tomato
+version: 1
+updated_at: "2026-06-09"
+
+checks:
+  hard:
+    - id: p_hard_001
+      content: 首章3000字内必须出现核心冲突或强钩子
+    - id: p_hard_002
+      content: 每章结尾须留悬念或情绪钩子
+  soft:
+    - id: p_soft_001
+      content: 章均字数建议2000~3000字
+    - id: p_soft_002
+      content: 删去不推动情绪的铺垫句
+
+tone_preferences:
+  - 节奏快
+  - 钩子明显
+
+forbidden:
+  - 慢热超过5章无冲突
+  - 大段心理独白无对话
+
+submission_template:
+  required_fields:
+    - 书名
+    - 字数
+    - 简介（100字内）
+    - 前三章
+  format: word

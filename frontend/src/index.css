@@ -1,0 +1,64 @@
+@import 'tailwindcss';
+
+/* 暖白 + 墨绿 — 设计令牌（Tailwind v4 @theme，等同 tailwind.config 扩展） */
+@theme {
+  --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-serif: 'Noto Serif SC', 'Songti SC', 'SimSun', serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --color-background: #faf9f7;
+  --color-surface: #ffffff;
+  --color-foreground: #1a1814;
+  --color-muted: #8c8780;
+  --color-border: #e8e4dc;
+  --color-primary: #2d6a4f;
+  --color-primary-hover: #1b4332;
+  --color-primary-foreground: #ffffff;
+  --color-card: #ffffff;
+  --color-accent: #f3f1ec;
+  --color-warning: #b45309;
+  --color-danger: #9b1c1c;
+  --color-success: #2d6a4f;
+  --color-overlay: rgb(26 24 20 / 0.45);
+}
+
+@media (prefers-color-scheme: dark) {
+  @theme {
+    --color-background: #141210;
+    --color-surface: #1c1a17;
+    --color-foreground: #ede9e3;
+    --color-muted: #9c968e;
+    --color-border: #2e2b26;
+    --color-primary: #40916c;
+    --color-primary-hover: #2d6a4f;
+    --color-card: #1c1a17;
+    --color-accent: #252220;
+    --color-overlay: rgb(0 0 0 / 0.55);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--color-background);
+  color: var(--color-foreground);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-serif {
+  font-family: var(--font-serif);
+}
+
+.font-ui {
+  font-family: var(--font-sans);
+}

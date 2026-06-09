@@ -188,9 +188,11 @@ class APIClient:
         max_tokens: int,
         temperature: float | None = None,
         provider: str | None = None,
+        model: str | None = None,
     ) -> tuple[str, TokenUsage]:
         pid = config.resolve_provider(provider)
         cfg = config.get_provider_config(pid)
+        eff_model = config.get_model(pid, model=model)
 
         if cfg["client"] == "anthropic":
             return self._call_anthropic(
@@ -199,6 +201,7 @@ class APIClient:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 provider=pid,
+                model=eff_model,
             )
         return self._call_openai(
             system,
@@ -206,6 +209,7 @@ class APIClient:
             max_tokens=max_tokens,
             temperature=temperature,
             provider=pid,
+            model=eff_model,
         )
 
     def iter_message(
@@ -216,9 +220,11 @@ class APIClient:
         max_tokens: int,
         temperature: float | None = None,
         provider: str | None = None,
+        model: str | None = None,
     ) -> Iterator[str]:
         pid = config.resolve_provider(provider)
         cfg = config.get_provider_config(pid)
+        eff_model = config.get_model(pid, model=model)
         if cfg["client"] == "anthropic":
             yield from self._iter_anthropic(
                 system,
@@ -226,6 +232,7 @@ class APIClient:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 provider=pid,
+                model=eff_model,
             )
         else:
             yield from self._iter_openai(
@@ -234,6 +241,7 @@ class APIClient:
                 max_tokens=max_tokens,
                 temperature=temperature,
                 provider=pid,
+                model=eff_model,
             )
 
     def _iter_anthropic(
@@ -244,9 +252,10 @@ class APIClient:
         max_tokens: int,
         temperature: float | None = None,
         provider: str,
+        model: str,
     ) -> Iterator[str]:
         kwargs: dict = {
-            "model": config.get_model(provider),
+            "model": model,
             "max_tokens": max_tokens,
             "messages": messages,
         }
@@ -276,6 +285,7 @@ class APIClient:
         max_tokens: int,
         temperature: float | None = None,
         provider: str,
+        model: str,
     ) -> Iterator[str]:
         openai_messages: list[dict] = []
         system_text = _flatten_system(system) if _has_system(system) else ""
@@ -283,7 +293,7 @@ class APIClient:
             openai_messages.append({"role": "system", "content": system_text})
         openai_messages.extend(messages)
         create_kwargs: dict = {
-            "model": config.get_model(provider),
+            "model": model,
             "max_tokens": max_tokens,
             "messages": openai_messages,
             "stream": True,
@@ -340,9 +350,10 @@ class APIClient:
         max_tokens: int,
         temperature: float | None = None,
         provider: str,
+        model: str,
     ) -> tuple[str, TokenUsage]:
         kwargs: dict = {
-            "model": config.get_model(provider),
+            "model": model,
             "max_tokens": max_tokens,
             "messages": messages,
         }
@@ -379,6 +390,7 @@ class APIClient:
         max_tokens: int,
         temperature: float | None = None,
         provider: str,
+        model: str,
     ) -> tuple[str, TokenUsage]:
         openai_messages: list[dict] = []
         system_text = _flatten_system(system) if _has_system(system) else ""
@@ -387,7 +399,7 @@ class APIClient:
         openai_messages.extend(messages)
 
         create_kwargs: dict = {
-            "model": config.get_model(provider),
+            "model": model,
             "max_tokens": max_tokens,
             "messages": openai_messages,
         }

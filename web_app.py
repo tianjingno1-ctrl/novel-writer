@@ -22,15 +22,23 @@ from api.routes import guide as guide_routes
 from api.routes import history as history_routes
 from api.routes import library as library_routes
 from api.routes import logs as logs_routes
+from api.routes import manuscripts as manuscripts_routes
+from api.routes import prefill as prefill_routes
+from api.routes import prompts as prompts_routes
 from api.routes import maintain as maintain_routes
 from api.routes import meta as meta_routes
 from api.routes import outline as outline_routes
 from api.routes import plan as plan_routes
+from api.routes import product as product_routes
 from api.routes import project as project_routes
 from api.routes import review as review_routes
 from api.routes import stats as stats_routes
+from api.routes import taste as taste_routes
+from api.routes import tools as tools_routes
 from api.routes import workshop as workshop_routes
 from api.routes import writing as writing_routes
+from app import runtime as app_runtime
+from core import model_routing
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -84,6 +92,9 @@ async def lifespan(app: FastAPI):
         f"（NOVEL_RUNTIME_LOG=0 可关闭）"
     )
     app.state.ctx = init_context()
+    if model_routing.PROMPT_CACHE_AUTO_REFRESH and config.HEARTBEAT_ENABLED:
+        app_runtime.start_heartbeat_thread()
+        _safe_print("[OK] Prompt Cache 自动续命已启动（Settings 可关闭）")
     yield
 
 
@@ -99,15 +110,21 @@ app.include_router(batch_routes.router)
 app.include_router(guide_routes.router)
 app.include_router(codex_routes.router)
 app.include_router(chapters_routes.router)
+app.include_router(product_routes.router)
 app.include_router(plan_routes.router)
 app.include_router(free_chat_routes.router)
 app.include_router(writing_routes.router)
 app.include_router(stats_routes.router)
 app.include_router(history_routes.router)
 app.include_router(config_routes.router)
+app.include_router(tools_routes.router)
 app.include_router(meta_routes.router)
 app.include_router(project_routes.router)
 app.include_router(logs_routes.router)
+app.include_router(prompts_routes.router)
+app.include_router(prefill_routes.router)
+app.include_router(manuscripts_routes.router)
+app.include_router(taste_routes.router)
 
 
 @app.middleware("http")
