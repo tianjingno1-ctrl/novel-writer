@@ -41,6 +41,7 @@ def undo_last_chapter_append() -> dict:
 def apply_assistant_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     """用某条 AI 回复**替换**整章正文（非追加）。"""
     import main
+    from app import writing_session as ws
 
     path = _chapter_path(chapter_num)
     if not path.exists():
@@ -64,7 +65,7 @@ def apply_assistant_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     _clear_assistant_appended_indices()
     state.appended_indices.add(msg_index)
     invalidate_chapter_injection(chapter_num)
-    main.save_session("apply_turn", silent=True)
+    ws.save_session("apply_turn", silent=True)
     return {
         "ok": True,
         "num": chapter_num,
@@ -78,6 +79,7 @@ def apply_assistant_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
 def apply_user_draft_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     """用首轮用户消息里附带的章节草稿替换整章正文。"""
     import main
+    from app import writing_session as ws
 
     path = _chapter_path(chapter_num)
     if not path.exists():
@@ -97,7 +99,7 @@ def apply_user_draft_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     state.last_append_undo = None
     _clear_assistant_appended_indices()
     invalidate_chapter_injection(chapter_num)
-    main.save_session("apply_turn", silent=True)
+    ws.save_session("apply_turn", silent=True)
     return {
         "ok": True,
         "num": chapter_num,

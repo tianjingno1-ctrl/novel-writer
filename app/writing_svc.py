@@ -1,26 +1,22 @@
-"""writing 路由适配层（P3-4b）。薄 forward，函数体留 main；P3-4c/d 逐步实迁。"""
+"""writing 路由适配层（P3-4b/c）。session 走 writing_session；chat 主链暂留 main。"""
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 
+from app import writing_session as ws
+
 
 def get_chat_history() -> list[dict]:
-    import main
-
-    return main.get_chat_history()
+    return ws.get_chat_history()
 
 
 def get_appended_indices() -> list[int]:
-    import main
-
-    return main.get_appended_indices()
+    return ws.get_appended_indices()
 
 
 def touch_user_active() -> None:
-    import main
-
-    main.touch_user_active()
+    ws.touch_user_active()
 
 
 def writing_chat(
@@ -46,30 +42,20 @@ def writing_chat_stream(
 
 
 def clear_chat_session() -> None:
-    import main
-
-    main.clear_chat_session()
+    ws.clear_chat_session()
 
 
 def set_write_chapter_num(num: int) -> dict:
-    import main
-
-    return main.set_write_chapter_num(num)
+    return ws.set_write_chapter_num(num)
 
 
 def restore_chat_session() -> dict:
-    import main
-
-    return main.restore_chat_session()
+    return ws.restore_chat_session()
 
 
 def load_chat_prompts() -> dict:
-    import main
-
-    return main.load_chat_prompts()
+    return ws.load_chat_prompts()
 
 
 def save_chat_prompts(prompts: list[dict]) -> dict:
-    import main
-
-    return main.save_chat_prompts(prompts)
+    return ws.save_chat_prompts(prompts)
