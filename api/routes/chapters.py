@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import main as core
 import novel_data
+from app import chapters_api as ch_svc
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
@@ -45,13 +46,13 @@ class ApplyTurnBody(BaseModel):
 
 @router.get("/api/chapters")
 def chapters_list() -> dict:
-    items = [{"num": n, "file": p.name} for n, p in core.list_chapters()]
+    items = [{"num": n, "file": p.name} for n, p in ch_svc.list_chapters()]
     return {"chapters": items}
 
 
 @router.get("/api/chapters/{num}")
 def get_chapter(num: int) -> dict:
-    ch = core.get_chapter_by_num(num)
+    ch = ch_svc.get_chapter_by_num(num)
     if ch is None:
         raise HTTPException(404, f"章节 ch{num:03d} 不存在")
     plan = novel_data.get_chapter_plan(num)
@@ -60,12 +61,12 @@ def get_chapter(num: int) -> dict:
 
 @router.put("/api/chapters/{num}")
 def put_chapter(num: int, body: ContentBody) -> dict:
-    return core.save_chapter_by_num(num, body.content)
+    return ch_svc.save_chapter_by_num(num, body.content)
 
 
 @router.post("/api/chapters/new")
 def new_chapter() -> dict:
-    r = core.create_next_chapter()
+    r = ch_svc.create_next_chapter()
     novel_data.ensure_chapter_plan(r["num"])
     return r
 

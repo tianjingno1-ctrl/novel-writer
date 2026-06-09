@@ -42,6 +42,12 @@ from app.chapter_titles import (
     refresh_chapter_file_header,
     sync_all_chapter_titles_from_files,
 )
+from app.chapters_api import (
+    create_next_chapter,
+    get_chapter_by_num,
+    list_chapters,
+    save_chapter_by_num,
+)
 from app.codex import get_codex, save_codex
 from app.guide import get_guide_status
 from app.free_chat import (
@@ -1059,16 +1065,6 @@ def call_api(
         if not silent:
             print(f"API 错误：{err}")
         return None
-
-
-def list_chapters() -> list[tuple[int, Path]]:
-    chapters = []
-    for p in CHAPTERS_DIR.glob("ch*.md"):
-        m = re.match(r"ch(\d+)\.md$", p.name, re.IGNORECASE)
-        if m:
-            chapters.append((int(m.group(1)), p))
-    chapters.sort(key=lambda x: x[0])
-    return chapters
 
 
 def get_latest_chapter() -> tuple[int, Path, str] | None:
@@ -2122,45 +2118,10 @@ def get_chapters_text_for_scope(chapter_num: int, scope: str) -> str | None:
     return _book_store().chapters_text_for_scope(chapter_num, scope)
 
 
-def get_chapter_by_num(num: int) -> dict | None:
-    path = CHAPTERS_DIR / f"ch{num:03d}.md"
-    if not path.exists():
-        return None
-    return {"num": num, "path": str(path.name), "content": read_text(path)}
-
-
-def save_chapter_by_num(num: int, content: str) -> dict:
-    path = CHAPTERS_DIR / f"ch{num:03d}.md"
-    content = sanitize_chapter_text(content)
-    changed = write_text(path, content, append=False, chapter_num=num)
-    _invalidate_chapter_injection(num)
-    chapter_title = sync_chapter_title_from_file(num)
-    return {"ok": True, "num": num, "chapter_title": chapter_title, "changed": changed}
-
-
 def ensure_chapter_file(chapter_num: int, title: str = "") -> dict:
-    """若章节正文文件不存在则创建，并写入可编辑的标题行。"""
-    path = CHAPTERS_DIR / f"ch{chapter_num:03d}.md"
-    if path.exists():
-        return {"ok": True, "num": chapter_num, "created": False, "file": path.name}
-    path.parent.mkdir(parents=True, exist_ok=True)
-    title = (title or "").strip()
-    header = f"# 第{chapter_num}章"
-    if title and title not in {
-        f"第{chapter_num}章",
-        f"第{chapter_text.chapter_cn(chapter_num)}章",
-    }:
-        header = f"{header} · {title}"
-    file_utils.atomic_write_text(path, f"{header}\n\n")
-    return {"ok": True, "num": chapter_num, "created": True, "file": path.name}
+    from app.chapters_api import _ensure_chapter_file
 
-
-def create_next_chapter() -> dict:
-    chapters = list_chapters()
-    next_num = (chapters[-1][0] + 1) if chapters else 1
-    plan = novel_data.get_chapter_plan(next_num)
-    title = (plan or {}).get("title", "") if plan else ""
-    return ensure_chapter_file(next_num, title)
+    return _ensure_chapter_file(chapter_num, title)
 
 
 def do_summary() -> None:
