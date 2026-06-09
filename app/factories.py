@@ -53,12 +53,16 @@ def resolve_chapter_num(chapter_num: int | None) -> tuple[int, str] | dict:
     from app_state import state
 
     if chapter_num and chapter_num > 0:
-        content = main.read_chapter_content(chapter_num)
+        import app.chapter_io as chapter_io
+
+        content = chapter_io.read_chapter_content(chapter_num)
         if not content.strip():
             return {"ok": False, "error": f"第{chapter_num}章内容为空"}
         return chapter_num, content
     if state.write_chapter_num > 0:
-        content = main.read_chapter_content(state.write_chapter_num)
+        import app.chapter_io as chapter_io
+
+        content = chapter_io.read_chapter_content(state.write_chapter_num)
         if content.strip():
             return state.write_chapter_num, content
     latest = main.get_latest_chapter()

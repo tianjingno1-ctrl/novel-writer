@@ -9,6 +9,7 @@ import batch_state
 import config
 import novel_data
 from app import writing_session as ws
+from app import chapter_io as ch
 from app.factories import invalidate_chapter_injection
 from app_state import state
 from summarizer import WRITING_INSTRUCTION
@@ -28,23 +29,21 @@ def save_chapter_after_reply(
     instruction: str = "",
 ) -> dict | None:
     """AI 回复后自动保存到目标章节。"""
-    import main
-
-    if not main.should_append_to_chapter(reply):
+    if not ch.should_append_to_chapter(reply):
         if not config.AUTO_APPEND_CHAPTER:
             return None
         print("💡 本条为讨论/说明，未写入章节（如需保存请手动编辑章节文件）")
         return None
 
     if not config.AUTO_APPEND_CHAPTER:
-        pending = main.count_unsaved_chapter_turns()
+        pending = ch.count_unsaved_chapter_turns()
         print(f"💡 本条正文尚未写入章节，输入 /save 保存（待保存 {pending} 条）")
         return None
 
-    chapter_num, chapter_path = main.get_or_create_write_chapter(write_chapter_num)
-    mode = main.instruction_save_mode(instruction)
+    chapter_num, chapter_path = ch.get_or_create_write_chapter(write_chapter_num)
+    mode = ch.instruction_save_mode(instruction)
     if mode == "append":
-        chars, title = main.append_to_chapter(
+        chars, title = ch.append_to_chapter(
             reply, chapter_path, msg_index=msg_index, chapter_num=chapter_num
         )
         state.appended_indices.add(msg_index)
@@ -53,11 +52,11 @@ def save_chapter_after_reply(
             f"💾 已追加到 data/chapters/ch{chapter_num:03d}.md{title_note}（+{chars} 字）"
         )
         if not title:
-            title = main.sync_chapter_title_from_file(chapter_num)
+            title = ch.sync_chapter_title_from_file(chapter_num)
         invalidate_chapter_injection(chapter_num)
         return {"mode": "append", "title": title, "chapter_num": chapter_num}
 
-    chars, title = main.replace_chapter_content(
+    chars, title = ch.replace_chapter_content(
         reply, chapter_path, chapter_num, msg_index=msg_index
     )
     _clear_assistant_appended_indices()
@@ -67,7 +66,7 @@ def save_chapter_after_reply(
         f"💾 已覆盖保存到 data/chapters/ch{chapter_num:03d}.md{title_note}（{chars} 字）"
     )
     if not title:
-        title = main.sync_chapter_title_from_file(chapter_num)
+        title = ch.sync_chapter_title_from_file(chapter_num)
     invalidate_chapter_injection(chapter_num)
     return {"mode": "replace", "title": title, "chapter_num": chapter_num}
 
@@ -90,7 +89,7 @@ def _finalize_writing_turn(
 ) -> dict:
     import main
 
-    reply = main.sanitize_chapter_text(reply)
+    reply = ch.sanitize_chapter_text(reply)
     state.conversation_history.append({"role": "assistant", "content": reply})
     msg_index = len(state.conversation_history) - 1
     save_info = save_chapter_after_reply(
@@ -147,7 +146,7 @@ def _prepare_writing_turn(
     if not full_instruction:
         return {"ok": False, "error": "指令不能为空"}
 
-    write_num = main.resolve_write_chapter_num(chapter_num, scene_id)
+    write_num = ch.resolve_write_chapter_num(chapter_num, scene_id)
     state.write_chapter_num = write_num
     injection_snapshot = {
         "session_includes_chapter": state.session_includes_chapter,
@@ -156,7 +155,7 @@ def _prepare_writing_turn(
     if write_num != state.last_injected_chapter_num:
         state.session_includes_chapter = False
 
-    chapter_content = main.read_chapter_content(write_num)
+    chapter_content = ch.read_chapter_content(write_num)
     if not chapter_content.strip():
         chapter_content = "（本章尚无正文）"
 

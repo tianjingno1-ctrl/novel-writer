@@ -8,6 +8,7 @@ import uuid
 from datetime import datetime
 
 import file_utils
+from app import chapter_io as chapter_io
 from app import paths as _paths
 from app_state import state
 
@@ -132,7 +133,7 @@ def restore_chat_session() -> dict:
     for msg in history:
         content = msg.get("content", "")
         if msg.get("role") == "assistant":
-            content = main.sanitize_chapter_text(content)
+            content = chapter_io.sanitize_chapter_text(content)
         state.conversation_history.append(
             {"role": msg["role"], "content": content}
         )
@@ -148,8 +149,8 @@ def restore_chat_session() -> dict:
     saved_indices = data.get("appended_indices")
     if saved_indices is not None:
         state.appended_indices.update(int(i) for i in saved_indices)
-    main.sync_appended_indices_with_chapter()
-    pending = main.count_unsaved_chapter_turns()
+    chapter_io.sync_appended_indices_with_chapter()
+    pending = chapter_io.count_unsaved_chapter_turns()
     return {
         "ok": True,
         "saved_at": data.get("saved_at", ""),

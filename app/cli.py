@@ -8,6 +8,7 @@ import signal
 from datetime import datetime
 
 import config
+from app import chapter_io as ch
 from app import paths as _paths
 from app import writing_session as ws
 from app import writing_turns as wt
@@ -38,9 +39,7 @@ def do_restore() -> None:
 
 
 def do_save() -> None:
-    import main as m
-
-    chapter_count = m.flush_chapter_writes()
+    chapter_count = ch.flush_chapter_writes()
     session_saved = ws.save_session("manual", silent=True)
     if chapter_count or session_saved:
         if session_saved:
@@ -262,12 +261,10 @@ def do_cost() -> None:
 
 
 def do_new() -> None:
-    import main as m
-
-    pending = m.count_unsaved_chapter_turns()
+    pending = ch.count_unsaved_chapter_turns()
     if pending:
         print(f"⚠️  还有 {pending} 条正文未写入章节，正在补存…")
-        m.flush_chapter_writes()
+        ch.flush_chapter_writes()
     ws.backup_session_before_clear()
     state.conversation_history.clear()
     state.session_includes_chapter = False
@@ -300,12 +297,10 @@ def print_help() -> None:
 
 
 def remind_unsaved_on_exit() -> None:
-    import main as m
-
     if not state.conversation_history:
         return
 
-    pending = m.count_unsaved_chapter_turns()
+    pending = ch.count_unsaved_chapter_turns()
     chapter_num = ws._session_chapter_num()
     session_md = _paths.resolved("SESSION_MD_FILE")
 
@@ -313,8 +308,8 @@ def remind_unsaved_on_exit() -> None:
     if pending > 0:
         print(f"⚠️  提醒：还有 {pending} 条 AI 正文未写入章节！")
         print("   正在尝试补存…")
-        m.flush_chapter_writes()
-        pending = m.count_unsaved_chapter_turns()
+        ch.flush_chapter_writes()
+        pending = ch.count_unsaved_chapter_turns()
         if pending > 0:
             print(f"   仍有 {pending} 条未保存，请手动执行 /save 或查看 {session_md}")
     elif config.AUTO_APPEND_CHAPTER and chapter_num:

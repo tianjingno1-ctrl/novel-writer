@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from app import paths as _paths
+from app import chapter_io as ch
 from app.factories import invalidate_chapter_injection
 from app_state import state
 
@@ -53,13 +54,13 @@ def apply_assistant_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     if msg["role"] != "assistant":
         return {"ok": False, "error": "只能选用 AI 回复替换章节"}
     content = msg["content"].strip()
-    if not main.should_append_to_chapter(content):
+    if not ch.should_append_to_chapter(content):
         return {"ok": False, "error": "该条为讨论/说明，不能作为章节正文"}
 
-    title, body = main.prepare_chapter_body_from_reply(content, chapter_num)
+    title, body = ch.prepare_chapter_body_from_reply(content, chapter_num)
     if not body.strip():
         return {"ok": False, "error": "该条没有可用正文"}
-    formatted = main.format_chapter_file(chapter_num, body, title=title)
+    formatted = ch.format_chapter_file(chapter_num, body, title=title)
     main.write_text(path, formatted, append=False)
     state.last_append_undo = None
     _clear_assistant_appended_indices()
@@ -94,7 +95,7 @@ def apply_user_draft_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     if not body:
         return {"ok": False, "error": "该轮指令里没有附带章节正文（仅首轮带全文时可用）"}
 
-    formatted = main.format_chapter_file(chapter_num, body)
+    formatted = ch.format_chapter_file(chapter_num, body)
     main.write_text(path, formatted, append=False)
     state.last_append_undo = None
     _clear_assistant_appended_indices()
