@@ -1642,18 +1642,20 @@ class TestWorldRemediate(unittest.TestCase):
             ch_file.write_text("# 第1章 · 旧\n\n旧内容。\n", encoding="utf-8")
 
             orig_chapters = main.CHAPTERS_DIR
-            orig_call = main.call_api
-            orig_info = main.get_last_call_info
-            orig_build = main.build_cached_system
+            from app import llm as llm_mod
+
+            orig_call = llm_mod.call_api
+            orig_info = llm_mod.get_last_call_info
+            orig_build = llm_mod.build_cached_system
             main.CHAPTERS_DIR = ch_dir
             try:
 
                 def fake_api(_sys, _msgs, **kwargs):
                     return "【章节标题】新标题\n\n新正文段落。\n"
 
-                main.call_api = fake_api
-                main.get_last_call_info = lambda: {"cost": 0.01}
-                main.build_cached_system = lambda p, **k: p
+                llm_mod.call_api = fake_api
+                llm_mod.get_last_call_info = lambda: {"cost": 0.01}
+                llm_mod.build_cached_system = lambda p, **k: p
 
                 from core import generator as chapter_generator
 
@@ -1668,9 +1670,9 @@ class TestWorldRemediate(unittest.TestCase):
                 self.assertIn("新标题", text)
             finally:
                 main.CHAPTERS_DIR = orig_chapters
-                main.call_api = orig_call
-                main.get_last_call_info = orig_info
-                main.build_cached_system = orig_build
+                llm_mod.call_api = orig_call
+                llm_mod.get_last_call_info = orig_info
+                llm_mod.build_cached_system = orig_build
 
 
 class DeconstructPromptTests(unittest.TestCase):

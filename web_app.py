@@ -6,8 +6,11 @@ import sys
 from contextlib import asynccontextmanager
 
 import config
-import main as core
 import runtime_log
+from app.bootstrap import bootstrap_library, init_data_dirs, init_context
+from app.cost import load_total_cost, set_total_cost
+from app import writing_session as ws
+from app.free_chat import load_free_chat
 from api.routes import batch as batch_routes
 from api.routes import chapters as chapters_routes
 from api.routes import codex as codex_routes
@@ -28,8 +31,6 @@ from api.routes import review as review_routes
 from api.routes import stats as stats_routes
 from api.routes import workshop as workshop_routes
 from api.routes import writing as writing_routes
-from app.bootstrap import init_context
-from app.free_chat import load_free_chat
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -64,12 +65,12 @@ def _safe_print(msg: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    core.bootstrap_library()
-    core.init_data_dirs()
+    bootstrap_library()
+    init_data_dirs()
     config.load_runtime_settings()
-    core.set_total_cost(core.load_total_cost())
+    set_total_cost(load_total_cost())
     load_free_chat()
-    if core.auto_restore_session_if_needed():
+    if ws.auto_restore_session_if_needed():
         _safe_print("[OK] 已从磁盘恢复写书对话（session_autosave.json）")
     if config.WEB_TOKEN:
         _safe_print("[AUTH] Web API 已启用令牌鉴权（请求头 X-Novel-Token）")

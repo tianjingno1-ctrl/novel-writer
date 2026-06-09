@@ -295,11 +295,11 @@ def apply_paths_to_modules() -> None:
     book_paths.mirror_to_main()
 
     import core.context as writing_context
-    import main
+    from app import book_io as bio
 
     writing_context.bind(
         writing_context.BookPaths.from_book_context(ctx),
-        read_text=main.read_text,
+        read_text=bio.read_text,
     )
 
 
@@ -324,11 +324,11 @@ def reset_session_state() -> None:
 def reinit_book_services() -> None:
     """切换书后重新绑定 change_history / quality_log 等。"""
     import change_history
-    import main
     import quality_log
+    from app.cost import _register_change_history
 
     ctx = get_context()
-    main._register_change_history()
+    _register_change_history()
     quality_log.init_quality_log(ctx.data_dir)
 
 
@@ -459,7 +459,6 @@ def switch_book(book_id: str) -> dict:
     index["active_book_id"] = book_id
     _save_index(index)
 
-    import main
     from app.free_chat import load_free_chat
 
     load_free_chat()

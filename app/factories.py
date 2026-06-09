@@ -143,12 +143,12 @@ def apply_chapter_title(chapter_num: int, title: str | None) -> str | None:
 
 
 def _llm_hooks() -> LlmHooks:
-    import main
+    from app import llm
 
     return LlmHooks(
-        build_cached_system=main.build_cached_system,
-        call_api=main.call_api,
-        get_last_call_info=main.get_last_call_info,
+        build_cached_system=llm.build_cached_system,
+        call_api=llm.call_api,
+        get_last_call_info=llm.get_last_call_info,
     )
 
 

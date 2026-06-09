@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import config
-import main as core
+from app import runtime as rt
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -52,4 +52,4 @@ def set_provider(body: ProviderSwitch) -> dict:
     from providers import reset_client
 
     reset_client(body.provider)
-    return {"ok": True, **core.get_app_status()}
+    return {"ok": True, **rt.get_app_status()}

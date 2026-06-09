@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import main as core
 from app import free_chat as svc
+from app import runtime as rt
+from app import writing_session as ws
 from fastapi import APIRouter
 from pydantic import BaseModel, field_validator
 
@@ -64,12 +65,12 @@ def set_free_chat_provider(body: ProviderSwitch) -> dict:
     from providers import reset_client
 
     reset_client(body.provider)
-    return {"ok": True, **core.get_app_status()}
+    return {"ok": True, **rt.get_app_status()}
 
 
 @router.post("/api/free-chat")
 def free_chat_send(body: FreeChatRequest) -> dict:
-    core.touch_user_active()
+    ws.touch_user_active()
     return require_ok(
         svc.free_chat(body.content, provider=body.provider),
         "自由聊失败",

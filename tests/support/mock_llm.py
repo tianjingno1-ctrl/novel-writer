@@ -1,7 +1,7 @@
 """
 LLM mock 工具，两层：
   mock_llm(responses)      — patch core.api.complete + stream（真 LLM 边界）
-  mock_call_api(responses) — patch main.call_api（遗留兼容，支持 dict[tag, str]）
+  mock_call_api(responses) — patch app.llm.call_api（main.call_api 经 __getattr__ 转发）
 """
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def mock_call_api(
     side_effect: Callable | None = None,
 ):
     """
-    patch main.call_api（遗留兼容层）。
+    patch app.llm.call_api。
     call_api(system, messages, *, tag="请求", **kwargs) -> str
 
     responses:
@@ -96,8 +96,6 @@ def mock_call_api(
     注意：fake 返回纯 str，不写 state.last_call_info。
     需要断言 last_call_info 时，在 side_effect 里手动写，或单独 patch state。
     """
-    import main  # 延迟 import，避免模块级副作用
-
     if side_effect is not None:
         _side_effect = side_effect
     elif isinstance(responses, dict):
@@ -116,5 +114,7 @@ def mock_call_api(
         def _side_effect(system, messages, *, tag="请求", **kwargs):
             return None
 
-    with mock.patch.object(main, "call_api", side_effect=_side_effect):
+    with mock.patch("app.llm.call_api", side_effect=_side_effect), mock.patch.object(
+        __import__("main"), "call_api", side_effect=_side_effect, create=True
+    ):
         yield

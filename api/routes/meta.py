@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-import main as core
+from app import llm
+from app import runtime as rt
+from app import writing_ctx as _wctx
 from fastapi import APIRouter
 from fastapi.responses import RedirectResponse
 
@@ -16,8 +18,8 @@ def root() -> RedirectResponse:
 
 @router.get("/api/status")
 def status() -> dict:
-    status_data = core.get_app_status()
-    last = core.get_last_call_info()
+    status_data = rt.get_app_status()
+    last = llm.get_last_call_info()
     if last:
         status_data["last_call"] = last
     return status_data
@@ -25,4 +27,4 @@ def status() -> dict:
 
 @router.get("/api/debug/last_context")
 def debug_last_context() -> dict:
-    return core.get_last_context_debug()
+    return _wctx.get_last_context_debug()
