@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import config
-import main as core
+from app import writing_svc as ws
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
@@ -45,8 +45,8 @@ class ChatPromptsBody(BaseModel):
 @router.get("/api/chat/history")
 def chat_history() -> dict:
     return {
-        "messages": core.get_chat_history(),
-        "appended_indices": core.get_appended_indices(),
+        "messages": ws.get_chat_history(),
+        "appended_indices": ws.get_appended_indices(),
         "context_turns": config.CHAT_CONTEXT_TURNS,
         "context_mode": config.CONTEXT_MODE,
     }
@@ -54,9 +54,9 @@ def chat_history() -> dict:
 
 @router.post("/api/chat")
 def chat(req: ChatRequest) -> dict:
-    core.touch_user_active()
+    ws.touch_user_active()
     return require_ok(
-        core.writing_chat(
+        ws.writing_chat(
             req.instruction, req.scene_beat, req.scene_id, req.chapter_num
         ),
         "写书对话失败",
@@ -65,10 +65,10 @@ def chat(req: ChatRequest) -> dict:
 
 @router.post("/api/chat/stream")
 def chat_stream(req: ChatRequest) -> StreamingResponse:
-    core.touch_user_active()
+    ws.touch_user_active()
 
     def generate():
-        for event in core.writing_chat_stream(
+        for event in ws.writing_chat_stream(
             req.instruction, req.scene_beat, req.scene_id, req.chapter_num
         ):
             yield f"data: {event}\n\n"
@@ -82,7 +82,7 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
 
 @router.post("/api/chat/clear")
 def chat_clear() -> dict:
-    core.clear_chat_session()
+    ws.clear_chat_session()
     return {"ok": True}
 
 
@@ -91,22 +91,22 @@ def set_write_chapter(body: ChapterQualityRequest) -> dict:
     if not body.chapter_num or body.chapter_num <= 0:
         raise HTTPException(400, "chapter_num 无效")
     return require_ok(
-        core.set_write_chapter_num(body.chapter_num),
+        ws.set_write_chapter_num(body.chapter_num),
         "设置写作目标章失败",
     )
 
 
 @router.post("/api/chat/restore")
 def chat_restore() -> dict:
-    return require_ok(core.restore_chat_session(), "恢复失败")
+    return require_ok(ws.restore_chat_session(), "恢复失败")
 
 
 @router.get("/api/chat/prompts")
 def get_chat_prompts() -> dict:
-    return core.load_chat_prompts()
+    return ws.load_chat_prompts()
 
 
 @router.put("/api/chat/prompts")
 def put_chat_prompts(body: ChatPromptsBody) -> dict:
     prompts = [p.model_dump() for p in body.prompts]
-    return core.save_chat_prompts(prompts)
+    return ws.save_chat_prompts(prompts)

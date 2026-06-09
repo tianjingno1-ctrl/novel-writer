@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import main as core
 import novel_data
 from app import chapters_api as ch_svc
+from app import writing_turns as wt
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
@@ -73,15 +73,15 @@ def new_chapter() -> dict:
 
 @router.post("/api/chapters/undo-last")
 def undo_last_chapter_write() -> dict:
-    return require_ok(core.undo_last_chapter_append(), "撤销失败")
+    return require_ok(wt.undo_last_chapter_append(), "撤销失败")
 
 
 @router.post("/api/chapters/{num}/apply-turn")
 def apply_chapter_turn(num: int, body: ApplyTurnBody) -> dict:
     if body.source == "user_draft":
-        result = core.apply_user_draft_turn_to_chapter(num, body.msg_index)
+        result = wt.apply_user_draft_turn_to_chapter(num, body.msg_index)
     elif body.source == "assistant":
-        result = core.apply_assistant_turn_to_chapter(num, body.msg_index)
+        result = wt.apply_assistant_turn_to_chapter(num, body.msg_index)
     else:
         raise HTTPException(400, "source 必须是 assistant 或 user_draft")
     return require_ok(result, "替换章节失败")

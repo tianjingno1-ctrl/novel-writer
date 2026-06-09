@@ -1209,19 +1209,9 @@ def sync_appended_indices_with_chapter() -> None:
 
 
 def undo_last_chapter_append() -> dict:
-    if state.last_append_undo is None:
-        return {"ok": False, "error": "没有可撤销的章节写入"}
-    undo = state.last_append_undo
-    path = Path(undo["path"])
-    write_text(path, undo["content"], append=False, history_source="undo")
-    msg_index = undo.get("msg_index")
-    if msg_index is not None:
-        state.appended_indices.discard(msg_index)
-    state.last_append_undo = None
-    m = re.search(r"ch(\d+)\.md", path.name)
-    if m:
-        _invalidate_chapter_injection(int(m.group(1)))
-    return {"ok": True, "file": path.name}
+    from app import writing_turns as wt
+
+    return wt.undo_last_chapter_append()
 
 
 def extract_chapter_body_from_user_message(content: str) -> str | None:
@@ -1282,67 +1272,16 @@ def _clear_assistant_appended_indices() -> None:
 
 def apply_assistant_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     """用某条 AI 回复**替换**整章正文（非追加）。"""
-    path = CHAPTERS_DIR / f"ch{chapter_num:03d}.md"
-    if not path.exists():
-        return {"ok": False, "error": f"章节 ch{chapter_num:03d} 不存在"}
+    from app import writing_turns as wt
 
-    if msg_index < 0 or msg_index >= len(state.conversation_history):
-        return {"ok": False, "error": "无效的消息序号"}
-    msg = state.conversation_history[msg_index]
-    if msg["role"] != "assistant":
-        return {"ok": False, "error": "只能选用 AI 回复替换章节"}
-    content = msg["content"].strip()
-    if not should_append_to_chapter(content):
-        return {"ok": False, "error": "该条为讨论/说明，不能作为章节正文"}
-
-    title, body = prepare_chapter_body_from_reply(content, chapter_num)
-    if not body.strip():
-        return {"ok": False, "error": "该条没有可用正文"}
-    chapter_text = format_chapter_file(chapter_num, body, title=title)
-    write_text(path, chapter_text, append=False)
-    state.last_append_undo = None
-    _clear_assistant_appended_indices()
-    state.appended_indices.add(msg_index)
-    _invalidate_chapter_injection(chapter_num)
-    save_session("apply_turn", silent=True)
-    return {
-        "ok": True,
-        "num": chapter_num,
-        "msg_index": msg_index,
-        "chars": len(chapter_text),
-        "chapter_title": title,
-        "source": "assistant",
-    }
+    return wt.apply_assistant_turn_to_chapter(chapter_num, msg_index)
 
 
 def apply_user_draft_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     """用首轮用户消息里附带的章节草稿替换整章正文。"""
-    path = CHAPTERS_DIR / f"ch{chapter_num:03d}.md"
-    if not path.exists():
-        return {"ok": False, "error": f"章节 ch{chapter_num:03d} 不存在"}
+    from app import writing_turns as wt
 
-    if msg_index < 0 or msg_index >= len(state.conversation_history):
-        return {"ok": False, "error": "无效的消息序号"}
-    msg = state.conversation_history[msg_index]
-    if msg["role"] != "user":
-        return {"ok": False, "error": "只能选用用户消息中的章节草稿"}
-    body = extract_chapter_body_from_user_message(msg["content"])
-    if not body:
-        return {"ok": False, "error": "该轮指令里没有附带章节正文（仅首轮带全文时可用）"}
-
-    chapter_text = format_chapter_file(chapter_num, body)
-    write_text(path, chapter_text, append=False)
-    state.last_append_undo = None
-    _clear_assistant_appended_indices()
-    _invalidate_chapter_injection(chapter_num)
-    save_session("apply_turn", silent=True)
-    return {
-        "ok": True,
-        "num": chapter_num,
-        "msg_index": msg_index,
-        "chars": len(chapter_text),
-        "source": "user_draft",
-    }
+    return wt.apply_user_draft_turn_to_chapter(chapter_num, msg_index)
 
 
 def do_undo() -> None:
