@@ -8,21 +8,19 @@ import novel_data
 from app import book_io as bio
 from app import paths as _paths
 from app import writing_ctx as _wctx
+from app.bootstrap_data import INITIAL_FILE_TEMPLATES
 from app_state import state
 
 
 def _maint_file_has_user_content(file_key: str) -> bool:
     """章后维护文件是否已有用户填写（非空模板）。"""
-    import main
-    from app import book_io as bio
-
     path = _paths.resolved_codex_files().get(file_key)
     if not path:
         return False
     text = bio.read_text(path).strip()
     if len(text) < 30:
         return False
-    placeholder = (main.INITIAL_FILE_TEMPLATES.get(file_key) or "").strip()
+    placeholder = (INITIAL_FILE_TEMPLATES.get(file_key) or "").strip()
     if text == placeholder:
         return False
     if file_key == "char_dynamic":
@@ -62,8 +60,6 @@ def _maint_file_has_user_content(file_key: str) -> bool:
 def get_guide_status() -> dict:
     """写作引导：地基文件、规划、章后待办等状态（供 /api/guide/status）。"""
     import change_history
-    import main
-    from app import book_io as bio
 
     track_keys = (
         "world",
@@ -80,7 +76,7 @@ def get_guide_status() -> dict:
         text = bio.read_text(path).strip()
         if len(text) < 20:
             return False
-        placeholder = (main.INITIAL_FILE_TEMPLATES.get(key) or "").strip()
+        placeholder = (INITIAL_FILE_TEMPLATES.get(key) or "").strip()
         return not placeholder or text != placeholder
 
     files = {key: _file_ready(key) for key in track_keys}

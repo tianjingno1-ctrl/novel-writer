@@ -10,7 +10,7 @@ from app import paths as _paths
 from app import book_io as bio
 from app import writing_ctx as _wctx
 from app.chapter_titles import refresh_chapter_file_header
-from app.factories import apply_chapter_title
+from app.factories import apply_chapter_title, book_store
 from app_state import state
 from core import chapters as chapter_text
 
@@ -33,6 +33,10 @@ def resolve_write_chapter_num(
         return state.write_chapter_num
     latest = _wctx.get_latest_chapter()
     return latest[0] if latest else 1
+
+
+def get_chapters_text_for_scope(chapter_num: int, scope: str) -> str | None:
+    return book_store().chapters_text_for_scope(chapter_num, scope)
 
 
 def read_chapter_content(chapter_num: int) -> str:

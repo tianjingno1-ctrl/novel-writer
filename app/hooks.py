@@ -19,8 +19,8 @@ def _ensure_context():
 
 
 def build_finalize_hooks() -> FinalizeHooks:
-    import main
     from app import book_io as bio
+    from app import chapter_io as _cio
 
     ctx = _ensure_context()
     rd = ctx.reviewer_deps
@@ -29,7 +29,7 @@ def build_finalize_hooks() -> FinalizeHooks:
         llm=rd.llm,
         resolve_chapter=ctx.resolve_chapter,
         short_story_skip=ctx.short_story_skip,
-        chapters_text_for_scope=main.get_chapters_text_for_scope,
+        chapters_text_for_scope=_cio.get_chapters_text_for_scope,
         load_check_snapshot=lambda num, body: ctx.store.load_snapshot(
             num, for_purpose="check", chapter_body=body
         ),

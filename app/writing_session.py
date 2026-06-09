@@ -177,7 +177,7 @@ def backup_session_before_clear() -> None:
 
 
 def load_chat_prompts() -> dict:
-    from main import DEFAULT_CHAT_PROMPTS
+    from app.bootstrap_data import DEFAULT_CHAT_PROMPTS
 
     prompts_file = _paths.resolved("CHAT_PROMPTS_FILE")
     if not prompts_file.exists():
