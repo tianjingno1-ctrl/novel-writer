@@ -16,6 +16,7 @@ from datetime import datetime
 import config
 import novel_data
 import runtime_log
+from app import cost as _cost
 from app import paths
 from app_state import state
 from core.api import APIError, CallOptions, TokenUsage, complete
@@ -290,12 +291,10 @@ def _is_stream_disconnect_error(exc: Exception) -> bool:
 
 
 def _record_call_usage(usage: TokenUsage, pid: str, *, tag: str = "请求") -> None:
-    import main
-
     state.last_request_time = time.time()
-    cost = main.calc_cost(usage, provider=pid)
-    main.log_cost(usage, cost, tag, provider=pid, silent=True)
-    state.last_call_info = main._build_last_call_info(usage, cost, pid)
+    cost = _cost.calc_cost(usage, provider=pid)
+    _cost.log_cost(usage, cost, tag, provider=pid, silent=True)
+    state.last_call_info = _cost._build_last_call_info(usage, cost, pid)
 
 
 def _api_error_message(exc: Exception) -> str:
@@ -331,8 +330,6 @@ def call_api(
     provider: str | None = None,
     silent: bool = False,
 ) -> str | None:
-    import main
-
     pid = config.resolve_provider(provider)
     if not config.is_api_key_configured(pid):
         cfg = config.get_provider_config(pid)
@@ -364,9 +361,9 @@ def call_api(
             api_ms = int((time.time() - t_api) * 1000)
             state.last_request_time = time.time()
 
-        cost = main.calc_cost(usage, provider=pid)
-        main.log_cost(usage, cost, tag, provider=pid, silent=silent)
-        state.last_call_info = main._build_last_call_info(usage, cost, pid)
+        cost = _cost.calc_cost(usage, provider=pid)
+        _cost.log_cost(usage, cost, tag, provider=pid, silent=silent)
+        state.last_call_info = _cost._build_last_call_info(usage, cost, pid)
         truncated = usage.stop_reason in ("max_tokens", "length") or (
             usage.output_tokens >= max(1, int(eff_max_tokens * 0.92))
         )
