@@ -394,9 +394,10 @@ def print_startup_banner() -> None:
 
 def main() -> None:
     import main as m
+    from app.bootstrap import bootstrap_library, init_data_dirs
 
-    m.bootstrap_library()
-    m.init_data_dirs()
+    bootstrap_library()
+    init_data_dirs()
     config.load_runtime_settings()
     state.total_cost = m.load_total_cost()
     setup_exit_handlers()

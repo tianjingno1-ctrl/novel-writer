@@ -23,7 +23,7 @@ from app_state import state
 from core.api import TokenUsage
 from core import chapters as chapter_text
 from app import batch_state
-from app.bootstrap import init_context
+from app.bootstrap import bootstrap_library, init_context, init_data_dirs
 from app.factories import (
     apply_chapter_title,
     book_paths_view as _book_paths_view,
@@ -154,47 +154,6 @@ CODEX_FILES = {
     "plot_threads_active": PLOT_THREADS_ACTIVE_FILE,
     "plot_threads": PLOT_THREADS_FILE,
 }
-
-
-def bootstrap_library() -> None:
-    """初始化书库并绑定当前书路径（启动时调用一次）。"""
-    runtime_log.init_runtime_log(BASE_DIR)
-    import book_context
-
-    book_context.init_library()
-    _wire_app_context()
-
-
-def _wire_app_context() -> None:
-    """注册 AppContext（依赖工厂在 app.factories，init_context 绑定引用）。"""
-    init_context()
-
-
-def init_data_dirs() -> None:
-    """首次运行：创建目录与空文件。"""
-    CHAPTERS_DIR.mkdir(parents=True, exist_ok=True)
-    BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
-    novel_data.CODEX_DIR.mkdir(parents=True, exist_ok=True)
-    archive_exists = ARCHIVE_FILE.exists()
-    import book_context
-
-    archived_filenames = frozenset(book_context.ARCHIVE_SECTION_BY_FILENAME.keys())
-    for key, path in CODEX_FILES.items():
-        content = INITIAL_FILE_TEMPLATES.get(key)
-        if not content or path.exists():
-            continue
-        if archive_exists and path.name in archived_filenames:
-            continue
-        path.write_text(content, encoding="utf-8")
-    if not CHAT_PROMPTS_FILE.exists():
-        file_utils.atomic_write_text(
-            CHAT_PROMPTS_FILE,
-            json.dumps(DEFAULT_CHAT_PROMPTS, ensure_ascii=False, indent=2),
-        )
-    novel_data.load_plan()
-    _register_change_history()
-    quality_log.init_quality_log(DATA_DIR)
-    change_history.ensure_baseline_snapshot()
 
 
 from app.book_io import (

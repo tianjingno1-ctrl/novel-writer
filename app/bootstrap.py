@@ -1,6 +1,8 @@
-"""组装 AppContext（由 main / web_app 在启动时注入工厂）。"""
+"""组装 AppContext 与启动初始化（由 main / web_app / CLI 在启动时调用）。"""
 
 from __future__ import annotations
+
+import json
 
 from app.context import AppContext
 
@@ -30,6 +32,52 @@ def init_context() -> AppContext:
     assert ctx.maintain_deps.store is ctx.store, "store 引用不一致"
     configure(ctx)
     return ctx
+
+
+def bootstrap_library() -> None:
+    """初始化书库并绑定当前书路径（启动时调用一次）。"""
+    import book_context
+    import runtime_log
+    from app import paths as _paths
+
+    runtime_log.init_runtime_log(_paths.resolved("BASE_DIR"))
+    book_context.init_library()
+    init_context()
+
+
+def init_data_dirs() -> None:
+    """首次运行：创建目录与空文件。"""
+    import book_context
+    import change_history
+    import file_utils
+    import novel_data
+    import quality_log
+    from app import paths as _paths
+    from app.bootstrap_data import DEFAULT_CHAT_PROMPTS, INITIAL_FILE_TEMPLATES
+    from app.cost import _register_change_history
+
+    _paths.resolved("CHAPTERS_DIR").mkdir(parents=True, exist_ok=True)
+    _paths.resolved("BACKUPS_DIR").mkdir(parents=True, exist_ok=True)
+    novel_data.CODEX_DIR.mkdir(parents=True, exist_ok=True)
+    archive_exists = _paths.resolved("ARCHIVE_FILE").exists()
+    archived_filenames = frozenset(book_context.ARCHIVE_SECTION_BY_FILENAME.keys())
+    for key, path in _paths.resolved_codex_files().items():
+        content = INITIAL_FILE_TEMPLATES.get(key)
+        if not content or path.exists():
+            continue
+        if archive_exists and path.name in archived_filenames:
+            continue
+        path.write_text(content, encoding="utf-8")
+    chat_prompts = _paths.resolved("CHAT_PROMPTS_FILE")
+    if not chat_prompts.exists():
+        file_utils.atomic_write_text(
+            chat_prompts,
+            json.dumps(DEFAULT_CHAT_PROMPTS, ensure_ascii=False, indent=2),
+        )
+    novel_data.load_plan()
+    _register_change_history()
+    quality_log.init_quality_log(_paths.resolved("DATA_DIR"))
+    change_history.ensure_baseline_snapshot()
 
 
 def rebuild_context() -> AppContext:

@@ -518,10 +518,10 @@ def create_book(
     _set_context(book_id)
     apply_paths_to_modules()
 
-    import main
+    from app.bootstrap import init_data_dirs
     from app.free_chat import load_free_chat
 
-    main.init_data_dirs()
+    init_data_dirs()
     reinit_book_services()
     load_free_chat()
 
