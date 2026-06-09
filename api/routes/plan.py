@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-import main as core
 import novel_data
+from app.chapter_titles import (
+    refresh_chapter_file_header,
+    sync_all_chapter_titles_from_files,
+)
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
@@ -82,7 +85,7 @@ def plan_all() -> dict:
 
 @router.get("/api/plan/full")
 def plan_full() -> dict:
-    core.sync_all_chapter_titles_from_files()
+    sync_all_chapter_titles_from_files()
     return {"chapters": novel_data.list_plan_details()}
 
 
@@ -95,7 +98,7 @@ def plan_update_chapter_title(
         raise HTTPException(400, "标题不能为空")
     if novel_data.update_chapter_title(chapter_num, title) is None:
         raise HTTPException(404, "章节不存在")
-    core.refresh_chapter_file_header(chapter_num, title)
+    refresh_chapter_file_header(chapter_num, title)
     return {"ok": True, "title": title}
 
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import main as core
 import novel_data
+from app import codex as codex_svc
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, field_validator
 
@@ -13,7 +13,6 @@ router = APIRouter(tags=["codex"])
 
 MAX_CONTENT_BYTES = 2 * 1024 * 1024
 MAX_API_TEXT_CHARS = 50_000
-VALID_CODEX_NAMES = frozenset(core.CODEX_FILES.keys())
 
 
 def _check_file_content(v: str) -> str:
@@ -57,14 +56,14 @@ class CodexActive(BaseModel):
 
 @router.get("/api/codex")
 def codex_list() -> dict:
-    return {"files": list(core.CODEX_FILES.keys())}
+    return {"files": codex_svc.codex_file_names()}
 
 
 @router.get("/api/codex/{name}")
 def get_codex(name: str) -> dict:
-    if name not in VALID_CODEX_NAMES:
+    if name not in codex_svc.valid_codex_names():
         raise HTTPException(400, "非法设定文件名")
-    data = core.get_codex(name)
+    data = codex_svc.get_codex(name)
     if data is None:
         raise HTTPException(404, f"未知设定: {name}")
     return data
@@ -72,10 +71,10 @@ def get_codex(name: str) -> dict:
 
 @router.put("/api/codex/{name}")
 def put_codex(name: str, body: CodexContentBody) -> dict:
-    if name not in VALID_CODEX_NAMES:
+    if name not in codex_svc.valid_codex_names():
         raise HTTPException(400, "非法设定文件名")
     return require_ok(
-        core.save_codex(name, body.content, chapter_num=body.chapter_num),
+        codex_svc.save_codex(name, body.content, chapter_num=body.chapter_num),
         "保存失败",
     )
 
