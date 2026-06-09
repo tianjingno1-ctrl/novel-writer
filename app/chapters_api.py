@@ -7,15 +7,18 @@ from pathlib import Path
 
 import file_utils
 import novel_data
+from app import paths as _paths
 from app.factories import invalidate_chapter_injection
 from core import chapters as chapter_text
 
 
-def list_chapters() -> list[tuple[int, Path]]:
-    import main
+def _chapters_dir() -> Path:
+    return _paths.resolved("CHAPTERS_DIR")
 
+
+def list_chapters() -> list[tuple[int, Path]]:
     chapters: list[tuple[int, Path]] = []
-    for p in main.CHAPTERS_DIR.glob("ch*.md"):
+    for p in _chapters_dir().glob("ch*.md"):
         m = re.match(r"ch(\d+)\.md$", p.name, re.IGNORECASE)
         if m:
             chapters.append((int(m.group(1)), p))
@@ -26,7 +29,7 @@ def list_chapters() -> list[tuple[int, Path]]:
 def get_chapter_by_num(num: int) -> dict | None:
     import main
 
-    path = main.CHAPTERS_DIR / f"ch{num:03d}.md"
+    path = _chapters_dir() / f"ch{num:03d}.md"
     if not path.exists():
         return None
     return {"num": num, "path": str(path.name), "content": main.read_text(path)}
@@ -35,7 +38,7 @@ def get_chapter_by_num(num: int) -> dict | None:
 def save_chapter_by_num(num: int, content: str) -> dict:
     import main
 
-    path = main.CHAPTERS_DIR / f"ch{num:03d}.md"
+    path = _chapters_dir() / f"ch{num:03d}.md"
     content = main.sanitize_chapter_text(content)
     changed = main.write_text(path, content, append=False, chapter_num=num)
     invalidate_chapter_injection(num)
@@ -44,8 +47,6 @@ def save_chapter_by_num(num: int, content: str) -> dict:
 
 
 def create_next_chapter() -> dict:
-    import main
-
     chapters = list_chapters()
     next_num = (chapters[-1][0] + 1) if chapters else 1
     plan = novel_data.get_chapter_plan(next_num)
@@ -55,9 +56,7 @@ def create_next_chapter() -> dict:
 
 def _ensure_chapter_file(chapter_num: int, title: str = "") -> dict:
     """若章节正文文件不存在则创建，并写入可编辑的标题行。"""
-    import main
-
-    path = main.CHAPTERS_DIR / f"ch{chapter_num:03d}.md"
+    path = _chapters_dir() / f"ch{chapter_num:03d}.md"
     if path.exists():
         return {"ok": True, "num": chapter_num, "created": False, "file": path.name}
     path.parent.mkdir(parents=True, exist_ok=True)

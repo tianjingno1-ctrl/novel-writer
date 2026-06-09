@@ -1,4 +1,4 @@
-"""自由聊天业务服务（有状态，依赖 app_state + main.FREE_CHAT_FILE）。"""
+"""自由聊天业务服务（有状态，依赖 app_state + app.paths.FREE_CHAT_FILE）。"""
 
 from __future__ import annotations
 
@@ -9,13 +9,12 @@ from datetime import datetime
 from pathlib import Path
 
 import config
+from app import paths as _paths
 from app_state import state
 
 
 def _free_chat_file() -> Path:
-    import main
-
-    return main.FREE_CHAT_FILE
+    return _paths.resolved("FREE_CHAT_FILE")
 
 
 def _trim_free_history() -> list[dict]:

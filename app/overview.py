@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 
 import novel_data
+from app import paths as _paths
 from core import stats as stats_core
 
 _stats_cache: dict | None = None
@@ -22,9 +23,9 @@ def cached_stats() -> dict:
         chapters = main.list_chapters()
         sig = stats_core.build_stats_sig(
             chapters,
-            summaries_file=main.SUMMARIES_FILE,
-            cost_log=main.COST_LOG,
-            cost_log_jsonl=main.COST_LOG_JSONL,
+            summaries_file=_paths.resolved("SUMMARIES_FILE"),
+            cost_log=_paths.resolved("COST_LOG"),
+            cost_log_jsonl=_paths.resolved("COST_LOG_JSONL"),
         )
         if _stats_cache is not None and _stats_sig == sig:
             return _stats_cache
@@ -57,7 +58,7 @@ def bookshelf_overview() -> dict:
         chapters=chapters,
         chapter_stats=stats.get("chapters", []),
         summaries_text=main.get_summaries_combined(),
-        world_text=main.read_text(main.WORLD_FILE),
+        world_text=main.read_text(_paths.resolved("WORLD_FILE")),
         current_chapter=current,
     )
     payload["library"] = book_context.list_books()
