@@ -287,43 +287,15 @@ def _set_context(book_id: str) -> BookContext:
 
 
 def apply_paths_to_modules() -> None:
-    """将当前 BookContext 路径同步到 main / novel_data 模块级变量。"""
+    """将当前 BookContext 路径同步到 app.paths / main / novel_data。"""
+    from app import paths as book_paths
+
     ctx = get_context()
-    import main
-    import novel_data
-
-    main.DATA_DIR = ctx.data_dir
-    main.CHAPTERS_DIR = ctx.chapters_dir
-    main.BACKUPS_DIR = ctx.backups_dir
-    main.CONTEXT_LOG_JSONL = ctx.context_log_jsonl
-    main.SESSION_FILE = ctx.session_file
-    main.SESSION_MD_FILE = ctx.session_md_file
-    main.FREE_CHAT_FILE = ctx.free_chat_file
-    main.WORLD_FILE = ctx.world_file
-    main.STYLE_FILE = ctx.style_file
-    main.CHARACTERS_FILE = ctx.characters_file
-    main.CHAR_CURRENT_FILE = ctx.char_current_file
-    main.CHAR_STATIC_FILE = ctx.char_static_file
-    main.CHAR_DYNAMIC_FILE = ctx.char_dynamic_file
-    main.SUMMARIES_FILE = ctx.summaries_file
-    main.SUMMARIES_ARCHIVE_FILE = ctx.summaries_archive_file
-    main.SUMMARIES_RECENT_FILE = ctx.summaries_recent_file
-    main.PLOT_THREADS_FILE = ctx.plot_threads_file
-    main.PLOT_THREADS_LOCKED_FILE = ctx.plot_threads_locked_file
-    main.PLOT_THREADS_ACTIVE_FILE = ctx.plot_threads_active_file
-    main.OUTLINE_LATEST_FILE = ctx.outline_latest_file
-    main.CHAT_PROMPTS_FILE = ctx.chat_prompts_file
-    main.ARCHIVE_FILE = ctx.archive_file
-    main.CODEX_FILES = ctx.codex_files_map()
-
-    novel_data.DATA_DIR = ctx.data_dir
-    novel_data.BACKUPS_DIR = ctx.backups_dir
-    novel_data.PLAN_FILE = ctx.plan_file
-    novel_data.PROJECT_FILE = ctx.project_file
-    novel_data.CODEX_DIR = ctx.codex_dir
-    novel_data.CODEX_ACTIVE_FILE = ctx.codex_active_file
+    book_paths.sync_from_context(ctx)
+    book_paths.mirror_to_main()
 
     import core.context as writing_context
+    import main
 
     writing_context.bind(
         writing_context.BookPaths.from_book_context(ctx),
