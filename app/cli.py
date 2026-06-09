@@ -11,7 +11,9 @@ import config
 from app import book_io as bio
 from app import chapter_io as ch
 from app import llm as _llm
+from app.cost import load_total_cost
 from app import paths as _paths
+from app import runtime as rt
 from app import writing_chat as _wchat
 from app import writing_ctx as _wctx
 from app import writing_session as ws
@@ -319,12 +321,10 @@ def remind_unsaved_on_exit() -> None:
 
 
 def graceful_exit(message: str = "再见！") -> None:
-    import main as m
-
-    if m._exiting:
+    if rt._exiting:
         return
-    m._exiting = True
-    m._heartbeat_stop.set()
+    rt._exiting = True
+    rt._heartbeat_stop.set()
     ws.save_session("exit", silent=True)
     remind_unsaved_on_exit()
     print(message)
@@ -338,11 +338,9 @@ def _handle_exit_signal(signum, frame) -> None:
 
 
 def _atexit_save() -> None:
-    import main as m
-
-    if m._exiting:
+    if rt._exiting:
         return
-    m._heartbeat_stop.set()
+    rt._heartbeat_stop.set()
     ws.save_session("atexit", silent=True)
     if state.conversation_history:
         remind_unsaved_on_exit()
@@ -393,17 +391,16 @@ def print_startup_banner() -> None:
 
 
 def main() -> None:
-    import main as m
     from app.bootstrap import bootstrap_library, init_data_dirs
 
     bootstrap_library()
     init_data_dirs()
     config.load_runtime_settings()
-    state.total_cost = m.load_total_cost()
+    state.total_cost = load_total_cost()
     setup_exit_handlers()
 
     print_startup_banner()
-    m.start_heartbeat_thread()
+    rt.start_heartbeat_thread()
 
     while True:
         try:
