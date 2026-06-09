@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 import novel_data
+from app import paths as _paths
 from app_state import state
 
 
@@ -12,7 +13,7 @@ def _maint_file_has_user_content(file_key: str) -> bool:
     """章后维护文件是否已有用户填写（非空模板）。"""
     import main
 
-    path = main.CODEX_FILES.get(file_key)
+    path = _paths.resolved_codex_files().get(file_key)
     if not path:
         return False
     text = main.read_text(path).strip()
@@ -69,7 +70,7 @@ def get_guide_status() -> dict:
     )
 
     def _file_ready(key: str) -> bool:
-        path = main.CODEX_FILES.get(key)
+        path = _paths.resolved_codex_files().get(key)
         if not path:
             return False
         text = main.read_text(path).strip()
@@ -115,7 +116,7 @@ def get_guide_status() -> dict:
     char_dynamic_last = _effective_maint_chapter("char_dynamic")
     plot_threads_last = _effective_maint_chapter("plot_threads_active")
 
-    recent_raw = main.read_text(main.SUMMARIES_RECENT_FILE)
+    recent_raw = main.read_text(_paths.resolved("SUMMARIES_RECENT_FILE"))
     summaries_recent_count = len(re.findall(r"【第\d+章", recent_raw))
 
     combined_summaries = main.get_summaries_combined()

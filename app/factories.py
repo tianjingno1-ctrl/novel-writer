@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from app import paths as _paths
 from core.book_store import BookPathsView, BookStore
 from core.deps import GeneratorDeps, LlmHooks, MaintainDeps, QualityHooks, ReviewerDeps
 from summarizer import WRITING_INSTRUCTION
@@ -71,24 +72,22 @@ def resolve_chapter_num(chapter_num: int | None) -> tuple[int, str] | dict:
 
 def book_paths_view() -> BookPathsView:
     """当前书路径视图（与 apply_paths_to_modules 同步；测试可 patch main.*_FILE）。"""
-    import main
-
     return BookPathsView(
-        data_dir=main.DATA_DIR,
-        chapters_dir=main.CHAPTERS_DIR,
-        summaries_recent_file=main.SUMMARIES_RECENT_FILE,
-        summaries_archive_file=main.SUMMARIES_ARCHIVE_FILE,
-        summaries_file=main.SUMMARIES_FILE,
-        char_static_file=main.CHAR_STATIC_FILE,
-        char_dynamic_file=main.CHAR_DYNAMIC_FILE,
-        plot_threads_locked_file=main.PLOT_THREADS_LOCKED_FILE,
-        plot_threads_active_file=main.PLOT_THREADS_ACTIVE_FILE,
-        plot_threads_file=main.PLOT_THREADS_FILE,
-        world_file=main.WORLD_FILE,
-        style_file=main.STYLE_FILE,
-        characters_file=main.CHARACTERS_FILE,
-        char_current_file=main.CHAR_CURRENT_FILE,
-        outline_latest_file=main.OUTLINE_LATEST_FILE,
+        data_dir=_paths.resolved("DATA_DIR"),
+        chapters_dir=_paths.resolved("CHAPTERS_DIR"),
+        summaries_recent_file=_paths.resolved("SUMMARIES_RECENT_FILE"),
+        summaries_archive_file=_paths.resolved("SUMMARIES_ARCHIVE_FILE"),
+        summaries_file=_paths.resolved("SUMMARIES_FILE"),
+        char_static_file=_paths.resolved("CHAR_STATIC_FILE"),
+        char_dynamic_file=_paths.resolved("CHAR_DYNAMIC_FILE"),
+        plot_threads_locked_file=_paths.resolved("PLOT_THREADS_LOCKED_FILE"),
+        plot_threads_active_file=_paths.resolved("PLOT_THREADS_ACTIVE_FILE"),
+        plot_threads_file=_paths.resolved("PLOT_THREADS_FILE"),
+        world_file=_paths.resolved("WORLD_FILE"),
+        style_file=_paths.resolved("STYLE_FILE"),
+        characters_file=_paths.resolved("CHARACTERS_FILE"),
+        char_current_file=_paths.resolved("CHAR_CURRENT_FILE"),
+        outline_latest_file=_paths.resolved("OUTLINE_LATEST_FILE"),
     )
 
 

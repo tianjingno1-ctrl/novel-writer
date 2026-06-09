@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.bootstrap import get_app_context
+from app import paths as _paths
 from core.orchestration import outline as orchestration_outline
 from core.orchestration import review as orchestration_review
 from core.orchestration.finalize import FinalizeHooks
@@ -31,7 +32,9 @@ def build_finalize_hooks() -> FinalizeHooks:
         load_check_snapshot=lambda num, body: ctx.store.load_snapshot(
             num, for_purpose="check", chapter_body=body
         ),
-        read_summaries_recent=lambda: main.read_text(main.SUMMARIES_RECENT_FILE),
+        read_summaries_recent=lambda: main.read_text(
+            _paths.resolved("SUMMARIES_RECENT_FILE")
+        ),
         run_pacing_check=lambda: orchestration_review.run_pacing_check(ctx),
         run_outline=lambda: orchestration_outline.run_outline(ctx, next_count=3),
         quality_log_entry=ctx.quality_log_entry,

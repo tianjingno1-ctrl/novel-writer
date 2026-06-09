@@ -2,23 +2,25 @@
 
 from __future__ import annotations
 
+from app import paths as _paths
+
+
+def _codex_files() -> dict:
+    return _paths.resolved_codex_files()
+
 
 def valid_codex_names() -> frozenset[str]:
-    import main
-
-    return frozenset(main.CODEX_FILES.keys())
+    return frozenset(_codex_files().keys())
 
 
 def codex_file_names() -> list[str]:
-    import main
-
-    return list(main.CODEX_FILES.keys())
+    return list(_codex_files().keys())
 
 
 def get_codex(name: str) -> dict | None:
     import main
 
-    path = main.CODEX_FILES.get(name)
+    path = _codex_files().get(name)
     if path is None:
         return None
     return {"name": name, "content": main.read_text(path)}
@@ -27,7 +29,7 @@ def get_codex(name: str) -> dict | None:
 def save_codex(name: str, content: str, chapter_num: int | None = None) -> dict:
     import main
 
-    path = main.CODEX_FILES.get(name)
+    path = _codex_files().get(name)
     if path is None:
         return {"ok": False, "error": f"未知设定文件: {name}"}
     ch = (

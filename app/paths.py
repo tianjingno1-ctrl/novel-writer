@@ -62,6 +62,19 @@ def resolved(name: str) -> Path:
     return local
 
 
+def resolved_codex_files() -> dict[str, Path]:
+    """CODEX_FILES；若测试 patch 了 main.CODEX_FILES 引用，优先 main。"""
+    import main
+
+    local = CODEX_FILES
+    main_val = main.CODEX_FILES
+    if local is None:
+        return main_val
+    if main_val is not local:
+        return main_val
+    return local
+
+
 def init_defaults() -> None:
     """启动时从 main 读取 BASE_DIR / COST_LOG（切书不变的路径）。"""
     global BASE_DIR, COST_LOG, COST_LOG_JSONL, _fixed_initialized
