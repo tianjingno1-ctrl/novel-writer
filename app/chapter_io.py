@@ -7,6 +7,7 @@ from pathlib import Path
 
 import novel_data
 from app import paths as _paths
+from app import book_io as bio
 from app.chapter_titles import refresh_chapter_file_header
 from app.factories import apply_chapter_title
 from app_state import state
@@ -36,10 +37,8 @@ def resolve_write_chapter_num(
 
 
 def read_chapter_content(chapter_num: int) -> str:
-    import main as m
-
     path = get_chapter_path(chapter_num)
-    return m.read_text(path) if path.exists() else ""
+    return bio.read_text(path) if path.exists() else ""
 
 
 def ensure_chapter_path(chapter_num: int) -> Path:
@@ -102,18 +101,16 @@ def replace_chapter_content(
     msg_index: int | None = None,
 ) -> tuple[int, str | None]:
     """用 AI 回复覆盖整章正文（非追加）。返回 (正文字数, 标题)。"""
-    import main as m
-
     title, body = prepare_chapter_body_from_reply(text, chapter_num)
     if not body.strip():
         return 0, title
     formatted = format_chapter_file(chapter_num, body, title=title)
     state.last_append_undo = {
         "path": str(chapter_path),
-        "content": m.read_text(chapter_path),
+        "content": bio.read_text(chapter_path),
         "msg_index": msg_index,
     }
-    m.write_text(chapter_path, formatted, append=False)
+    bio.write_text(chapter_path, formatted, append=False)
     return len(body), title
 
 
@@ -125,8 +122,6 @@ def append_to_chapter(
     chapter_num: int | None = None,
 ) -> tuple[int, str | None]:
     """将正文追加到章节文件。返回 (正文字数, 标题)。"""
-    import main as m
-
     if chapter_num is None:
         m_match = re.match(r"ch(\d+)\.md$", chapter_path.name, re.IGNORECASE)
         chapter_num = int(m_match.group(1)) if m_match else 0
@@ -137,7 +132,7 @@ def append_to_chapter(
     content = body.strip()
     if not content:
         return 0, title
-    existing = m.read_text(chapter_path)
+    existing = bio.read_text(chapter_path)
     state.last_append_undo = {
         "path": str(chapter_path),
         "content": existing,
@@ -145,11 +140,11 @@ def append_to_chapter(
     }
     if not existing.strip() and chapter_num > 0:
         formatted = format_chapter_file(chapter_num, content, title=title)
-        m.write_text(chapter_path, formatted, append=False)
+        bio.write_text(chapter_path, formatted, append=False)
         return len(content), title
     if chapter_num > 0 and title:
         refresh_chapter_file_header(chapter_num, title)
-    m.write_text(chapter_path, f"\n\n{content}\n", append=True)
+    bio.write_text(chapter_path, f"\n\n{content}\n", append=True)
     return len(content), title
 
 
@@ -190,12 +185,10 @@ def flush_chapter_writes(*, silent: bool = False) -> int:
 
 def sync_appended_indices_with_chapter() -> None:
     """若章节中已含某条助手正文，则标记为已写入，避免 /restore 后重复追加。"""
-    import main as m
-
     if not state.conversation_history:
         return
     _, chapter_path = get_or_create_write_chapter()
-    body = m.read_text(chapter_path)
+    body = bio.read_text(chapter_path)
     if not body.strip():
         return
     for i, msg in enumerate(state.conversation_history):

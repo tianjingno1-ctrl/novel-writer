@@ -18,16 +18,17 @@ def codex_file_names() -> list[str]:
 
 
 def get_codex(name: str) -> dict | None:
-    import main
+    from app import book_io as bio
 
     path = _codex_files().get(name)
     if path is None:
         return None
-    return {"name": name, "content": main.read_text(path)}
+    return {"name": name, "content": bio.read_text(path)}
 
 
 def save_codex(name: str, content: str, chapter_num: int | None = None) -> dict:
-    import main
+    from app import book_io as bio
+    from app import writing_session as ws
 
     path = _codex_files().get(name)
     if path is None:
@@ -35,9 +36,9 @@ def save_codex(name: str, content: str, chapter_num: int | None = None) -> dict:
     ch = (
         chapter_num
         if chapter_num and chapter_num > 0
-        else main._session_chapter_num()
+        else ws._session_chapter_num()
     )
-    changed = main.write_text(
+    changed = bio.write_text(
         path, content, append=False, history_source="codex", chapter_num=ch
     )
     return {"ok": True, "name": name, "changed": changed}

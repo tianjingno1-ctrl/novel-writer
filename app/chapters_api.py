@@ -27,20 +27,21 @@ def list_chapters() -> list[tuple[int, Path]]:
 
 
 def get_chapter_by_num(num: int) -> dict | None:
-    import main
+    from app import book_io as bio
 
     path = _chapters_dir() / f"ch{num:03d}.md"
     if not path.exists():
         return None
-    return {"num": num, "path": str(path.name), "content": main.read_text(path)}
+    return {"num": num, "path": str(path.name), "content": bio.read_text(path)}
 
 
 def save_chapter_by_num(num: int, content: str) -> dict:
     import main
+    from app import book_io as bio
 
     path = _chapters_dir() / f"ch{num:03d}.md"
     content = main.sanitize_chapter_text(content)
-    changed = main.write_text(path, content, append=False, chapter_num=num)
+    changed = bio.write_text(path, content, append=False, chapter_num=num)
     invalidate_chapter_injection(num)
     chapter_title = main.sync_chapter_title_from_file(num)
     return {"ok": True, "num": num, "chapter_title": chapter_title, "changed": changed}

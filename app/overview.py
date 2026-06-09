@@ -18,6 +18,7 @@ def cached_stats() -> dict:
     global _stats_cache, _stats_sig
 
     import main
+    from app import book_io as bio
 
     with _stats_lock:
         chapters = main.list_chapters()
@@ -31,7 +32,7 @@ def cached_stats() -> dict:
             return _stats_cache
         result = stats_core.compute_stats(
             chapters,
-            read_text=main.read_text,
+            read_text=bio.read_text,
             count_summaries=main.count_summaries,
             get_total_cost=main.get_total_cost,
         )
@@ -44,11 +45,12 @@ def bookshelf_overview() -> dict:
     """GET /api/overview。"""
     import book_context
     import main
+    from app import book_io as bio
 
     chapters = main.list_chapters()
     stats = stats_core.compute_stats(
         chapters,
-        read_text=main.read_text,
+        read_text=bio.read_text,
         count_summaries=main.count_summaries,
         get_total_cost=main.get_total_cost,
     )
@@ -58,7 +60,7 @@ def bookshelf_overview() -> dict:
         chapters=chapters,
         chapter_stats=stats.get("chapters", []),
         summaries_text=main.get_summaries_combined(),
-        world_text=main.read_text(_paths.resolved("WORLD_FILE")),
+        world_text=bio.read_text(_paths.resolved("WORLD_FILE")),
         current_chapter=current,
     )
     payload["library"] = book_context.list_books()

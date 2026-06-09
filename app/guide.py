@@ -12,11 +12,12 @@ from app_state import state
 def _maint_file_has_user_content(file_key: str) -> bool:
     """章后维护文件是否已有用户填写（非空模板）。"""
     import main
+    from app import book_io as bio
 
     path = _paths.resolved_codex_files().get(file_key)
     if not path:
         return False
-    text = main.read_text(path).strip()
+    text = bio.read_text(path).strip()
     if len(text) < 30:
         return False
     placeholder = (main.INITIAL_FILE_TEMPLATES.get(file_key) or "").strip()
@@ -60,6 +61,7 @@ def get_guide_status() -> dict:
     """写作引导：地基文件、规划、章后待办等状态（供 /api/guide/status）。"""
     import change_history
     import main
+    from app import book_io as bio
 
     track_keys = (
         "world",
@@ -73,7 +75,7 @@ def get_guide_status() -> dict:
         path = _paths.resolved_codex_files().get(key)
         if not path:
             return False
-        text = main.read_text(path).strip()
+        text = bio.read_text(path).strip()
         if len(text) < 20:
             return False
         placeholder = (main.INITIAL_FILE_TEMPLATES.get(key) or "").strip()
@@ -116,7 +118,7 @@ def get_guide_status() -> dict:
     char_dynamic_last = _effective_maint_chapter("char_dynamic")
     plot_threads_last = _effective_maint_chapter("plot_threads_active")
 
-    recent_raw = main.read_text(_paths.resolved("SUMMARIES_RECENT_FILE"))
+    recent_raw = bio.read_text(_paths.resolved("SUMMARIES_RECENT_FILE"))
     summaries_recent_count = len(re.findall(r"【第\d+章", recent_raw))
 
     combined_summaries = main.get_summaries_combined()

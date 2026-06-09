@@ -98,6 +98,7 @@ def book_paths_view() -> BookPathsView:
 def book_store() -> BookStore:
     """当前书存储入口（路径由 main 全局注入 BookStore，core 不 import main）。"""
     import book_context
+    from app import book_io as bio
     import main
 
     try:
@@ -106,8 +107,8 @@ def book_store() -> BookStore:
         ctx = None
     return BookStore(
         book_paths_view(),
-        read_text=main.read_text,
-        write_text=main.write_text,
+        read_text=bio.read_text,
+        write_text=bio.write_text,
         session_chapter_num=main._session_chapter_num,
         book_context=ctx,
     )

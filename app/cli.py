@@ -9,6 +9,7 @@ from datetime import datetime
 
 import config
 from app import chapter_io as ch
+from app import book_io as bio
 from app import paths as _paths
 from app import writing_session as ws
 from app import writing_turns as wt
@@ -115,14 +116,14 @@ def do_summary() -> None:
         return
 
     append_text = f"\n{reply.strip()}\n"
-    m.write_text(
+    bio.write_text(
         _paths.resolved("SUMMARIES_RECENT_FILE"),
         append_text,
         append=True,
         history_source="summary",
         chapter_num=chapter_num,
     )
-    m.write_text(
+    bio.write_text(
         _paths.resolved("SUMMARIES_FILE"),
         append_text,
         append=True,
@@ -143,8 +144,8 @@ def do_check() -> None:
         return
 
     chapter_num, _, chapter_content = latest
-    world = m.read_text(_paths.resolved("WORLD_FILE"))
-    characters = m.read_text(_paths.resolved("CHARACTERS_FILE"))
+    world = bio.read_text(_paths.resolved("WORLD_FILE"))
+    characters = bio.read_text(_paths.resolved("CHARACTERS_FILE"))
     pid = config.CHECK_PROVIDER
     system = m.build_cached_system(CHECK_SYSTEM, provider=pid)
     messages = [
@@ -182,7 +183,7 @@ def do_outline(next_count: int = 3) -> None:
         {
             "role": "user",
             "content": build_outline_user_message(
-                m.read_text(_paths.resolved("WORLD_FILE")),
+                bio.read_text(_paths.resolved("WORLD_FILE")),
                 m.get_char_context_for_check(),
                 m.get_summaries_combined(),
                 m._read_plot_active(),
@@ -203,10 +204,10 @@ def do_patch(content: str) -> None:
         return
 
     chars_file = _paths.resolved("CHARACTERS_FILE")
-    draft_num = len(re.findall(r"【设定补充-第\d+稿", m.read_text(chars_file))) + 1
+    draft_num = len(re.findall(r"【设定补充-第\d+稿", bio.read_text(chars_file))) + 1
     date_str = datetime.now().strftime("%Y-%m-%d")
     entry = f"\n【设定补充-第{draft_num}稿-{date_str}】：{content.strip()}\n"
-    m.write_text(chars_file, entry, append=True)
+    bio.write_text(chars_file, entry, append=True)
     print(f"已追加到 characters.md（第{draft_num}稿）")
 
 

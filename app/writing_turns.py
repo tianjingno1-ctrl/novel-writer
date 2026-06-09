@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from app import paths as _paths
+from app import book_io as bio
 from app import chapter_io as ch
 from app.factories import invalidate_chapter_injection
 from app_state import state
@@ -22,13 +23,11 @@ def _clear_assistant_appended_indices() -> None:
 
 
 def undo_last_chapter_append() -> dict:
-    import main
-
     if state.last_append_undo is None:
         return {"ok": False, "error": "没有可撤销的章节写入"}
     undo = state.last_append_undo
     path = Path(undo["path"])
-    main.write_text(path, undo["content"], append=False, history_source="undo")
+    bio.write_text(path, undo["content"], append=False, history_source="undo")
     msg_index = undo.get("msg_index")
     if msg_index is not None:
         state.appended_indices.discard(msg_index)
@@ -41,7 +40,6 @@ def undo_last_chapter_append() -> dict:
 
 def apply_assistant_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     """用某条 AI 回复**替换**整章正文（非追加）。"""
-    import main
     from app import writing_session as ws
 
     path = _chapter_path(chapter_num)
@@ -61,7 +59,7 @@ def apply_assistant_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     if not body.strip():
         return {"ok": False, "error": "该条没有可用正文"}
     formatted = ch.format_chapter_file(chapter_num, body, title=title)
-    main.write_text(path, formatted, append=False)
+    bio.write_text(path, formatted, append=False)
     state.last_append_undo = None
     _clear_assistant_appended_indices()
     state.appended_indices.add(msg_index)
@@ -96,7 +94,7 @@ def apply_user_draft_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
         return {"ok": False, "error": "该轮指令里没有附带章节正文（仅首轮带全文时可用）"}
 
     formatted = ch.format_chapter_file(chapter_num, body)
-    main.write_text(path, formatted, append=False)
+    bio.write_text(path, formatted, append=False)
     state.last_append_undo = None
     _clear_assistant_appended_indices()
     invalidate_chapter_injection(chapter_num)

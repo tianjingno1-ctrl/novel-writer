@@ -20,6 +20,7 @@ def _ensure_context():
 
 def build_finalize_hooks() -> FinalizeHooks:
     import main
+    from app import book_io as bio
 
     ctx = _ensure_context()
     rd = ctx.reviewer_deps
@@ -32,7 +33,7 @@ def build_finalize_hooks() -> FinalizeHooks:
         load_check_snapshot=lambda num, body: ctx.store.load_snapshot(
             num, for_purpose="check", chapter_body=body
         ),
-        read_summaries_recent=lambda: main.read_text(
+        read_summaries_recent=lambda: bio.read_text(
             _paths.resolved("SUMMARIES_RECENT_FILE")
         ),
         run_pacing_check=lambda: orchestration_review.run_pacing_check(ctx),

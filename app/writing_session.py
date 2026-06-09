@@ -9,6 +9,7 @@ from datetime import datetime
 
 import file_utils
 from app import chapter_io as chapter_io
+from app import book_io as bio
 from app import paths as _paths
 from app_state import state
 
@@ -122,8 +123,6 @@ def has_pending_session() -> bool:
 
 def restore_chat_session() -> dict:
     """从 session_autosave.json 恢复写书对话到内存。"""
-    import main
-
     data = load_session_from_disk()
     history = _session_history(data) if data else None
     if not data or not history:
@@ -195,8 +194,6 @@ def load_chat_prompts() -> dict:
 
 
 def save_chat_prompts(prompts: list[dict]) -> dict:
-    import main
-
     cleaned: list[dict] = []
     seen: set[str] = set()
     for item in prompts:
@@ -217,7 +214,7 @@ def save_chat_prompts(prompts: list[dict]) -> dict:
             title = (line[:80] + "…") if len(line) > 80 else (line or "指令")
         cleaned.append({"id": pid, "title": title, "content": content})
     payload = {"prompts": cleaned}
-    main.write_text(
+    bio.write_text(
         _paths.resolved("CHAT_PROMPTS_FILE"),
         json.dumps(payload, ensure_ascii=False, indent=2),
         append=False,
