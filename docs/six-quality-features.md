@@ -36,7 +36,7 @@
 | 模块 | 路径 |
 |------|------|
 | Prompt | `summarizer.py`, `docs/review-prompts/` |
-| 审阅/采纳 | `main.py` → `api_run_female_fiction_review`, `api_accept_female_fiction_rewrite` |
+| 审阅/采纳 | `api/routes/female_fiction.py` → `core/orchestration/female_fiction` |
 | 批量生成 | `batch_generate.py` |
 | 世界批次 | `batch_world.py`, `batch_remediate.py` |
 | 路由 | `web_app.py` |

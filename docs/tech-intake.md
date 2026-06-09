@@ -26,8 +26,10 @@
 
 ```
 novel_writer/
-├── main.py              # 核心业务（CLI + 被 web 引用）
-├── web_app.py           # FastAPI + REST/SSE
+├── main.py              # 路径锚点 + CLI 入口（业务在 app/）
+├── web_app.py           # FastAPI + REST/SSE（零 import main）
+├── app/                 # bootstrap、llm、writing_*、cli、runtime、paths …
+├── api/routes/          # HTTP 路由（零 import main）
 ├── config.py            # 提供商、上下文策略、.env
 ├── providers.py         # 统一 LLM 调用
 ├── novel_data.py        # plan.json、Codex
@@ -112,9 +114,9 @@ novel_writer/
 | 人物总表 | `data/characters.md` |
 | 兼容占位 | `char_current.md`、`plot_threads.md`、`summaries.md`（续写不直接读；见拆分文件） |
 
-- 读取：`main.read_text()`、`main.CODEX_FILES` 映射；组装见 `get_characters_block()` / `get_stable_archive_block()` / `get_dynamic_context_block()`
+- 读取：`app.book_io.read_text()`、`app.paths.resolved_codex_files()`；组装见 `app.writing_ctx`（`get_characters_block` / `get_stable_archive_block` / `get_dynamic_context_block`）
 - Web：`GET/PUT /api/codex/{name}`（`name` 含 `char_static`、`char_dynamic`、`summaries_archive`、`summaries_recent`、`plot_threads_locked`、`plot_threads_active` 及兼容项）
-- 首次运行：`main.init_data_dirs()` + `INITIAL_FILES` 模板
+- 首次运行：`app.bootstrap.init_data_dirs()` + `app.bootstrap_data.INITIAL_FILE_TEMPLATES`
 - **章后维护习惯**：改 `char_dynamic` + `plot_threads_active` → 生成概述 → 旧概述剪切进 `summaries_archive`
 
 ### 12. 对话历史存在哪里？格式是什么？
@@ -205,7 +207,7 @@ _prepare_writing_turn()
 ### 18. Prompt Cache 怎么实现？
 
 - **仅 kie/Claude**（`config.supports_prompt_cache()`）
-- `main.cache_block()` → Anthropic `cache_control: {type: ephemeral, ttl: 1h}`
+- `app.llm.build_cached_system()` → Anthropic `cache_control: {type: ephemeral, ttl: 1h}`
 - DeepSeek：system 合并为纯文本，无 cache
 - 可选心跳：50 分钟无 API 且仍在写作时刷新 cache（`HEARTBEAT_*`）
 
@@ -336,7 +338,7 @@ Prompt 目录：`docs/review-prompts/`（如 `world-tomato.md`，`mode: rewrite-
 ### 31. 调用 AI 的核心
 
 - `providers.APIClient.create_message()` / `iter_message()`
-- 封装：`main.call_api()`、`main.writing_chat_stream()`
+- 封装：`app.llm.call_api()`、`app.writing_chat.writing_chat_stream()`
 - kie：Anthropic SDK + 自定义 UA/Bearer；DeepSeek：OpenAI SDK
 
 ### 32. 上下文组装的核心
@@ -347,7 +349,7 @@ Prompt 目录：`docs/review-prompts/`（如 `world-tomato.md`，`mode: rewrite-
 
 ### 33. 数据读写的核心
 
-- `main.read_text()` / `write_text()`（带 backup）
+- `app.book_io.read_text()` / `write_text()`（带 backup）
 - `file_utils.atomic_write_text()`
 - `novel_data.load_plan()` / `_mutate_plan()`
 - `read_chapter_content()` → `data/chapters/ch{num:03d}.md`
@@ -355,12 +357,12 @@ Prompt 目录：`docs/review-prompts/`（如 `world-tomato.md`，`mode: rewrite-
 ### 34. 中间件
 
 - `web_app.web_auth_middleware`：本地 IP 或 `X-Novel-Token`
-- `main._request_lock`：LLM 请求串行化
+- `app.llm._request_lock`：LLM 请求串行化
 
 ### 35. 错误处理
 
 - `providers.APIError`（auth / rate_limit / timeout / network）
-- `main._api_error_message()` 中文提示
+- `app.llm._api_error_message()` 中文提示
 - SSE `{type: "error"}`；流式断连可 fallback 非流式
 
 ---
@@ -372,7 +374,7 @@ Prompt 目录：`docs/review-prompts/`（如 `world-tomato.md`，`mode: rewrite-
 | 35 | 模块：`main`、`web_app`、`novel_data`、`providers`、`config`、`summarizer`、`app_state` |
 | 36 | 配置：`.env`、`config.py`、`data/runtime.json`、`prices.json` |
 | 37 | 日志：`cost_log.jsonl`、`data/context_log.jsonl`（`NOVEL_CONTEXT_LOG=0` 可关） |
-| 38 | FastAPI REST + SSE；静态 `web/`；业务在 `main.py` 可被 CLI 直接调用 |
+| 38 | FastAPI REST + SSE；业务在 `app/*` + `core/orchestration/`；`main.py` 仅路径锚点与测试契约 |
 | 39 | **不支持多用户**；`app_state` 单例（含 `last_call_info`、`last_context_debug`）；多用户需按 session 隔离（未实现） |
 
 ---
@@ -419,7 +421,7 @@ POST /api/observe/apply → 追加写入 char_static / char_dynamic
 | 项 | 位置 |
 |----|------|
 | Prompt | `summarizer.OBSERVE_SYSTEM`, `build_observe_user_message`, `parse_observe_proposals` |
-| 业务 | `main.api_run_observe`, `main.api_apply_observe` |
+| 业务 | `core/orchestration` + `BookStore.apply_observe` |
 | UI | 写书对话 **「角色观察」** 按钮；`observeModal` 弹窗 |
 
 章 **append 写入成功** 后会 confirm 是否立即生成提案（不自动写档案）。
@@ -452,7 +454,7 @@ data/history/
 
 ### 45. 写入路径
 
-- 所有 `main.write_text()` 对追踪文件 → `change_history.save_with_history()`
+- 所有 `app.book_io.write_text()` 对追踪文件 → `change_history.save_with_history()`
 - `novel_data._save_json(plan.json)` 同理
 - `source` 标记：`codex` | `summary` | `observe` | `detail_extract` | `plan` | `revert` | `write`
 
@@ -468,7 +470,7 @@ data/history/
 
 ### 47. 代码
 
-`change_history.py` · `main._register_change_history()` · `init_data_dirs()` 内 `ensure_baseline_snapshot()`
+`change_history.py` · `app.cost._register_change_history()` · `init_data_dirs()` 内 `ensure_baseline_snapshot()`
 
 ---
 
@@ -480,7 +482,7 @@ data/history/
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| GET | `/api/guide/status` | `main.get_guide_status()`：stage、files 就绪、plan 场景数、章后 todos |
+| GET | `/api/guide/status` | `app.guide.get_guide_status()`：stage、files 就绪、plan 场景数、章后 todos |
 
 `stage`：`setup` → `planning` → `first_chapter` → `writing`。  
 `post_chapter_todos`：`summary` / `char_dynamic` / `plot_threads` / `*_never` / `archive`（近期概述 ≥5 条）。
@@ -515,17 +517,17 @@ data/history/
 
 | 主题 | 文件 | 符号 |
 |------|------|------|
-| 上下文组装 | `main.py` | `build_cached_system`, `_prepare_writing_turn`, `_record_context_debug` |
-| 调试 | `main.py` / `web_app.py` | `get_last_context_debug`, `GET /api/debug/last_context`, `_build_last_call_info` |
+| 上下文组装 | `app/llm.py`, `app/writing_ctx.py` | `build_cached_system`, `_prepare_writing_turn`, `_record_context_debug` |
+| 调试 | `app/writing_ctx.py` / `api/routes/meta.py` | `get_last_context_debug`, `GET /api/debug/last_context`, `app.cost._build_last_call_info` |
 | Plan / Codex | `novel_data.py` | `add_scene`, `get_scene_context_text` |
 | LLM 调用 | `providers.py` | `APIClient.create_message`, `iter_message` |
 | Prompt 模板 | `summarizer.py` | `WRITING_INSTRUCTION`, `CHECK_SYSTEM`, `CHARACTER_DRIFT_SYSTEM` |
 | Web API | `web_app.py` | `/api/chat/stream`, `/api/codex/{name}` |
 | 质量检查 | `web_app.py` | `/api/check/character-drift`, `/api/extract/details`, `/api/check/repetition`, `/api/check/pacing` |
-| 角色观察 | `main.api_run_observe`, `POST /api/observe`（`auto_apply` 默认 true） | 自动追加 char_*；日志 `quality_log` |
+| 角色观察 | `core/orchestration` + `POST /api/observe`（`auto_apply` 默认 true） | 自动追加 char_*；日志 `quality_log` |
 | 质量记录 | `quality_log.py` | `GET /api/quality/log`, `GET /api/quality/log/{id}` |
 | 档案留痕 | `change_history.py` | `GET /api/history`, `POST /api/history/revert` |
-| 写作引导 | `main.get_guide_status` | `GET /api/guide/status` |
+| 写作引导 | `app.guide.get_guide_status` | `GET /api/guide/status` |
 | 配置 | `config.py` | `CONTEXT_MODE`, `PROVIDERS`, `CHAT_CONTEXT_TURNS` |
 
 ---

@@ -29,11 +29,21 @@ os.environ.setdefault("NOVEL_MAINTAIN_PROVIDER", "deepseek")
 os.environ.setdefault("NOVEL_OUTLINE_PROVIDER", "deepseek")
 
 import config
-import main
 import quality_log
+from app import llm
+from app import paths as _paths
+from app.bootstrap import bootstrap_library, init_data_dirs
+from app.chapters_api import list_chapters
 
-FLOW_LOG = main.DATA_DIR / "closure_flow_log.jsonl"
 DEBUG_LOG = ROOT / "debug-d92d85.log"
+
+
+def _data_dir() -> Path:
+    return _paths.resolved("DATA_DIR")
+
+
+def _flow_log_path() -> Path:
+    return _data_dir() / "closure_flow_log.jsonl"
 
 
 def _sep(title: str) -> None:
@@ -49,13 +59,17 @@ def _flow_log(step: str, ok: bool, detail: dict | None = None) -> None:
         "ok": ok,
         "detail": detail or {},
     }
-    FLOW_LOG.parent.mkdir(parents=True, exist_ok=True)
-    with open(FLOW_LOG, "a", encoding="utf-8") as f:
+    path = _flow_log_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
 def main_flow() -> int:
-    quality_log.init_quality_log(main.DATA_DIR)
+    bootstrap_library()
+    init_data_dirs()
+    data_dir = _data_dir()
+    quality_log.init_quality_log(data_dir)
     _sep("0. 配置检查")
     for pid in (
         config.OUTLINE_PROVIDER,
@@ -70,7 +84,7 @@ def main_flow() -> int:
             print(f"ERROR: 必需 Key 未配置: {pid}")
             return 1
 
-    chapters = main.list_chapters()
+    chapters = list_chapters()
     _sep(f"1. 写作前提 · 已有 {len(chapters)} 章")
     if not chapters:
         print("ERROR: data/chapters/ 无正文，请先在 Web 写作模式或写书对话生成章节")
@@ -170,7 +184,7 @@ def main_flow() -> int:
         print(preview)
     except UnicodeEncodeError:
         print(preview.encode("utf-8", errors="replace").decode("utf-8"))
-    out = main.DATA_DIR / "test_closure_report.md"
+    out = data_dir / "test_closure_report.md"
     out.write_text(report, encoding="utf-8")
     print(f"\n完整报告: {out}")
     _flow_log(
@@ -199,7 +213,7 @@ def main_flow() -> int:
         print("⚠️ 部分完成，见 warnings/errors 与 debug-d92d85.log")
         return 2
     print("✅ 全流程完成")
-    print(f"流程日志: {FLOW_LOG}")
+    print(f"流程日志: {_flow_log_path()}")
     print(f"调试日志: {DEBUG_LOG}")
     return 0
 

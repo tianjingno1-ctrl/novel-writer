@@ -16,9 +16,10 @@ os.environ.setdefault("NOVEL_CHECK_PROVIDER", "deepseek")
 os.environ.setdefault("NOVEL_QUALITY_PROVIDER", "deepseek")
 
 import config
-import main
 import quality_log
-from app.bootstrap import init_context
+from app import llm
+from app import paths as _paths
+from app.bootstrap import bootstrap_library, init_context, init_data_dirs
 from core.orchestration import batch as orchestration_batch
 
 
@@ -29,7 +30,9 @@ def _sep(title: str) -> None:
 
 
 def main_flow() -> int:
-    quality_log.init_quality_log(main.DATA_DIR)
+    bootstrap_library()
+    init_data_dirs()
+    quality_log.init_quality_log(_paths.resolved("DATA_DIR"))
     pid = config.CHECK_PROVIDER
     _sep(f"1. 配置 · provider={pid} ({config.get_provider_config(pid)['model']})")
     if not config.is_api_key_configured(pid):
@@ -94,7 +97,7 @@ def main_flow() -> int:
         for e in result["errors"]:
             print(f"  - {e}")
 
-    last = main.get_last_call_info()
+    last = llm.get_last_call_info()
     print(f"last_call: provider={last.get('provider')} cost={last.get('cost')}")
 
     _sep("5. 审阅报告（前 2000 字）")

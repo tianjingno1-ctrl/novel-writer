@@ -23,7 +23,7 @@ _PREVIEW_HEAD_CHARS = 520
 
 
 def estimate_tokens(text: str) -> int:
-    """粗估 token（与 main._estimate_tokens 一致：中文为主约 1.6 字/token）。"""
+    """粗估 token（与 app.llm._estimate_tokens 一致：中文为主约 1.6 字/token）。"""
     if not text:
         return 0
     body = text or ""

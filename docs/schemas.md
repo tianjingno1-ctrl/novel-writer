@@ -61,7 +61,7 @@
 ```
 
 - 回复正文 fence 前可有 Markdown 摘要
-- 写盘：`main.api_apply_observe`（后续迁 BookStore）
+- 写盘：`BookStore.apply_observe`（`core/orchestration` + `app/hooks`）
 
 ### quality-bundle-json → `QualityPayload`
 
@@ -114,14 +114,14 @@
 
 | 标记 | 位置 | 用途 |
 |------|------|------|
-| `---DRAFT---` / `---REPLY---` / `---EXTRACT---` / `---END---` | `main.py` workshop | 规划对话：自然语言 + JSON extract |
+| `---DRAFT---` / `---REPLY---` / `---EXTRACT---` / `---END---` | `core/orchestration/workshop` | 规划对话：自然语言 + JSON extract |
 | ` ```json `（通用回退） | 多数 parser | 所有 parse_* 在专用 fence 失败时会尝试 |
 
 ---
 
 ## Workshop EXTRACT JSON（无专用 fence 名）
 
-`main.parse_workshop_response` 解析 EXTRACT 段：
+`core/orchestration/workshop` 解析 EXTRACT 段：
 
 ```json
 {
@@ -139,7 +139,7 @@
 |------|------|------|------|
 | `parse_outline_suggestions` | `novel_data.py` | Markdown | 续章灵感 |
 | `parse_chapter_spans` | `batch_world.py` | 多章文本 | 批量审阅分章 |
-| `parse_workshop_response` | `main.py` | workshop 回复 | 规划模块 |
+| `parse_workshop_response` | `core/orchestration/workshop` | workshop 回复 | 规划模块 |
 
 ---
 

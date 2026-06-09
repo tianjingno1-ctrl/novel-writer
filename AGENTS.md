@@ -18,18 +18,19 @@ python main.py         # CLI
 
 | 路径 | 说明 |
 |------|------|
-| `main.py` | 核心业务：写作对话、/summary、/check、自由聊、会话持久化 |
+| `main.py` | **路径锚点** + 测试契约 re-export（`__getattr__` → `app/main_forwards.py`）；CLI 入口 `python main.py` |
+| `app/` | 业务实现：`bootstrap`、`llm`、`writing_*`、`cli`、`runtime`、`paths`、`book_io`、`cost` 等 |
 | `app_state.py` | 进程内单例状态（CLI/API 共享；多用户需按 session 隔离） |
-| `web_app.py` | FastAPI **纯 API**（`/api/*` + OpenAPI `/docs`），不托管静态前端 |
+| `web_app.py` | FastAPI **纯 API**（`/api/*` + OpenAPI `/docs`），lifespan 调 `app.bootstrap` |
 | `config.py` | 提供商、上下文策略、从 `.env` 读 Key |
 | `prices.json` | 可选：覆盖各模型 token 单价（费用为预估） |
 | `providers.py` | kie(Anthropic) + DeepSeek(OpenAI 兼容) 统一调用 |
 | `summarizer.py` | 概述/检查的系统提示词 |
 | `novel_data.py` | Plan 场景、Codex 设定条目 |
 | `book_context.py` | 书库 `library/books/{id}/`、切换书、路径注入 |
-| `core/orchestration/` | 多步流程编排（定稿、审阅、档案同步；从 main 迁出） |
-| `app/` | 启动绑定：`bootstrap.configure()`、`AppContext` 依赖容器 |
-| `core/book_store.py` | 书籍读写入口（概述、观察写盘；逐步替代 main 全局 Path） |
+| `core/orchestration/` | 多步流程编排（定稿、审阅、档案同步） |
+| `app/` | 启动绑定 + 业务实现（见 `ARCHITECTURE.md` P3 模块表） |
+| `core/book_store.py` | 书籍读写入口（概述、观察写盘） |
 | `core/schemas/` | 跨模块数据契约（LLM JSON、服务 IO） |
 | `review_prompts.py` | 女频审阅 Prompt 路由（`docs/review-prompts/`） |
 | `batch_generate.py` | 按 plan Beat 批量生成世界章节 |
@@ -67,7 +68,7 @@ python main.py         # CLI
 1. `core/` 禁止 `import main` / `web_app` / `api`
 2. 禁止三层同名转发；禁止新建 `services/*.py`
 3. 禁止 route / orchestration / reviewer 里直接 `Path.write_text`
-4. `main.py` 不得**新增** `api_run_*`；已有转发随迁移**物理删除**
+4. `main.py` 不得**新增**业务逻辑或 `api_run_*`；新代码进 `app/*` 或 `core/*`
 5. 档案写盘走 `BookStore`；LLM 解析类型放 `core/schemas/llm.py`
 
 详见 `docs/schemas.md`、`docs/deps-audit.md`。
