@@ -73,17 +73,17 @@ class CostTests(unittest.TestCase):
                 main.CHARACTERS_FILE = orig["CHARACTERS"]
                 main.CHAR_STATIC_FILE = orig["STATIC"]
 
-    def test_log_request_context_free_chat_no_stale_layers(self) -> None:
+    def test_log_request_context_no_system_no_stale_layers(self) -> None:
         main.build_cached_system("续写", provider="kie")
         main.log_request_context(
             None,
             [{"role": "user", "content": "你好"}],
-            tag="自由聊",
+            tag="调试",
             provider="deepseek",
         )
         debug = main.get_last_context_debug()
         self.assertTrue(debug["ok"])
-        self.assertEqual(debug["tag"], "自由聊")
+        self.assertEqual(debug["tag"], "调试")
         self.assertEqual(len(debug["layers"]), 1)
         self.assertIn("无 system", debug["layers"][0]["label"])
 
@@ -140,6 +140,36 @@ class ShouldAppendTests(unittest.TestCase):
     def test_prose(self) -> None:
         text = "夜风从窗缝里渗进来，带着潮气。他握紧剑柄，听见廊下脚步声渐近。"
         self.assertTrue(main.should_append_to_chapter(text))
+
+
+class SyncAppendedIndicesTests(unittest.TestCase):
+    def test_clears_false_positive_when_disk_body_empty(self) -> None:
+        from infra.state import state
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            with patch_paths(base):
+                body = "夜风从窗缝里渗进来，带着潮气。" * 5
+                main.CHAPTERS_DIR.mkdir(parents=True, exist_ok=True)
+                (main.CHAPTERS_DIR / "ch001.md").write_text(
+                    "# 第1章\n\n",
+                    encoding="utf-8",
+                )
+                state.conversation_history.clear()
+                state.appended_indices.clear()
+                state.conversation_history.extend(
+                    [
+                        {"role": "user", "content": "写"},
+                        {"role": "assistant", "content": body},
+                    ]
+                )
+                state.appended_indices.add(1)
+                state.write_chapter_num = 1
+                main.sync_appended_indices_with_chapter()
+                self.assertNotIn(1, state.appended_indices)
+                state.conversation_history.clear()
+                state.appended_indices.clear()
+                state.write_chapter_num = 0
 
 
 class TrimHistoryTests(unittest.TestCase):
@@ -357,7 +387,11 @@ class MaintainTests(unittest.TestCase):
                 self.assertNotIn("第1章", recent_text)
 
     def test_finalize_mock_api(self) -> None:
-        from tests.support.mock_llm import mock_call_api
+        from types import SimpleNamespace
+
+        from core.deps import LlmHooks, MaintainDeps, QualityHooks
+        from core.orchestration.finalize import FinalizeHooks, run_post_chapter_finalize
+        from tests.support.isolated_library import store_only_library
 
         archive_json = (
             "```post-chapter-json\n"
@@ -376,9 +410,10 @@ class MaintainTests(unittest.TestCase):
             '"character_drift": "无漂移",'
             '"repetition": "无重复"}\n```"'
         )
+        call_state: dict = {}
 
         def fake_call(system, messages, *, tag="请求", **kwargs):
-            main.state.last_call_info = {
+            call_state["last"] = {
                 "ok": True,
                 "cost": 0.001,
                 "usage": {"input": 10, "output": 5, "cache_read": 0},
@@ -389,95 +424,76 @@ class MaintainTests(unittest.TestCase):
                 return quality_json
             return None
 
+        llm = LlmHooks(
+            build_cached_system=lambda *a, **k: "",
+            call_api=fake_call,
+            get_last_call_info=lambda: call_state.get("last") or {},
+        )
+
         with tempfile.TemporaryDirectory() as tmp:
-            data = Path(tmp)
-            ch_dir = data / "chapters"
-            ch_dir.mkdir()
-            (ch_dir / "ch001.md").write_text("# 第1章\n\n正文足够长。" * 5, encoding="utf-8")
-            summaries_recent = data / "summaries_recent.md"
-            summaries = data / "summaries.md"
-            locked = data / "plot_threads_locked.md"
-            active = data / "plot_threads_active.md"
-            world = data / "world.md"
-            characters = data / "characters.md"
-            dynamic = data / "char_dynamic.md"
-            static = data / "char_static.md"
-            for p in (
-                summaries_recent,
-                summaries,
-                locked,
-                active,
-                world,
-                characters,
-                dynamic,
-                static,
-            ):
-                p.write_text("# 占位\n", encoding="utf-8")
-            active.write_text("# 活跃\n\n## 未回收\n\n## 已回收\n", encoding="utf-8")
-            orig_ch = main.CHAPTERS_DIR
-            orig = {
-                "RECENT": main.SUMMARIES_RECENT_FILE,
-                "SUM": main.SUMMARIES_FILE,
-                "LOCKED": main.PLOT_THREADS_LOCKED_FILE,
-                "ACTIVE": main.PLOT_THREADS_ACTIVE_FILE,
-                "WORLD": main.WORLD_FILE,
-                "CHARS": main.CHARACTERS_FILE,
-                "DYN": main.CHAR_DYNAMIC_FILE,
-                "STA": main.CHAR_STATIC_FILE,
-                "DATA": main.DATA_DIR,
-            }
-            from core.data import change_history
-
-            try:
-                main.CHAPTERS_DIR = ch_dir
-                main.DATA_DIR = data
-                main.SUMMARIES_RECENT_FILE = summaries_recent
-                main.SUMMARIES_FILE = summaries
-                main.PLOT_THREADS_LOCKED_FILE = locked
-                main.PLOT_THREADS_ACTIVE_FILE = active
-                main.WORLD_FILE = world
-                main.CHARACTERS_FILE = characters
-                main.CHAR_DYNAMIC_FILE = dynamic
-                main.CHAR_STATIC_FILE = static
-                change_history.init_history(
-                    data,
-                    {
-                        "summaries_recent": summaries_recent,
-                        "plot_threads_locked": locked,
-                        "plot_threads_active": active,
-                    },
-                    backups_dir=data / "backups",
+            with store_only_library(Path(tmp)) as (bctx, store):
+                locked = store.paths.plot_threads_locked_file
+                active = store.paths.plot_threads_active_file
+                for p in (
+                    store.paths.summaries_recent_file,
+                    store.paths.summaries_file,
+                    locked,
+                    active,
+                    store.paths.world_file,
+                    store.paths.characters_file,
+                    store.paths.char_dynamic_file,
+                    store.paths.char_static_file,
+                ):
+                    p.write_text("# 占位\n", encoding="utf-8")
+                active.write_text("# 活跃\n\n## 未回收\n\n## 已回收\n", encoding="utf-8")
+                (bctx.data_dir / "chapters" / "ch001.md").write_text(
+                    "# 第1章\n\n正文足够长。" * 5,
+                    encoding="utf-8",
                 )
-                from infra.logs import quality as quality_log
 
-                quality_log.init_quality_log(data)
-                from app.hooks import build_finalize_hooks
-                from core.orchestration import finalize as orchestration_finalize
+                def resolve_chapter(n: int | None) -> tuple[int, str]:
+                    num = n or 1
+                    ch = bctx.data_dir / "chapters" / f"ch{num:03d}.md"
+                    return num, ch.read_text(encoding="utf-8")
 
-                with mock_call_api(side_effect=fake_call):
-                    r = orchestration_finalize.run_post_chapter_finalize(
-                        1,
-                        build_finalize_hooks(),
-                        run_pacing=False,
-                        run_outline=False,
-                    )
+                deps = MaintainDeps(
+                    llm=llm,
+                    quality=QualityHooks(
+                        log_entry=lambda *a, **k: None,
+                        short_story_skip=lambda *a, **k: None,
+                    ),
+                    store=store,
+                    resolve_chapter=resolve_chapter,
+                )
+                hooks = FinalizeHooks(
+                    maintain_deps=deps,
+                    llm=llm,
+                    resolve_chapter=resolve_chapter,
+                    short_story_skip=lambda *a, **k: None,
+                    chapters_text_for_scope=lambda num, _scope: resolve_chapter(num)[1],
+                    load_check_snapshot=lambda num, body: SimpleNamespace(
+                        world="",
+                        characters="",
+                        char_context_for_check="",
+                        summaries_combined="",
+                    ),
+                    read_summaries_recent=lambda: "",
+                    run_pacing_check=lambda: {"ok": True},
+                    run_outline=lambda: {"ok": True},
+                    quality_log_entry=lambda *a, **k: None,
+                )
+                r = run_post_chapter_finalize(
+                    1,
+                    hooks,
+                    run_pacing=False,
+                    run_outline=False,
+                )
                 self.assertTrue(r["ok"], r)
                 self.assertTrue(r["archive"]["summary"]["ok"])
                 self.assertIn("测试城", locked.read_text(encoding="utf-8"))
                 self.assertIn("线A", active.read_text(encoding="utf-8"))
                 self.assertTrue(r["quality"]["continuity"]["ok"])
                 self.assertEqual(len(r["calls"]), 2)
-            finally:
-                main.CHAPTERS_DIR = orig_ch
-                main.DATA_DIR = orig["DATA"]
-                main.SUMMARIES_RECENT_FILE = orig["RECENT"]
-                main.SUMMARIES_FILE = orig["SUM"]
-                main.PLOT_THREADS_LOCKED_FILE = orig["LOCKED"]
-                main.PLOT_THREADS_ACTIVE_FILE = orig["ACTIVE"]
-                main.WORLD_FILE = orig["WORLD"]
-                main.CHARACTERS_FILE = orig["CHARS"]
-                main.CHAR_DYNAMIC_FILE = orig["DYN"]
-                main.CHAR_STATIC_FILE = orig["STA"]
 
 
 class ObserveTests(unittest.TestCase):
@@ -963,7 +979,8 @@ class ApplyTurnTests(unittest.TestCase):
                 r = main.restore_chat_session()
                 self.assertTrue(r["ok"])
                 self.assertEqual(len(state.conversation_history), 2)
-                self.assertIn(1, state.appended_indices)
+                # 磁盘无正文时 reconcile 会撤销误标记的 appended
+                self.assertNotIn(1, state.appended_indices)
             finally:
                 main.SESSION_FILE = orig_session_file
                 main.SESSION_MD_FILE = orig_session_md_file
@@ -1043,6 +1060,11 @@ class ChapterSaveTests(unittest.TestCase):
         self.assertEqual(main.instruction_save_mode("接着写一场戏"), "append")
         self.assertEqual(
             main.instruction_save_mode("字数控制在2000-3000，减ai腔调"), "replace"
+        )
+        from app.writing_chat import CHAPTER_REGENERATE_INSTRUCTION
+
+        self.assertEqual(
+            main.instruction_save_mode(CHAPTER_REGENERATE_INSTRUCTION), "replace"
         )
         beat_instruction = "【场景指令 Scene Beat】\n续写下一场\n\n继续写"
         self.assertEqual(main.instruction_save_mode(beat_instruction), "append")
@@ -1180,230 +1202,21 @@ class SessionChapterCacheTests(unittest.TestCase):
             main.state.write_chapter_num = prev
 
 
-class GuideStatusTests(unittest.TestCase):
-    def test_get_guide_status_shape(self) -> None:
-        status = main.get_guide_status()
-        self.assertTrue(status["ok"])
-        self.assertIn(status["stage"], ("setup", "planning", "first_chapter", "writing"))
-        for key in ("world", "char_static", "style", "char_dynamic", "plot_threads_active"):
-            self.assertIn(key, status["files"])
-        todos = status["post_chapter_todos"]
-        for key in (
-            "summary",
-            "char_dynamic",
-            "plot_threads",
-            "char_dynamic_never",
-            "plot_threads_never",
-            "archive",
-        ):
-            self.assertIn(key, todos)
-            self.assertIsInstance(todos[key], bool)
-
-    def test_latest_chapter_summary_requires_exact_match(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            data = Path(tmp)
-            ch_dir = data / "chapters"
-            ch_dir.mkdir()
-            orig = {
-                "CHAPTERS": main.CHAPTERS_DIR,
-                "RECENT": main.SUMMARIES_RECENT_FILE,
-                "ARCHIVE": main.SUMMARIES_ARCHIVE_FILE,
-            }
-            try:
-                main.CHAPTERS_DIR = ch_dir
-                (ch_dir / "ch002.md").write_text("# 第二章\n正文", encoding="utf-8")
-                main.SUMMARIES_RECENT_FILE = data / "summaries_recent.md"
-                main.SUMMARIES_ARCHIVE_FILE = data / "summaries_archive.md"
-                main.SUMMARIES_RECENT_FILE.write_text(
-                    "【第5章】旧书残留概述\n", encoding="utf-8"
-                )
-                main.SUMMARIES_ARCHIVE_FILE.write_text("", encoding="utf-8")
-                status = main.get_guide_status()
-                self.assertEqual(status["latest_chapter_num"], 2)
-                self.assertFalse(status["latest_chapter_has_summary"])
-                self.assertTrue(status["post_chapter_todos"]["summary"])
-            finally:
-                main.CHAPTERS_DIR = orig["CHAPTERS"]
-                main.SUMMARIES_RECENT_FILE = orig["RECENT"]
-                main.SUMMARIES_ARCHIVE_FILE = orig["ARCHIVE"]
-
-    def test_maint_file_content_clears_never_todos(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            data = Path(tmp)
-            ch_dir = data / "chapters"
-            ch_dir.mkdir()
-            dynamic = data / "char_dynamic.md"
-            active = data / "plot_threads_active.md"
-            orig = {
-                "CHAPTERS": main.CHAPTERS_DIR,
-                "DYNAMIC": main.CHAR_DYNAMIC_FILE,
-                "ACTIVE": main.PLOT_THREADS_ACTIVE_FILE,
-            }
-            try:
-                tpl_dynamic = main.INITIAL_FILE_TEMPLATES["char_dynamic"]
-                tpl_active = main.INITIAL_FILE_TEMPLATES["plot_threads_active"]
-                main.CHAPTERS_DIR = ch_dir
-                (ch_dir / "ch001.md").write_text("# 第一章\n正文", encoding="utf-8")
-                main.CHAR_DYNAMIC_FILE = dynamic
-                main.PLOT_THREADS_ACTIVE_FILE = active
-                main.CODEX_FILES["char_dynamic"] = dynamic
-                main.CODEX_FILES["plot_threads_active"] = active
-                dynamic.write_text(tpl_dynamic, encoding="utf-8")
-                active.write_text(tpl_active, encoding="utf-8")
-                status = main.get_guide_status()
-                self.assertTrue(status["post_chapter_todos"]["char_dynamic_never"])
-                dynamic.write_text(
-                    dynamic.read_text(encoding="utf-8").replace(
-                        "- 当前状态：\n", "- 当前状态：刚穿入，正在摸底\n"
-                    ),
-                    encoding="utf-8",
-                )
-                status = main.get_guide_status()
-                self.assertFalse(status["post_chapter_todos"]["char_dynamic_never"])
-            finally:
-                main.CHAPTERS_DIR = orig["CHAPTERS"]
-                main.CHAR_DYNAMIC_FILE = orig["DYNAMIC"]
-                main.PLOT_THREADS_ACTIVE_FILE = orig["ACTIVE"]
-                main.CODEX_FILES["char_dynamic"] = orig["DYNAMIC"]
-                main.CODEX_FILES["plot_threads_active"] = orig["ACTIVE"]
-
-
-class FreeChatThreadTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._orig_threads = list(main.state.free_chat_threads)
-        self._orig_active = main.state.free_chat_active_thread_id
-        self._orig_history = list(main.state.free_chat_history)
-        self._orig_file = main.FREE_CHAT_FILE
-        main.state.free_chat_threads = []
-        main.state.free_chat_active_thread_id = ""
-        main.state.free_chat_history = []
-
-    def tearDown(self) -> None:
-        main.state.free_chat_threads = self._orig_threads
-        main.state.free_chat_active_thread_id = self._orig_active
-        main.state.free_chat_history = self._orig_history
-        main.FREE_CHAT_FILE = self._orig_file
-
-    def test_legacy_free_chat_migrates_to_thread(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "free_chat.json"
-            path.write_text(
-                json.dumps(
-                    {
-                        "provider": "deepseek",
-                        "messages": [
-                            {"role": "user", "content": "讨论世界观"},
-                            {"role": "assistant", "content": "好的"},
-                        ],
-                    },
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
-            main.FREE_CHAT_FILE = path
-            main.load_free_chat()
-            self.assertEqual(len(main.state.free_chat_threads), 1)
-            self.assertEqual(main.state.free_chat_threads[0]["title"], "讨论世界观")
-            self.assertEqual(len(main.state.free_chat_history), 2)
-            saved = json.loads(path.read_text(encoding="utf-8"))
-            self.assertIn("threads", saved)
-            self.assertEqual(len(saved["threads"]), 1)
-
-    def test_create_and_switch_threads(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            main.FREE_CHAT_FILE = Path(tmp) / "free_chat.json"
-            main._ensure_free_chat_threads()
-            first_id = main.state.free_chat_active_thread_id
-            main.state.free_chat_history.append(
-                {"role": "user", "content": "第一条"},
-            )
-            main.save_free_chat()
-
-            created = main.create_free_chat_thread(title="人物设定")
-            self.assertTrue(created["ok"])
-            second_id = created["thread"]["id"]
-            self.assertNotEqual(second_id, first_id)
-            self.assertEqual(main.state.free_chat_history, [])
-
-            switched = main.switch_free_chat_thread(first_id)
-            self.assertTrue(switched["ok"])
-            self.assertEqual(len(switched["messages"]), 1)
-            self.assertEqual(switched["messages"][0]["content"], "第一条")
-
-    def test_delete_free_chat_message(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            main.FREE_CHAT_FILE = Path(tmp) / "free_chat.json"
-            main._ensure_free_chat_threads()
-            main.state.free_chat_history = [
-                {"role": "user", "content": "a"},
-                {"role": "assistant", "content": "b"},
-                {"role": "user", "content": "c"},
-            ]
-            main._persist_active_thread_messages()
-            main.save_free_chat()
-
-            bad = main.delete_free_chat_message(9)
-            self.assertFalse(bad["ok"])
-
-            ok = main.delete_free_chat_message(1)
-            self.assertTrue(ok["ok"])
-            self.assertEqual(len(ok["messages"]), 2)
-            self.assertEqual(ok["messages"][0]["content"], "a")
-            self.assertEqual(ok["messages"][1]["content"], "c")
-
-            saved = json.loads(main.FREE_CHAT_FILE.read_text(encoding="utf-8"))
-            self.assertEqual(len(saved["threads"][0]["messages"]), 2)
-
-
-class BatchWorldTests(unittest.TestCase):
-    def test_checkpoint_save_load_and_resume_targets(self) -> None:
-        from pipeline.checkpoint import (
-            JOB_KIND_WORLD_GENERATE,
-            STATUS_PAUSED,
-            create_job,
-            load_job,
-            remaining_targets,
-            save_job,
-        )
-
-        with tempfile.TemporaryDirectory() as tmp:
-            data = Path(tmp)
-            job = create_job(
-                JOB_KIND_WORLD_GENERATE,
-                label="测试世界",
-                chapter_from=1,
-                chapter_to=3,
-                targets=[1, 2, 3],
-            )
-            save_job(data, job)
-            loaded = load_job(data, job["id"])
-            assert loaded is not None
-            self.assertEqual(loaded["kind"], JOB_KIND_WORLD_GENERATE)
-            loaded["completed"] = [1]
-            loaded["status"] = STATUS_PAUSED
-            save_job(data, loaded)
-            self.assertEqual(remaining_targets(loaded), [2, 3])
-
+class PlanChapterTests(unittest.TestCase):
     def test_parse_chapter_spans(self) -> None:
-        import batch_world
+        from core.plan_chapters import parse_chapter_spans
 
-        spans = batch_world.parse_chapter_spans("第1-2章 · 初见 · 第15章")
+        spans = parse_chapter_spans("第1-2章 · 初见 · 第15章")
         self.assertIn((1, 2), spans)
         self.assertIn((15, 15), spans)
 
-    def test_iter_chapter_chunks(self) -> None:
-        import batch_world
-
-        chunks = batch_world.iter_chapter_chunks(1, 15, chunk_size=5)
-        self.assertEqual(chunks, [(1, 5), (6, 10), (11, 15)])
-
     def test_build_chapters_text_block_truncates(self) -> None:
-        import batch_world
+        from core.chapter_text import build_chapters_text_block
 
         def read_ch(n: int) -> str:
             return f"第{n}章" + ("正文" * 5000)
 
-        text, truncated, used = batch_world.build_chapters_text_block(
+        text, truncated, used = build_chapters_text_block(
             [1, 2],
             read_ch,
             max_total_chars=8000,
@@ -1413,179 +1226,8 @@ class BatchWorldTests(unittest.TestCase):
         self.assertGreater(len(text), 0)
         self.assertGreaterEqual(len(used), 1)
 
-    def test_infer_world_range_from_plan(self) -> None:
-        import batch_world
-        from core.data import novel_data
 
-        with tempfile.TemporaryDirectory() as tmp:
-            plan_path = Path(tmp) / "plan.json"
-            plan_path.write_text(
-                json.dumps(
-                    {
-                        "chapters": {
-                            "1": {
-                                "scenes": [
-                                    {"summary": "第1-2章"},
-                                    {"summary": "第15章"},
-                                ]
-                            }
-                        }
-                    },
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
-            orig = novel_data.PLAN_FILE
-            novel_data.PLAN_FILE = plan_path
-            try:
-                cf, ct = batch_world.infer_world_chapter_range()
-                self.assertEqual(cf, 1)
-                self.assertEqual(ct, 15)
-            finally:
-                novel_data.PLAN_FILE = orig
-
-    def test_world_batch_status_written(self) -> None:
-        import batch_world
-
-        def read_ch(n: int) -> str:
-            return "有正文" if n <= 3 else ""
-
-        status = batch_world.get_world_batch_status(read_chapter=read_ch)
-        self.assertGreaterEqual(status["written_count"], 0)
-
-    def test_review_plan_token_estimate(self) -> None:
-        import batch_world
-        from core.data import novel_data
-
-        prose = "正文" * 1600  # 3200 字/章
-
-        def read_ch(n: int) -> str:
-            return f"# 第{n}章\n\n{prose}" if n <= 5 else ""
-
-        def read_text(_path) -> str:
-            return "设定" * 200
-
-        def get_char() -> str:
-            return "人物" * 100
-
-        def build_sys(prompt, **kwargs):
-            return [{"type": "text", "content": prompt[:500]}]
-
-        with tempfile.TemporaryDirectory() as tmp:
-            plan_path = Path(tmp) / "plan.json"
-            plan_path.write_text(
-                json.dumps(
-                    {
-                        "chapters": {
-                            "1": {"scenes": [{"summary": "第1-15章"}]},
-                        }
-                    },
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
-            orig = novel_data.PLAN_FILE
-            novel_data.PLAN_FILE = plan_path
-            try:
-                plan = batch_world.build_world_batch_review_plan(
-                    read_chapter=read_ch,
-                    read_text=read_text,
-                    get_char_context_for_check=get_char,
-                    build_cached_system=build_sys,
-                    summaries_for_scope_fn=lambda _n, _s: "概述" * 50,
-                    cross_chapter_user_message_fn=lambda *a, **k: "跨章" * 80,
-                    world_file=Path("w.md"),
-                    characters_file=Path("c.md"),
-                    plot_locked_file=Path("l.md"),
-                    plot_active_file=Path("a.md"),
-                )
-            finally:
-                novel_data.PLAN_FILE = orig
-
-        self.assertTrue(plan.get("ok"))
-        self.assertGreater(plan["total_prose_chars"], 10000)
-        self.assertGreater(plan["total_est_input_tokens"], 5000)
-        md = batch_world.format_review_plan_markdown(plan)
-        self.assertIn("发送预览", md)
-        self.assertIn("tokens", md)
-
-
-class TestWorldRemediate(unittest.TestCase):
-    def test_parse_remediate_diagnose(self) -> None:
-        from summarizer import parse_remediate_diagnose
-
-        reply = (
-            '说明\n```remediate-diagnose-json\n'
-            '{"num":2,"action":"patch","issues":[{"severity":"must_fix",'
-            '"summary":"钩子弱","location":"开篇"}],"skip_reason":""}\n```'
-        )
-        data, err = parse_remediate_diagnose(reply)
-        self.assertIsNone(err or None)
-        self.assertIsNotNone(data)
-        assert data is not None
-        self.assertEqual(data["action"], "patch")
-        self.assertEqual(len(data["issues"]), 1)
-
-    def test_format_closure_report(self) -> None:
-        from summarizer import format_remediate_closure_report
-
-        md = format_remediate_closure_report(
-            "测试世界",
-            1,
-            2,
-            [
-                {
-                    "num": 1,
-                    "action": "patch",
-                    "changes": [
-                        {
-                            "issue": "钩子弱",
-                            "done": "加入冲突",
-                            "location": "第2段",
-                        }
-                    ],
-                    "skipped": [],
-                },
-                {"num": 2, "action": "skip", "skip_reason": "节奏可保留"},
-            ],
-        )
-        self.assertIn("世界闭环", md)
-        self.assertIn("已改", md)
-        self.assertIn("未改动", md)
-
-    def test_snapshot_and_revert(self) -> None:
-        import batch_remediate
-
-        with tempfile.TemporaryDirectory() as tmp:
-            data = Path(tmp)
-            job_id = "testjob01"
-            root = batch_remediate.job_path(data, job_id)
-            root.mkdir(parents=True)
-            ch_path = root / "before" / "ch001.md"
-            ch_path.parent.mkdir(parents=True, exist_ok=True)
-            ch_path.write_text("# 第1章\n\n旧正文\n", encoding="utf-8")
-
-            written: dict[int, str] = {}
-
-            def write_ch(n: int, t: str) -> None:
-                written[n] = t
-
-            batch_remediate.save_job(
-                data,
-                {"id": job_id, "status": "completed", "targets": [1]},
-            )
-            r = batch_remediate.revert_chapter_from_job(
-                data,
-                job_id,
-                1,
-                write_chapter=write_ch,
-                sync_title=lambda _n: None,
-            )
-            self.assertTrue(r.get("ok"))
-            self.assertIn("旧正文", written.get(1, ""))
-            self.assertIn("正文", r.get("reverted", []))
-            self.assertIn("档案", r.get("warning", ""))
-
+class TestBulkArchive(unittest.TestCase):
     def test_parse_bulk_summaries_and_state(self) -> None:
         from summarizer import parse_bulk_state, parse_bulk_summaries
 
@@ -1742,6 +1384,159 @@ class BookContextTests(unittest.TestCase):
                 book_context.INDEX_FILE = orig_index
                 book_context._context = orig_ctx
 
+    def test_trash_restore_and_purge(self) -> None:
+        from core.data import book_context
+
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = Path(tmp) / "library"
+            books = lib / "books"
+            trash = lib / "trash"
+            books.mkdir(parents=True)
+            index = {
+                "version": 1,
+                "active_book_id": "a",
+                "books": [{"id": "a", "title": "书A", "type": "novel"}],
+            }
+            (lib / "index.json").write_text(
+                json.dumps(index, ensure_ascii=False), encoding="utf-8"
+            )
+            book_a = books / "a"
+            book_a.mkdir()
+            (book_a / "project.json").write_text(
+                json.dumps(
+                    {"title": "书A", "type": "novel", "world_label": "", "tagline": ""},
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            orig_lib = book_context.LIBRARY_DIR
+            orig_books = book_context.BOOKS_DIR
+            orig_trash = book_context.TRASH_DIR
+            orig_trash_index = book_context.TRASH_INDEX_FILE
+            orig_index = book_context.INDEX_FILE
+            orig_ctx = book_context._context
+            try:
+                book_context.LIBRARY_DIR = lib
+                book_context.BOOKS_DIR = books
+                book_context.TRASH_DIR = trash
+                book_context.TRASH_INDEX_FILE = trash / "index.json"
+                book_context.INDEX_FILE = lib / "index.json"
+                book_context._context = None
+                book_context.init_library(book_id="a")
+
+                tr = book_context.trash_book("a")
+                self.assertTrue(tr.get("ok"))
+                self.assertFalse(book_a.exists())
+                self.assertTrue((trash / "a").is_dir())
+                self.assertEqual(book_context.list_books().get("books"), [])
+
+                lst = book_context.list_trash()
+                self.assertEqual(len(lst.get("books") or []), 1)
+
+                rs = book_context.restore_book("a")
+                self.assertTrue(rs.get("ok"))
+                self.assertTrue(book_a.is_dir())
+                self.assertFalse((trash / "a").exists())
+                self.assertEqual(len(book_context.list_books().get("books") or []), 1)
+
+                tr2 = book_context.trash_book("a")
+                self.assertTrue(tr2.get("ok"))
+                pu = book_context.purge_book("a")
+                self.assertTrue(pu.get("ok"))
+                self.assertFalse((trash / "a").exists())
+                self.assertEqual(book_context.list_trash().get("books"), [])
+            finally:
+                book_context.LIBRARY_DIR = orig_lib
+                book_context.BOOKS_DIR = orig_books
+                book_context.TRASH_DIR = orig_trash
+                book_context.TRASH_INDEX_FILE = orig_trash_index
+                book_context.INDEX_FILE = orig_index
+                book_context._context = orig_ctx
+
+    def test_trash_and_purge_books_batch(self) -> None:
+        from core.data import book_context
+
+        def _seed_book(books_root: Path, book_id: str, title: str) -> None:
+            book_dir = books_root / book_id
+            book_dir.mkdir()
+            (book_dir / "project.json").write_text(
+                json.dumps(
+                    {
+                        "title": title,
+                        "type": "novel",
+                        "world_label": "",
+                        "tagline": "",
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            lib = Path(tmp) / "library"
+            books = lib / "books"
+            trash = lib / "trash"
+            books.mkdir(parents=True)
+            index = {
+                "version": 1,
+                "active_book_id": "a",
+                "books": [
+                    {"id": "a", "title": "书A", "type": "novel"},
+                    {"id": "b", "title": "书B", "type": "novel"},
+                    {"id": "c", "title": "书C", "type": "novel"},
+                ],
+            }
+            (lib / "index.json").write_text(
+                json.dumps(index, ensure_ascii=False), encoding="utf-8"
+            )
+            _seed_book(books, "a", "书A")
+            _seed_book(books, "b", "书B")
+            _seed_book(books, "c", "书C")
+
+            orig_lib = book_context.LIBRARY_DIR
+            orig_books = book_context.BOOKS_DIR
+            orig_trash = book_context.TRASH_DIR
+            orig_trash_index = book_context.TRASH_INDEX_FILE
+            orig_index = book_context.INDEX_FILE
+            orig_ctx = book_context._context
+            try:
+                book_context.LIBRARY_DIR = lib
+                book_context.BOOKS_DIR = books
+                book_context.TRASH_DIR = trash
+                book_context.TRASH_INDEX_FILE = trash / "index.json"
+                book_context.INDEX_FILE = lib / "index.json"
+                book_context._context = None
+                book_context.init_library(book_id="a")
+
+                tr = book_context.trash_books(["a", "b", "missing"])
+                self.assertTrue(tr.get("ok"))
+                self.assertEqual(tr.get("count"), 2)
+                self.assertEqual(len(tr.get("failed") or []), 1)
+                self.assertTrue(tr.get("context_refreshed"))
+                self.assertEqual(
+                    {b.get("id") for b in book_context.list_books().get("books") or []},
+                    {"c"},
+                )
+                self.assertEqual(
+                    {b.get("id") for b in book_context.list_trash().get("books") or []},
+                    {"a", "b"},
+                )
+
+                pu = book_context.purge_books(["a", "ghost"])
+                self.assertTrue(pu.get("ok"))
+                self.assertEqual(pu.get("count"), 1)
+                self.assertEqual(len(pu.get("failed") or []), 1)
+                self.assertFalse((trash / "a").exists())
+                self.assertTrue((trash / "b").exists())
+            finally:
+                book_context.LIBRARY_DIR = orig_lib
+                book_context.BOOKS_DIR = orig_books
+                book_context.TRASH_DIR = orig_trash
+                book_context.TRASH_INDEX_FILE = orig_trash_index
+                book_context.INDEX_FILE = orig_index
+                book_context._context = orig_ctx
+
 
 class ReviewPromptTests(unittest.TestCase):
     def test_resolve_profile_by_type_platform(self) -> None:
@@ -1758,7 +1553,7 @@ class ReviewPromptTests(unittest.TestCase):
         )
 
     def test_resolve_beat_for_prose_chapter(self) -> None:
-        import batch_world
+        from core.plan_chapters import resolve_beat_for_prose_chapter
         from core.data import novel_data
 
         plan = {
@@ -1786,35 +1581,21 @@ class ReviewPromptTests(unittest.TestCase):
         orig_load = novel_data.load_plan
         try:
             novel_data.load_plan = lambda: plan  # type: ignore[method-assign]
-            m1 = batch_world.resolve_beat_for_prose_chapter(1)
+            m1 = resolve_beat_for_prose_chapter(1)
             self.assertIsNotNone(m1)
             assert m1 is not None
             self.assertEqual(m1["scene_id"], "s1")
             self.assertEqual(m1["span_from"], 1)
             self.assertEqual(m1["span_to"], 2)
             self.assertEqual(m1["chapter_index_in_span"], 1)
-            m2 = batch_world.resolve_beat_for_prose_chapter(2)
+            m2 = resolve_beat_for_prose_chapter(2)
             assert m2 is not None
             self.assertEqual(m2["chapter_index_in_span"], 2)
-            m4 = batch_world.resolve_beat_for_prose_chapter(4)
+            m4 = resolve_beat_for_prose_chapter(4)
             assert m4 is not None
             self.assertEqual(m4["scene_id"], "s2")
         finally:
             novel_data.load_plan = orig_load  # type: ignore[method-assign]
-
-    def test_build_chapter_generate_instruction(self) -> None:
-        import batch_generate
-
-        meta = {
-            "scene_title": "穿入",
-            "span_from": 1,
-            "span_to": 2,
-            "chapter_index_in_span": 2,
-            "pace": "快",
-        }
-        text = batch_generate.build_chapter_generate_instruction(2, meta, prev_tail="上一章尾巴")
-        self.assertIn("第 2 章", text)
-        self.assertIn("上一章尾巴", text)
 
     def test_load_world_tomato_prompt(self) -> None:
         import review_prompts
@@ -1943,112 +1724,6 @@ class WorkshopBeatMappingTests(unittest.TestCase):
             4,
         )
         self.assertIsNone(novel_data._workshop_beat_chapter_num({"title": "x", "beat": "y"}))
-
-    def test_replace_scenes_from_workshop_beats(self) -> None:
-        from core.data import novel_data
-
-        with tempfile.TemporaryDirectory() as tmp:
-            plan_path = Path(tmp) / "plan.json"
-            plan_path.write_text(
-                json.dumps({"active_scene_id": None, "chapters": {}}, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            orig_plan = novel_data.PLAN_FILE
-            orig_lock = novel_data._plan_lock
-            try:
-                novel_data.PLAN_FILE = plan_path
-                novel_data._plan_lock = novel_data.threading.Lock()
-                ok = novel_data.replace_scenes_from_workshop_beats([
-                    {"chapter": 1, "title": "开篇", "beat": "穿入"},
-                    {"chapter": 2, "title": "冲突", "beat": "对峙"},
-                ])
-                self.assertTrue(ok)
-                plan = novel_data.load_plan()
-                self.assertEqual(plan["chapters"]["1"]["title"], "开篇")
-                self.assertEqual(plan["chapters"]["1"]["scenes"][0]["title"], "开篇")
-                self.assertEqual(plan["chapters"]["1"]["scenes"][0]["beat"], "穿入")
-                self.assertEqual(plan["chapters"]["2"]["scenes"][0]["title"], "冲突")
-                self.assertNotIn("chapter", plan["chapters"]["2"]["scenes"][0])
-            finally:
-                novel_data.PLAN_FILE = orig_plan
-                novel_data._plan_lock = orig_lock
-
-    def test_normalize_workshop_beats_uses_chapter(self) -> None:
-        from core import workshop as workshop_text
-
-        beats = workshop_text.normalize_workshop_beats([
-            {"chapter": 1, "title": "A", "beat": "a"},
-            {"chapter_index": 2, "title": "B", "beat": "b"},
-        ])
-        self.assertEqual(len(beats), 2)
-        self.assertEqual(beats[0]["chapter"], 1)
-        self.assertEqual(beats[1]["chapter"], 2)
-
-
-class WorkshopTests(unittest.TestCase):
-    def test_parse_workshop_response_new_format(self) -> None:
-        from core import workshop as workshop_text
-
-        raw = (
-            "---REPLY---\n"
-            "好的，帮你规划了五章。\n"
-            "---EXTRACT---\n"
-            '{"world": "古代架空", "characters": "女主穿书", '
-            '"beats": [{"chapter": 1, "title": "开篇", "beat": "穿入"}]}\n'
-            "---END---"
-        )
-        reply, extract = workshop_text.parse_workshop_response(raw)
-        self.assertIn("五章", reply)
-        self.assertEqual(extract["world"], "古代架空")
-        self.assertEqual(extract["characters"], "女主穿书")
-        self.assertEqual(len(extract["beats"]), 1)
-        self.assertEqual(extract["beats"][0]["chapter"], 1)
-
-    def test_parse_workshop_response_missing_json_fields(self) -> None:
-        from core import workshop as workshop_text
-
-        raw = (
-            "---REPLY---\n"
-            "继续说说。\n"
-            "---EXTRACT---\n"
-            '{"world": "仅有世界观"}\n'
-            "---END---"
-        )
-        reply, extract = workshop_text.parse_workshop_response(raw)
-        self.assertIn("继续", reply)
-        self.assertEqual(extract["world"], "仅有世界观")
-        self.assertEqual(extract["characters"], "")
-        self.assertEqual(extract["beats"], [])
-
-    def test_parse_workshop_response_invalid_json(self) -> None:
-        from core import workshop as workshop_text
-
-        raw = "---REPLY---\n你好\n---EXTRACT---\n{not json\n---END---"
-        reply, extract = workshop_text.parse_workshop_response(raw)
-        self.assertIn("你好", reply)
-        self.assertEqual(extract, {"world": "", "characters": "", "beats": []})
-
-    def test_parse_workshop_response_with_draft(self) -> None:
-        from core import workshop as workshop_text
-
-        raw = "好的，继续说说势力设定。\n---DRAFT---\n# 世界观\n\n## 背景设定\n架空古代"
-        reply, extract = workshop_text.parse_workshop_response(raw)
-        self.assertIn("势力", reply)
-        self.assertIn("背景设定", extract["world"])
-        self.assertEqual(extract["characters"], "")
-        self.assertEqual(extract["beats"], [])
-
-    def test_parse_workshop_response_no_draft(self) -> None:
-        from core import workshop as workshop_text
-
-        reply, extract = workshop_text.parse_workshop_response("先聊聊主角动机。")
-        self.assertEqual(reply, "先聊聊主角动机。")
-        self.assertEqual(extract, {"world": "", "characters": "", "beats": []})
-
-    def test_workshop_write_key_map(self) -> None:
-        from core import workshop as workshop_text
-
-        self.assertEqual(workshop_text.WORKSHOP_WRITE_KEY_MAP["世界观设定"], "world")
 
 
 if __name__ == "__main__":

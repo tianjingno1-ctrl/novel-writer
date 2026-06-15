@@ -4,10 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
+from core import chapter_roles
 from core.data import novel_data
 from core.schemas.rule_refs import parse_rule_ref
 
 CHAPTER_STATUSES = frozenset({"pending", "drafting", "approved"})
+_LEGACY_META_KEYS = frozenset({"writing_mode"})
+GENRES = frozenset({"urban", "sweet", "ancient"})
+GENRE_LABELS = {
+    "urban": "都市",
+    "sweet": "甜宠",
+    "ancient": "古言",
+}
 DEFAULT_REVIEW_CRITERIA: dict[str, Any] = {
     "platform_profile": "",
     "hard_rules": [],
@@ -17,13 +25,41 @@ DEFAULT_REVIEW_CRITERIA: dict[str, Any] = {
 
 
 def load_plan() -> dict:
+    persist_strip_legacy_meta_if_needed()
     return novel_data.load_plan()
+
+
+def persist_strip_legacy_meta_if_needed() -> bool:
+    """若 plan.meta 含废弃字段（如 writing_mode）则写盘清除。"""
+    plan = novel_data.load_plan()
+    meta = plan.get("meta")
+    if not isinstance(meta, dict):
+        return False
+    if _strip_legacy_meta(meta) == meta:
+        return False
+
+    def _edit(p: dict) -> None:
+        m = p.get("meta")
+        if isinstance(m, dict):
+            p["meta"] = _strip_legacy_meta(m)
+
+    novel_data._mutate_plan(_edit)
+    return True
+
+
+def _strip_legacy_meta(meta: dict[str, Any]) -> dict[str, Any]:
+    out = dict(meta)
+    for key in _LEGACY_META_KEYS:
+        out.pop(key, None)
+    return out
 
 
 def get_meta(plan: dict | None = None) -> dict[str, Any]:
     p = plan if plan is not None else load_plan()
     meta = p.get("meta")
-    return dict(meta) if isinstance(meta, dict) else {}
+    if not isinstance(meta, dict):
+        return {}
+    return _strip_legacy_meta(meta)
 
 
 def get_review_criteria(plan: dict | None = None) -> dict[str, Any]:
@@ -36,12 +72,23 @@ def get_review_criteria(plan: dict | None = None) -> dict[str, Any]:
     return out
 
 
+def normalize_genre(value: str | None) -> str:
+    g = (value or "").strip().lower()
+    return g if g in GENRES else ""
+
+
 def set_plan_meta(meta: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(meta, dict):
         raise ValueError("meta 须为对象")
+    meta = _strip_legacy_meta(dict(meta))
+    if "genre" in meta:
+        meta["genre"] = normalize_genre(str(meta.get("genre") or ""))
 
     def _edit(plan: dict) -> None:
-        plan["meta"] = meta
+        cur = plan.get("meta")
+        merged = dict(cur) if isinstance(cur, dict) else {}
+        merged.update(meta)
+        plan["meta"] = _strip_legacy_meta(merged)
         if int(plan.get("version") or 0) < 2:
             plan["version"] = 2
 
@@ -175,6 +222,8 @@ def apply_prefill_chapters(option: dict[str, Any], *, replace: bool) -> list[dic
         nonlocal applied
         if replace:
             plan["chapters"] = {}
+        meta = plan.get("meta") if isinstance(plan.get("meta"), dict) else {}
+        default_wpc = int(meta.get("word_count_per_chapter") or 0)
         for ch in chapters:
             if not isinstance(ch, dict):
                 continue
@@ -198,20 +247,36 @@ def apply_prefill_chapters(option: dict[str, Any], *, replace: bool) -> list[dic
             )
             hook = str(ch.get("hook") or "").strip()
             target = int(ch.get("word_count_target") or ch.get("target_words") or 0)
-            plan.setdefault("chapters", {})[key] = {
+            if not target and default_wpc:
+                target = default_wpc
+            entry: dict[str, Any] = {
                 "title": title,
                 "status": "pending",
                 "hook": hook,
                 "word_count_target": target or None,
                 "scenes": [scene],
             }
+            role = chapter_roles.normalize_role(ch.get("role"))
+            if role:
+                entry["role"] = role
+                intent = chapter_roles.normalize_intent(role, ch.get("intent"))
+                if intent is not None:
+                    entry["intent"] = intent
+            plan.setdefault("chapters", {})[key] = entry
             applied.append({
                 "chapter_num": num,
                 "title": title,
                 "scene_id": scene["id"],
                 "hook": hook,
+                "role": role,
             })
         if applied:
+            paywall_nums = [
+                int(k) for k, v in (plan.get("chapters") or {}).items()
+                if isinstance(v, dict) and chapter_roles.normalize_role(v.get("role")) == "paywall"
+            ]
+            if len(paywall_nums) == 1:
+                plan.setdefault("meta", {})["paywall_chapter"] = paywall_nums[0]
             first_key = str(applied[0]["chapter_num"])
             first_scenes = plan["chapters"][first_key].get("scenes") or []
             plan["active_scene_id"] = first_scenes[0]["id"] if first_scenes else None

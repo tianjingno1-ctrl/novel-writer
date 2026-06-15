@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 _BASE = Path(__file__).resolve().parents[2]
 LIBRARY_DIR = _BASE / "library"
 BOOKS_DIR = LIBRARY_DIR / "books"
+TRASH_DIR = LIBRARY_DIR / "trash"
 INDEX_FILE = LIBRARY_DIR / "index.json"
+TRASH_INDEX_FILE = TRASH_DIR / "index.json"
 RUNTIME_FILE = LIBRARY_DIR / "runtime.json"
 LEGACY_DATA_DIR = _BASE / "data"
 
@@ -125,7 +127,6 @@ class BookContext:
         self.context_log_jsonl = book_dir / "context_log.jsonl"
         self.session_file = book_dir / "session_autosave.json"
         self.session_md_file = book_dir / "session_autosave.md"
-        self.free_chat_file = book_dir / "free_chat.json"
         self.world_file = book_dir / "world.md"
         self.style_file = book_dir / "style.md"
         self.characters_file = book_dir / "characters.md"
@@ -144,10 +145,8 @@ class BookContext:
         self.project_file = book_dir / "project.json"
         self.codex_dir = book_dir / "codex" / "entries"
         self.codex_active_file = book_dir / "codex" / "active.json"
-        self.batch_jobs_dir = book_dir / "batch_jobs"
         self.quality_log_jsonl = book_dir / "quality_log.jsonl"
         self.archive_file = book_dir / "book_archive.md"
-        self.brief_file = book_dir / "brief.md"
         self.prompt_overrides_file = book_dir / "prompt_overrides.yaml"
         self.taste_file = book_dir / "taste.json"
 
@@ -214,15 +213,35 @@ def _book_entry(book_id: str, book_dir: Path) -> dict:
         book_type = "novel"
     mtime = book_dir.stat().st_mtime if book_dir.exists() else 0
     platform = project.get("platform") or "tomato"
+    from core.bookshelf_stats import bookshelf_stats
+
+    stats = bookshelf_stats(book_dir)
+    plan_path = book_dir / "plan.json"
+    plan_title = ""
+    if plan_path.is_file():
+        try:
+            plan_raw = json.loads(plan_path.read_text(encoding="utf-8"))
+            if isinstance(plan_raw, dict):
+                meta = plan_raw.get("meta")
+                if isinstance(meta, dict):
+                    plan_title = str(meta.get("title") or "").strip()
+        except (json.JSONDecodeError, OSError):
+            pass
+    project_title = str(project.get("title") or "").strip() or "未命名小说"
+    display_title = project_title
+    if plan_title and project_title in ("新书", "未命名小说"):
+        display_title = plan_title
+
     return {
         "id": book_id,
-        "title": project.get("title") or "未命名小说",
+        "title": display_title,
         "world_label": project.get("world_label") or "",
         "type": book_type,
         "platform": platform,
         "tagline": project.get("tagline") or "",
         "updated_at": datetime.fromtimestamp(mtime).isoformat(timespec="seconds"),
         "created_at": project.get("created_at") or "",
+        **stats,
     }
 
 
@@ -307,21 +326,17 @@ def apply_paths_to_modules() -> None:
 
 
 def reset_session_state() -> None:
-    """切换书籍时清空进程内写作/对话状态。"""
-    from infra.state import state
+    """切换书籍时清空进程内写作/对话状态（无快照时使用）。"""
+    from infra.session_book import clear_writing_state
 
-    state.conversation_history.clear()
-    state.free_chat_history.clear()
-    state.free_chat_threads.clear()
-    state.free_chat_active_thread_id = ""
-    state.session_includes_chapter = False
-    state.write_chapter_num = 0
-    state.last_injected_chapter_num = 0
-    state.appended_indices.clear()
-    state.last_append_undo = None
-    state.batch_job_running = False
-    state.batch_job_id = ""
-    state.last_context_debug.clear()
+    clear_writing_state()
+
+
+def _active_book_id() -> str | None:
+    try:
+        return get_context().book_id
+    except RuntimeError:
+        return _context.book_id if _context else None
 
 
 def reinit_book_services() -> None:
@@ -454,17 +469,22 @@ def switch_book(book_id: str) -> dict:
     if book_id not in known or not (BOOKS_DIR / book_id).is_dir():
         return {"ok": False, "error": f"书籍不存在: {book_id}"}
 
-    reset_session_state()
+    from infra.session_book import activate_book_session, park_book_session
+
+    old_id = _active_book_id()
+    if old_id and old_id != book_id:
+        park_book_session(old_id)
     _set_context(book_id)
     apply_paths_to_modules()
+    activate_book_session(book_id)
     reinit_book_services()
+    from core import plan_product
+
+    plan_product.persist_strip_legacy_meta_if_needed()
 
     index["active_book_id"] = book_id
     _save_index(index)
 
-    from app.free_chat import load_free_chat
-
-    load_free_chat()
     return {
         "ok": True,
         "book_id": book_id,
@@ -516,15 +536,359 @@ def create_book(
     index["active_book_id"] = book_id
     _save_index(index)
 
-    reset_session_state()
+    from infra.session_book import activate_book_session, park_book_session
+
+    old_id = _active_book_id()
+    if old_id and old_id != book_id:
+        park_book_session(old_id)
     _set_context(book_id)
     apply_paths_to_modules()
+    activate_book_session(book_id)
 
     from app.bootstrap import init_data_dirs
-    from app.free_chat import load_free_chat
 
     init_data_dirs()
     reinit_book_services()
-    load_free_chat()
 
     return {"ok": True, "book_id": book_id, "book": entry}
+
+
+def update_book(
+    book_id: str,
+    *,
+    title: str | None = None,
+    book_type: str | None = None,
+    platform: str | None = None,
+    world_label: str | None = None,
+    tagline: str | None = None,
+) -> dict:
+    import review_prompts
+
+    book_dir = BOOKS_DIR / book_id
+    if not book_dir.is_dir():
+        return {"ok": False, "error": "书籍不存在"}
+
+    from core import project_lifecycle
+
+    doc = project_lifecycle.load_project(book_dir)
+    if not doc:
+        doc = dict(DEFAULT_PROJECT)
+
+    if title is not None:
+        doc["title"] = (title or "").strip() or "未命名小说"
+    if book_type is not None:
+        bt = (book_type or "novel").strip()
+        if bt not in BOOK_TYPES:
+            return {"ok": False, "error": f"type 必须是 {', '.join(sorted(BOOK_TYPES))}"}
+        doc["type"] = bt
+    if platform is not None:
+        doc["platform"] = review_prompts.normalize_platform(platform)
+    if world_label is not None:
+        doc["world_label"] = (world_label or "").strip()
+    if tagline is not None:
+        doc["tagline"] = (tagline or "").strip()
+
+    project_lifecycle.save_project(book_dir, doc)
+
+    index = _load_index()
+    books = list(index.get("books") or [])
+    for i, meta in enumerate(books):
+        if meta.get("id") == book_id:
+            books[i] = _book_entry(book_id, book_dir)
+            break
+    index["books"] = books
+    _save_index(index)
+
+    entry = _book_entry(book_id, book_dir)
+    return {"ok": True, "book_id": book_id, "book": entry}
+
+
+def _load_trash_index() -> dict:
+    if not TRASH_INDEX_FILE.exists():
+        return {"version": 1, "items": []}
+    try:
+        raw = json.loads(TRASH_INDEX_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {"version": 1, "items": []}
+    return raw if isinstance(raw, dict) else {"version": 1, "items": []}
+
+
+def _save_trash_index(data: dict) -> None:
+    TRASH_DIR.mkdir(parents=True, exist_ok=True)
+    file_utils.atomic_write_text(
+        TRASH_INDEX_FILE,
+        json.dumps(data, ensure_ascii=False, indent=2),
+    )
+
+
+def _sync_trash_index_items() -> list[dict]:
+    """与 trash 目录对齐索引，返回仍存在的条目。"""
+    data = _load_trash_index()
+    kept: list[dict] = []
+    for item in data.get("items") or []:
+        if not isinstance(item, dict):
+            continue
+        bid = str(item.get("id") or "").strip()
+        if bid and (TRASH_DIR / bid).is_dir():
+            kept.append(item)
+    if kept != list(data.get("items") or []):
+        data["items"] = kept
+        _save_trash_index(data)
+    return kept
+
+
+def _activate_book_after_switch(book_id: str) -> None:
+    from infra.session_book import activate_book_session
+
+    _set_context(book_id)
+    apply_paths_to_modules()
+    activate_book_session(book_id)
+    reinit_book_services()
+    from core import plan_product
+
+    plan_product.persist_strip_legacy_meta_if_needed()
+
+
+def _clear_active_context() -> None:
+    global _context
+    from infra.session_book import clear_writing_state
+
+    _context = None
+    clear_writing_state()
+
+
+def list_trash() -> dict:
+    items: list[dict] = []
+    for meta in _sync_trash_index_items():
+        bid = str(meta.get("id") or "").strip()
+        book_dir = TRASH_DIR / bid
+        if not book_dir.is_dir():
+            continue
+        entry = _book_entry(bid, book_dir)
+        entry["trashed_at"] = meta.get("trashed_at") or ""
+        items.append(entry)
+    items.sort(key=lambda b: str(b.get("trashed_at") or ""), reverse=True)
+    return {"ok": True, "books": items, "trash_dir": str(TRASH_DIR)}
+
+
+def trash_book(book_id: str) -> dict:
+    """移入垃圾站（软删除）：目录迁至 library/trash/{id}/。"""
+    result = trash_books([book_id])
+    if not result.get("ok"):
+        err = result.get("error")
+        if result.get("failed"):
+            err = result["failed"][0].get("error") or err
+        return {"ok": False, "error": err or "移入垃圾站失败"}
+    trashed = result.get("trashed") or []
+    if not trashed:
+        return {"ok": False, "error": "移入垃圾站失败"}
+    one = trashed[0]
+    return {
+        "ok": True,
+        "book_id": one.get("book_id"),
+        "active_book_id": result.get("active_book_id"),
+        "context_refreshed": result.get("context_refreshed"),
+        "book": one.get("book"),
+    }
+
+
+def trash_books(book_ids: list[str]) -> dict:
+    """批量移入垃圾站；一次更新 index 与 active 书。"""
+    from infra.session_book import drop_book_session, park_book_session
+
+    ids: list[str] = []
+    seen: set[str] = set()
+    for raw in book_ids:
+        bid = (raw or "").strip()
+        if not bid or bid in seen:
+            continue
+        seen.add(bid)
+        ids.append(bid)
+
+    if not ids:
+        return {"ok": False, "error": "缺少 book_ids"}
+
+    index = _load_index()
+    books = list(index.get("books") or [])
+    active = str(index.get("active_book_id") or "")
+    trash_active = active in ids
+
+    if trash_active:
+        park_book_session(active)
+
+    TRASH_DIR.mkdir(parents=True, exist_ok=True)
+    trash_data = _load_trash_index()
+    trash_items = list(trash_data.get("items") or [])
+
+    trashed: list[dict] = []
+    failed: list[dict] = []
+    trashed_ids: set[str] = set()
+
+    for book_id in ids:
+        book_dir = BOOKS_DIR / book_id
+        if not book_dir.is_dir():
+            failed.append({"book_id": book_id, "error": "书籍不存在"})
+            continue
+        if not any(b.get("id") == book_id for b in books):
+            failed.append({"book_id": book_id, "error": "书籍不在书架"})
+            continue
+        dest = TRASH_DIR / book_id
+        if dest.exists():
+            failed.append({"book_id": book_id, "error": "该书籍已在垃圾站"})
+            continue
+
+        entry = _book_entry(book_id, book_dir)
+        trashed_at = datetime.now().isoformat(timespec="seconds")
+        try:
+            shutil.move(str(book_dir), str(dest))
+        except OSError as exc:
+            failed.append({"book_id": book_id, "error": str(exc)})
+            continue
+
+        books = [b for b in books if b.get("id") != book_id]
+        trash_items = [i for i in trash_items if i.get("id") != book_id]
+        trash_items.append({"id": book_id, "trashed_at": trashed_at})
+        trashed_ids.add(book_id)
+        drop_book_session(book_id)
+        trashed.append(
+            {
+                "book_id": book_id,
+                "trashed_at": trashed_at,
+                "book": {**entry, "trashed_at": trashed_at},
+            }
+        )
+
+    new_active = active if active and active not in trashed_ids else ""
+    if trash_active and books:
+        new_active = str(books[0].get("id") or "")
+
+    index["books"] = books
+    index["active_book_id"] = new_active
+    _save_index(index)
+
+    trash_data["items"] = trash_items
+    _save_trash_index(trash_data)
+
+    context_refreshed = trash_active and bool(trashed_ids)
+    if context_refreshed:
+        if new_active:
+            _activate_book_after_switch(new_active)
+        else:
+            _clear_active_context()
+
+    ok = bool(trashed)
+    return {
+        "ok": ok,
+        "trashed": trashed,
+        "failed": failed,
+        "count": len(trashed),
+        "active_book_id": new_active or None,
+        "context_refreshed": context_refreshed,
+        "error": None if ok else "没有书籍被移入垃圾站",
+    }
+
+
+def restore_book(book_id: str) -> dict:
+    """从垃圾站恢复到书架。"""
+    book_id = (book_id or "").strip()
+    trash_dir = TRASH_DIR / book_id
+    if not trash_dir.is_dir():
+        return {"ok": False, "error": "书籍不在垃圾站"}
+
+    dest = BOOKS_DIR / book_id
+    if dest.exists():
+        return {"ok": False, "error": "书架已存在同名书籍，无法恢复"}
+
+    shutil.move(str(trash_dir), str(dest))
+    entry = _book_entry(book_id, dest)
+
+    trash_data = _load_trash_index()
+    trash_data["items"] = [
+        i for i in (trash_data.get("items") or []) if i.get("id") != book_id
+    ]
+    _save_trash_index(trash_data)
+
+    index = _load_index()
+    books = list(index.get("books") or [])
+    books.append(entry)
+    index["books"] = books
+    if not index.get("active_book_id"):
+        index["active_book_id"] = book_id
+    _save_index(index)
+
+    return {"ok": True, "book_id": book_id, "book": entry}
+
+
+def purge_book(book_id: str) -> dict:
+    """从垃圾站永久删除。"""
+    result = purge_books([book_id])
+    if not result.get("ok"):
+        err = result.get("error")
+        if result.get("failed"):
+            err = result["failed"][0].get("error") or err
+        return {"ok": False, "error": err or "永久删除失败"}
+    purged = result.get("purged") or []
+    if not purged:
+        return {"ok": False, "error": "永久删除失败"}
+    return {"ok": True, "book_id": purged[0]}
+
+
+def purge_books(book_ids: list[str]) -> dict:
+    """批量从垃圾站永久删除；一次更新 trash index。"""
+    from infra.session_book import drop_book_session
+
+    ids: list[str] = []
+    seen: set[str] = set()
+    for raw in book_ids:
+        bid = (raw or "").strip()
+        if not bid or bid in seen:
+            continue
+        seen.add(bid)
+        ids.append(bid)
+
+    if not ids:
+        return {"ok": False, "error": "缺少 book_ids"}
+
+    trash_data = _load_trash_index()
+    trash_items = list(trash_data.get("items") or [])
+
+    purged: list[str] = []
+    failed: list[dict] = []
+
+    for book_id in ids:
+        trash_dir = TRASH_DIR / book_id
+        if not trash_dir.is_dir():
+            failed.append({"book_id": book_id, "error": "书籍不在垃圾站"})
+            continue
+        shutil.rmtree(trash_dir)
+        trash_items = [i for i in trash_items if i.get("id") != book_id]
+        drop_book_session(book_id)
+        purged.append(book_id)
+
+    trash_data["items"] = trash_items
+    _save_trash_index(trash_data)
+
+    ok = bool(purged)
+    return {
+        "ok": ok,
+        "purged": purged,
+        "failed": failed,
+        "count": len(purged),
+        "error": None if ok else "没有书籍被永久删除",
+    }
+
+
+def purge_all_trash() -> dict:
+    """清空垃圾站（永久删除全部）。"""
+    from infra.session_book import drop_book_session
+
+    removed: list[str] = []
+    for meta in _sync_trash_index_items():
+        bid = str(meta.get("id") or "").strip()
+        trash_dir = TRASH_DIR / bid
+        if trash_dir.is_dir():
+            shutil.rmtree(trash_dir)
+            drop_book_session(bid)
+            removed.append(bid)
+    _save_trash_index({"version": 1, "items": []})
+    return {"ok": True, "removed": removed, "count": len(removed)}
