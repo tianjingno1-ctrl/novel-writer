@@ -19,8 +19,18 @@ def _outline_context_ready(ctx: AppContext) -> str | None:
     store = ctx.store
     if not store.list_chapter_nums():
         return "没有找到章节文件"
+    if store.count_summaries() == 0:
+        from core.data import book_context
+
+        if book_context.is_short_book():
+            return "请先完成至少一章正文（短篇不使用章节概述）"
+        return "请先生成章节概述（/summary 或 Web「生成概述」）"
     snap = store.load_snapshot(for_purpose="check")
-    if not snap.summaries_combined or store.count_summaries() == 0:
+    if not snap.summaries_combined:
+        from core.data import book_context
+
+        if book_context.is_short_book():
+            return None
         return "请先生成章节概述（/summary 或 Web「生成概述」）"
     return None
 

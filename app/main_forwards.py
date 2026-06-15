@@ -44,15 +44,13 @@ _MODULES: dict[str, str] = {
     "get_world_block": "core.context",
     "get_characters_block": "core.context",
     "extract_chapter_body_from_user_message": "core.context",
-    # app.codex / guide / chapters_api / bootstrap_data / free_chat
+    # app.codex / chapters_api / bootstrap_data
     "save_codex": "app.codex",
     "get_codex": "app.codex",
-    "get_guide_status": "app.guide",
     "save_chapter_by_num": "app.chapters_api",
     "get_chapter_by_num": "app.chapters_api",
     "list_chapters": "app.chapters_api",
     "create_next_chapter": "app.chapters_api",
-    "load_free_chat": "app.free_chat",
     "INITIAL_FILE_TEMPLATES": "app.bootstrap_data",
     "DEFAULT_CHAT_PROMPTS": "app.bootstrap_data",
     # app.writing_turns
@@ -114,16 +112,6 @@ _MODULES: dict[str, str] = {
     "do_new": "app.cli",
     "print_help": "app.cli",
     "print_startup_banner": "app.cli",
-    # app.free_chat（测试经 main.* 访问）
-    "_ensure_free_chat_threads": "app.free_chat",
-    "_persist_active_thread_messages": "app.free_chat",
-    "create_free_chat_thread": "app.free_chat",
-    "switch_free_chat_thread": "app.free_chat",
-    "save_free_chat": "app.free_chat",
-    "delete_free_chat_message": "app.free_chat",
-    "free_chat": "app.free_chat",
-    "clear_free_chat": "app.free_chat",
-    "get_free_chat_state": "app.free_chat",
 }
 
 _ALIASES: dict[str, tuple[str, str]] = {

@@ -19,6 +19,26 @@ if TYPE_CHECKING:
 
 _FEMALE_REVIEW_MODES = frozenset({"chapter", "outline", "characters"})
 
+import re
+
+_REVIEW_BODY_MARKERS = re.compile(
+    r"^#\s*女频审阅|^profile\s*[:：]|^##\s*一、|^##\s*开篇",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _looks_like_chapter_body(body: str) -> bool:
+    """采纳改稿时排除误写入的审阅报告。"""
+    text = (body or "").strip()
+    if len(text) < 40:
+        return False
+    head = text[:800]
+    if _REVIEW_BODY_MARKERS.search(head):
+        return False
+    if head.count("## ") >= 3 and "读者情绪" in head:
+        return False
+    return True
+
 
 def _apply_chapter_title(chapter_num: int, title: str | None) -> str | None:
     if not title:
@@ -128,6 +148,10 @@ def _criteria_context_block(ctx: AppContext) -> str:
         for row in resolved["soft"]:
             lines.append(f"- [{row.get('ref', '')}] {row.get('content', '')}")
         lines.append("")
+    if resolved.get("hard") or resolved.get("soft"):
+        from core import review_gaps
+
+        lines.append(review_gaps.criteria_gaps_appendix())
     return "\n".join(lines).strip()
 
 
@@ -142,6 +166,8 @@ def run_female_fiction_review(
     write_back: bool = False,
     sync_archive: bool = True,
     skip_precheck: bool = False,
+    skip_paywall_intent: bool = False,
+    revise_note: str = "",
 ) -> dict:
     if mode not in _FEMALE_REVIEW_MODES:
         return {"ok": False, "error": "mode 必须是 chapter / outline / characters"}
@@ -162,11 +188,21 @@ def run_female_fiction_review(
 
     if mode == "chapter" and num > 0 and not skip_precheck:
         project = novel_data.get_project_meta()
+        plan = novel_data.load_plan()
+        from core import chapter_role_overlay
+
+        skip_codes = (
+            chapter_precheck.SKIPPABLE_PRECHECK_CODES
+            if skip_paywall_intent
+            else frozenset()
+        )
         pre = chapter_precheck.run_precheck(
             chapter_num=num,
             content=body,
-            plan=novel_data.load_plan(),
+            plan=plan,
             project=project,
+            role_params=chapter_role_overlay.l1b_params(plan, num),
+            skip_issue_codes=skip_codes,
         )
         if not pre.get("ok"):
             return {
@@ -200,6 +236,14 @@ def run_female_fiction_review(
     if criteria_block:
         taste_block = f"{taste_block}\n\n{criteria_block}".strip() if taste_block else criteria_block
 
+    if mode == "chapter" and num > 0:
+        from core import chapter_role_overlay
+
+        plan = novel_data.load_plan()
+        overlay = chapter_role_overlay.l4_overlay_block(plan, num)
+        if overlay:
+            taste_block = f"{taste_block}\n\n{overlay}".strip() if taste_block else overlay
+
     llm_r = quality_reviewer.run_female_fiction_review(
         mode,
         body,
@@ -213,6 +257,7 @@ def run_female_fiction_review(
         profile_id=profile_id,
         project=project,
         taste_excerpt=taste_block,
+        revise_note=revise_note,
     )
     if not llm_r.get("ok"):
         return llm_r
@@ -225,6 +270,18 @@ def run_female_fiction_review(
     active_profile = llm_r.get("profile_id") or active_profile
     tag = llm_r.get("tag") or ""
     profile_label = llm_r.get("profile_label") or ""
+
+    if revise and not rewrite_only and not revised_text and not write_back:
+        return {
+            "ok": False,
+            "error": "改稿未生成独立正文（须在审阅后输出 # 改稿正文），请重试",
+            "revise": True,
+            "reply": display_reply,
+            "review_text": review_text or None,
+            "chapter_num": num or None,
+            "profile_id": active_profile,
+            "profile_label": profile_label,
+        }
 
     if write_back and num > 0 and revised_text:
         write_r = chapter_text.write_chapter_from_review_text(
@@ -249,8 +306,12 @@ def run_female_fiction_review(
         archive_synced = bool(archive_result.get("ok"))
 
     pending_accept = bool(
-        (rewrite_only or revise) and (revised_text or display_reply).strip() and not written_back
+        rewrite_only
+        and (revised_text or display_reply).strip()
+        and not written_back
     )
+    if revise and not rewrite_only:
+        pending_accept = bool(revised_text and not written_back)
     from core import prompt_nodes
 
     review_prompt = prompt_nodes.resolve_node(
@@ -306,6 +367,38 @@ def run_female_fiction_review(
         revise_log_id = log_id
     accept_log_id = revise_log_id if (pending_accept and revise_log_id) else log_id
 
+    if mode == "chapter" and num > 0 and log_id:
+        from core import chapter_review
+        from core import review_gaps
+
+        excerpt = (review_text if revise else display_reply) or ""
+        source_text = review_text.strip() if review_text.strip() else excerpt
+        plan = novel_data.load_plan()
+        resolved = criteria_resolver.resolve_review_criteria(
+            plan, book_dir=ctx.store.paths.data_dir,
+        )
+        gaps = review_gaps.parse_gaps_from_review(source_text, resolved)
+        try:
+            chapter_review.append_round(
+                ctx.store.paths.data_dir,
+                num,
+                quality_log_id=str(log_id),
+                profile_id=active_profile,
+                revise=revise,
+                rewrite_only=rewrite_only,
+                review_excerpt=excerpt[:2000],
+                gaps=gaps,
+                judgment="pending",
+            )
+        except (ValueError, OSError):
+            pass
+
+    from core import chapter_role_overlay
+
+    role_meta: dict = {}
+    if mode == "chapter" and num > 0:
+        role_meta = chapter_role_overlay.review_context_meta(novel_data.load_plan(), num)
+
     return {
         "ok": True,
         "reply": display_reply,
@@ -329,6 +422,7 @@ def run_female_fiction_review(
         "log_id": accept_log_id,
         "review_log_id": log_id if accept_log_id != log_id else None,
         "pending_accept": pending_accept,
+        **role_meta,
         **ctx.reviewer_deps.llm.get_last_call_info(),
     }
 
@@ -360,6 +454,11 @@ def accept_female_fiction_rewrite(
     body = (row.get("body") or "").strip()
     if len(body) < 40:
         return {"ok": False, "error": "改稿正文过短，无法采纳"}
+    if not _looks_like_chapter_body(body):
+        return {
+            "ok": False,
+            "error": "改稿正文像审阅报告而非章节，请重新改稿",
+        }
 
     write_r = chapter_text.write_chapter_from_review_text(
         ctx.store,

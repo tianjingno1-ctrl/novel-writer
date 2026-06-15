@@ -17,7 +17,6 @@ router = APIRouter(tags=["config"])
 class ContextConfig(BaseModel):
     turns: int | None = None
     mode: str | None = None
-    free_chat_turns: int | None = None
 
 
 class ProviderSwitch(BaseModel):
@@ -62,10 +61,6 @@ def set_context(cfg: ContextConfig) -> dict:
         if cfg.turns < 0 or cfg.turns > 100:
             raise HTTPException(400, "写书轮数范围 0-100")
         config.CHAT_CONTEXT_TURNS = cfg.turns
-    if cfg.free_chat_turns is not None:
-        if cfg.free_chat_turns < 0 or cfg.free_chat_turns > 100:
-            raise HTTPException(400, "自由聊轮数范围 0-100")
-        config.FREE_CHAT_CONTEXT_TURNS = cfg.free_chat_turns
     if cfg.mode is not None:
         if cfg.mode not in ("turns", "summaries", "beats", "codex"):
             raise HTTPException(400, "mode 必须是 turns/summaries/beats/codex")
@@ -74,7 +69,6 @@ def set_context(cfg: ContextConfig) -> dict:
     return {
         "ok": True,
         "context_turns": config.CHAT_CONTEXT_TURNS,
-        "free_chat_context_turns": config.FREE_CHAT_CONTEXT_TURNS,
         "context_mode": config.CONTEXT_MODE,
     }
 

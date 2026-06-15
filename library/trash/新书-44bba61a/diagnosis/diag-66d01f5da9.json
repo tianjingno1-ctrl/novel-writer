@@ -1,0 +1,22 @@
+{
+  "id": "diag-66d01f5da9",
+  "book_id": "新书-44bba61a",
+  "created_at": "2026-06-10 19:28:38",
+  "quality_log_id": "c82cf2f66f91",
+  "trigger": "chapter_fail",
+  "trigger_ref": {},
+  "issue_tags": [],
+  "analysis": "第1章缺失平台向审阅（review.platform），导致‘review_gap’问题，未能依据硬性规则检查核心冲突开篇和钩子。",
+  "patch": {
+    "target_node": "review.platform",
+    "diff_preview": "追加一条流程规则：writing.main 产出续写后，必须经 review.platform 节点进行平台向审阅。该节点需强制检查以下项目：\n1. 首章（或当前续写章）在3000字内是否出现核心冲突或立体钩子（如信息差、身份反转、强烈情绪对立）；\n2. 章末是否留有明确悬念或情绪钩子（如未解之谜、狠话、新角色介入）；\n3. 是否删去不推动情绪的铺垫句（如冗余心理、背景交代）。\n审阅不合格则打回 writing.main 修改直改稿，直至满足条件。",
+    "override": {
+      "prepend": "",
+      "append": "追加一条流程规则：writing.main 产出续写后，必须经 review.platform 节点进行平台向审阅。该节点需强制检查以下项目：\n1. 首章（或当前续写章）在3000字内是否出现核心冲突或立体钩子（如信息差、身份反转、强烈情绪对立）；\n2. 章末是否留有明确悬念或情绪钩子（如未解之谜、狠话、新角色介入）；\n3. 是否删去不推动情绪的铺垫句（如冗余心理、背景交代）。\n审阅不合格则打回 writing.main 修改直改稿，直至满足条件。",
+      "system": null
+    }
+  },
+  "decision": {},
+  "status": "pending",
+  "updated_at": "2026-06-10 19:28:38"
+}

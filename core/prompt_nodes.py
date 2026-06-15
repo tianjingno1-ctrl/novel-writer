@@ -24,6 +24,7 @@ class PromptNodeDef:
     label: str
     category: str
     prompt_id: str | None = None
+    prompt_id_novel: str | None = None
     review_profile: bool = False
     description: str = ""
 
@@ -31,7 +32,9 @@ class PromptNodeDef:
 # Phase 1 节点清单（可扩展）
 NODE_REGISTRY: dict[str, PromptNodeDef] = {
     "writing.main": PromptNodeDef(
-        "writing.main", "写作续写", "writing", prompt_id="writing",
+        "writing.main", "写作续写", "writing",
+        prompt_id="writing",
+        prompt_id_novel="writing_novel",
         description="写书对话 system prompt",
     ),
     "review.platform": PromptNodeDef(
@@ -41,9 +44,12 @@ NODE_REGISTRY: dict[str, PromptNodeDef] = {
     "prefill.direction": PromptNodeDef(
         "prefill.direction", "预填故事方向", "prefill",
         prompt_id="prefill_short_direction",
+        prompt_id_novel="prefill_novel_direction",
     ),
     "prefill.plan": PromptNodeDef(
-        "prefill.plan", "预填章规划", "prefill", prompt_id="prefill_short_plan",
+        "prefill.plan", "预填章规划", "prefill",
+        prompt_id="prefill_short_plan",
+        prompt_id_novel="prefill_novel_plan",
     ),
     "maintain.summary": PromptNodeDef(
         "maintain.summary", "生成概述", "maintain", prompt_id="summary",
@@ -167,10 +173,18 @@ def merge_node_override(
         if key not in override:
             continue
         val = override.get(key)
-        if key == "system" and (val is None or not str(val).strip()):
-            merged.pop("system", None)
-        elif val is not None:
-            merged[key] = str(val) if key != "system" else str(val).strip()
+        if val is None:
+            continue
+        text = str(val).strip()
+        if key == "system":
+            if text:
+                merged["system"] = text
+            else:
+                merged.pop("system", None)
+        elif text:
+            merged[key] = text
+        else:
+            merged.pop(key, None)
     if merged:
         nodes[node_id] = merged
     else:
@@ -197,6 +211,22 @@ class ResolvedPrompt:
     profile_id: str | None = None
 
 
+def _prompt_book_type(project: dict | None) -> str:
+    bt = review_prompts.normalize_book_type((project or {}).get("type"))
+    if bt == "world":
+        return "novel"
+    return bt
+
+
+def _resolve_prompt_id(defn: PromptNodeDef, project: dict | None) -> str:
+    bt = _prompt_book_type(project)
+    if bt == "novel" and defn.prompt_id_novel:
+        return defn.prompt_id_novel
+    if defn.prompt_id:
+        return defn.prompt_id
+    raise ValueError(f"节点 {defn.node_id} 未配置 prompt_id")
+
+
 def resolve_node(
     node_id: str,
     *,
@@ -209,13 +239,25 @@ def resolve_node(
     if not defn:
         raise ValueError(f"未知 prompt 节点: {node_id}")
 
+    if project is None and book_dir is not None:
+        proj_path = book_dir / "project.json"
+        if proj_path.is_file():
+            try:
+                import json
+
+                raw = json.loads(proj_path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    project = raw
+            except (OSError, json.JSONDecodeError):
+                project = None
+
     overrides = load_overrides_doc(book_dir)
     node_override = (overrides.get("nodes") or {}).get(node_id)
 
     base_text = ""
     prompt_source = "global"
     profile_id: str | None = None
-    prompt_id = defn.prompt_id
+    prompt_id: str | None = None
 
     if defn.review_profile:
         profile_id = review_prompts.resolve_profile_id(
@@ -226,12 +268,12 @@ def resolve_node(
             profile_id, project=project, include_revise=include_revise,
         )
         profile_id = active
+        prompt_id = active
         prompt_source = "review_profile"
-    elif defn.prompt_id:
-        base_text = prompt_loader.load_system(defn.prompt_id)
-        prompt_source = "global"
     else:
-        raise ValueError(f"节点 {node_id} 未配置 prompt_id")
+        prompt_id = _resolve_prompt_id(defn, project)
+        base_text = prompt_loader.load_system(prompt_id)
+        prompt_source = "global"
 
     text = base_text
     if isinstance(node_override, dict):

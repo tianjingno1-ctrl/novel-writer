@@ -37,28 +37,28 @@ export function WelcomeStart() {
   const navigate = useNavigate()
 
   return (
-    <div className="mx-auto max-w-md space-y-8 px-4 py-10 text-center">
+    <div className="mx-auto max-w-md space-y-8 py-12 text-center">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          欢迎使用 Novel Writer
-        </h1>
-        <p className="mt-2 text-sm text-muted">你想怎么开始？</p>
+        <h1 className="page-title">欢迎使用 Novel Writer</h1>
+        <p className="page-sub">你想怎么开始？</p>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-3 text-left">
         {paths.map(({ id, icon: Icon, title, desc, href }) => (
           <button
             key={id}
             type="button"
-            className="flex w-full items-start gap-4 rounded-xl border border-border bg-surface p-5 text-left shadow-sm transition-all hover:border-primary/40 hover:shadow-md"
+            className="card-ui book-card flex w-full items-start gap-4 text-left"
             onClick={() => navigate(href)}
           >
-            <div className="rounded-lg bg-accent p-2.5 text-primary">
+            <div className="rounded-[var(--border-radius-sm)] bg-[var(--color-background-secondary)] p-2.5 text-[var(--color-primary)]">
               <Icon className="h-5 w-5" />
             </div>
             <div>
-              <p className="font-medium text-foreground">{title}</p>
-              <p className="mt-1 text-sm text-muted">{desc}</p>
+              <p className="text-[13px] font-medium">{title}</p>
+              <p className="mt-1 text-[11px] text-[var(--color-text-tertiary)]">
+                {desc}
+              </p>
             </div>
           </button>
         ))}

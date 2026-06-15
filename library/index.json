@@ -1,5 +1,25 @@
 {
   "version": 1,
-  "active_book_id": "",
-  "books": []
+  "active_book_id": "养生男主-电竞女主-1218ba27",
+  "books": [
+    {
+      "id": "养生男主-电竞女主-1218ba27",
+      "title": "养生男主+电竞女主",
+      "world_label": "",
+      "type": "short",
+      "platform": "tomato",
+      "tagline": "",
+      "updated_at": "2026-06-13T17:39:06",
+      "created_at": "2026-06-13T17:39:06",
+      "progress_pct": 0,
+      "shelf_status": "draft",
+      "chapter_label": "草稿 · 继续向导",
+      "wizard_complete": false,
+      "wizard_step": "reference",
+      "chapter_total": 0,
+      "chapter_approved": 0,
+      "lifecycle_status": "drafting"
+    }
+  ],
+  "migrated_from_data": true
 }

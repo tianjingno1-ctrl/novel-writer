@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>小说修改助手</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .highlight-pending {
+      background-color: #fef08a;
+      border-radius: 2px;
+      padding: 0 1px;
+      cursor: pointer;
+    }
+    .highlight-modified {
+      background-color: #bbf7d0;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+    #editor-left:focus {
+      outline: 2px solid #93c5fd;
+      outline-offset: 2px;
+    }
+    .card-active {
+      box-shadow: 0 0 0 2px #3b82f6;
+    }
+    .card-skipped {
+      opacity: 0.55;
+    }
+    #editor-left {
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.75;
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body class="bg-stone-50 text-stone-800 min-h-screen">
+  <!-- ========== 导入界面 ========== -->
+  <div id="import-view" class="max-w-3xl mx-auto px-4 py-8">
+    <p class="text-xs text-stone-400 mb-4">💡 直接双击可用于导入/编辑/导出；如需 AI 解析功能，请用 python -m http.server 8080 启动后访问</p>
+    <header class="mb-8">
+      <h1 class="text-2xl font-bold text-stone-900">小说修改助手</h1>
+      <p class="text-sm text-stone-500 mt-1">对照 AI 修改建议逐条处理，导出 Word 交给编辑</p>
+    </header>
+
+    <div id="recovery-banner" class="hidden mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm">
+      <p class="font-medium text-amber-900">检测到上次未完成的编辑，是否恢复？</p>
+      <div class="mt-2 flex gap-2">
+        <button type="button" id="btn-recover" class="rounded bg-amber-600 px-3 py-1 text-white text-sm hover:bg-amber-700">恢复</button>
+        <button type="button" id="btn-ignore-recovery" class="rounded border border-stone-300 px-3 py-1 text-sm hover:bg-stone-100">忽略</button>
+      </div>
+    </div>
+
+    <!-- ① API Key -->
+    <section id="api-key-section" class="hidden mb-6 rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+      <label class="block text-sm font-medium mb-2">DeepSeek API Key</label>
+      <div class="flex flex-wrap gap-2 items-center">
+        <input type="password" id="api-key-input" placeholder="sk-..." class="flex-1 min-w-[200px] rounded border border-stone-300 px-3 py-2 text-sm" autocomplete="off" />
+        <button type="button" id="btn-test-api" class="rounded bg-stone-700 px-4 py-2 text-sm text-white hover:bg-stone-800">测试连接</button>
+      </div>
+      <p id="api-test-result" class="mt-2 text-sm hidden"></p>
+    </section>
+
+    <!-- ② 原文 -->
+    <section class="mb-6 rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+      <div class="flex justify-between items-center mb-2">
+        <h2 class="text-sm font-semibold">② 原文</h2>
+        <span id="original-count" class="text-xs text-stone-500">0 字</span>
+      </div>
+      <input type="file" id="original-file" accept=".txt" class="mb-2 text-sm" />
+      <textarea id="original-input" rows="10" placeholder="上传 .txt 或粘贴原文…" class="w-full rounded border border-stone-300 px-3 py-2 text-sm font-mono leading-relaxed"></textarea>
+    </section>
+
+    <!-- ③ AI 建议 -->
+    <section class="mb-6 rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+      <div class="flex flex-wrap justify-between items-center gap-2 mb-2">
+        <h2 class="text-sm font-semibold">③ AI 修改建议</h2>
+        <div class="flex items-center gap-2">
+          <button type="button" id="btn-copy-prompt" class="rounded border border-stone-300 px-3 py-1 text-xs hover:bg-stone-50">📋 复制格式提示词</button>
+          <span id="suggestion-count" class="text-xs text-stone-500">0 字</span>
+        </div>
+      </div>
+      <p id="api-truncate-hint" class="hidden mb-2 text-xs text-amber-700">建议内容较长，调用 API 时将截断至 3000 字</p>
+      <input type="file" id="suggestion-file" accept=".txt" class="mb-2 text-sm" />
+      <textarea id="suggestion-input" rows="8" placeholder="粘贴 AI 建议（JSON / 自然语言 / 结构化文本）…" class="w-full rounded border border-stone-300 px-3 py-2 text-sm font-mono leading-relaxed"></textarea>
+    </section>
+
+    <!-- ④ 解析方式 -->
+    <section class="mb-6 rounded-lg border border-stone-200 bg-white p-4 shadow-sm">
+      <h2 class="text-sm font-semibold mb-3">④ 解析方式</h2>
+      <div class="space-y-3 text-sm">
+        <label class="flex gap-2 cursor-pointer">
+          <input type="radio" name="parse-mode" value="json" checked class="mt-1" />
+          <span><strong>直接解析 JSON</strong>（默认）— 适合用「复制格式提示词」让 AI 输出的标准 JSON，无需联网。</span>
+        </label>
+        <label class="flex gap-2 cursor-pointer">
+          <input type="radio" name="parse-mode" value="api" class="mt-1" />
+          <span><strong>调用 API 解析</strong> — 适合自然语言建议，需 DeepSeek API Key。</span>
+        </label>
+        <label class="flex gap-2 cursor-pointer">
+          <input type="radio" name="parse-mode" value="rules" class="mt-1" />
+          <span><strong>规则解析</strong> — 适合「原文：xxx / 建议：xxx」等格式，无需联网。</span>
+        </label>
+      </div>
+    </section>
+
+    <p id="import-error" class="hidden mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 whitespace-pre-wrap"></p>
+
+    <!-- 规则解析预览 -->
+    <section id="rules-preview-section" class="hidden mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
+      <h3 class="text-sm font-semibold mb-2">规则解析预览（可编辑后确认）</h3>
+      <textarea id="rules-preview-json" rows="12" class="w-full rounded border border-stone-300 px-3 py-2 text-xs font-mono"></textarea>
+      <div class="mt-3 flex gap-2">
+        <button type="button" id="btn-confirm-rules" class="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700">确认并进入编辑</button>
+        <button type="button" id="btn-cancel-rules" class="rounded border border-stone-300 px-4 py-2 text-sm hover:bg-white">取消</button>
+      </div>
+    </section>
+
+    <button type="button" id="btn-start" class="w-full rounded-lg bg-emerald-700 py-3 text-white font-medium hover:bg-emerald-800 shadow-sm">开始编辑</button>
+  </div>
+
+  <!-- ========== 编辑界面 ========== -->
+  <div id="editor-view" class="hidden h-screen flex flex-col">
+    <header class="shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-stone-200 bg-white px-4 py-2 shadow-sm">
+      <div class="flex items-center gap-3">
+        <span class="font-semibold text-stone-900">小说修改助手</span>
+        <button type="button" id="btn-reimport" class="text-sm text-stone-600 hover:text-stone-900 underline">重新导入</button>
+        <button type="button" id="btn-export" class="rounded bg-emerald-700 px-3 py-1.5 text-sm text-white hover:bg-emerald-800">导出 Word</button>
+      </div>
+      <p id="stats-bar" class="text-sm text-stone-600">已修改 0 · 已跳过 0 · 待处理 0 / 共 0 条</p>
+    </header>
+    <div class="flex flex-1 min-h-0">
+      <div class="flex-1 flex flex-col border-r border-stone-200 bg-white">
+        <div class="shrink-0 px-4 py-2 text-xs text-stone-500 border-b border-stone-100">
+          左侧原文（可编辑）· 黄色=待处理 · 绿色=已修改 · 点击高亮跳转建议
+        </div>
+        <div id="editor-left" contenteditable="true" class="flex-1 overflow-y-auto px-6 py-4"></div>
+      </div>
+      <div class="w-[380px] shrink-0 flex flex-col bg-stone-50">
+        <div class="shrink-0 px-4 py-2 text-xs font-medium text-stone-600 border-b border-stone-200">建议列表</div>
+        <div id="suggestion-list" class="flex-1 overflow-y-auto p-3 space-y-3"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/docx@9.5.1/build/index.min.js"></script>
+  <script>
+    // ==================== 常量 ====================
+    const FORMAT_PROMPT = `你是小说改稿助手。请把「修改建议」整理成下面这种 JSON 数组，供本地工具直接解析。
+
+【输出要求 — 必须全部遵守】
+1. 只输出一个 JSON 数组，不要输出任何解释、标题、markdown、代码块标记（不要 \`\`\`json）。
+2. 数组里每个对象代表一条修改建议，字段固定 4 个，顺序不限：
+   - orig：原文里要被改掉的那一段，必须与原文逐字一致（标点、空格、引号都算）
+   - orig_context：在原文里截取 orig 前后各约 15 字，拼成一段定位用上下文；必须完整包含 orig；若在章首/章末，单侧够 15 字即可
+   - sug：建议改成的文字（可以是空字符串 ""，表示建议删除）
+   - reason：修改原因；没有就写 ""
+3. 一条建议一个对象，不要合并多条。
+4. 字符串必须是合法 JSON：用英文双引号 " 包裹；字段内的双引号写成 \\"；换行写成 \\n；不要用中文弯引号 ""''。
+5. 不要尾逗号（最后一个字段后面不要加逗号）。
+
+【格式示例 — 请仿照这个结构输出】
+[
+  {
+    "orig": "他说\\"你好\\"世界",
+    "orig_context": "……前文约15字他说\\"你好\\"世界后文约15字……",
+    "sug": "他说「你好」世界",
+    "reason": "中文引号与 JSON 转义示例"
+  },
+  {
+    "orig": "她转身离开了。",
+    "orig_context": "林晚没再说话。她转身离开了。门在身后关上。",
+    "sug": "她转身离开，门在身后轻轻合上。",
+    "reason": "动作更连贯"
+  }
+]
+
+【orig / orig_context 怎么写】
+- 先在原文里 Ctrl+F 找到要改的那句话，原样复制到 orig，不要润色、不要改标点。
+- orig_context = orig 前面约 15 字 + orig + orig 后面约 15 字（都在原文里截取）。
+- 若 orig 在原文中出现多次，orig_context 要足够长，让工具能唯一定位到你要改的那一处。
+
+【禁止】
+- 禁止输出 \`\`\` 或「以下是 JSON」之类前后缀
+- 禁止在 JSON 外再包一层说明文字
+- 禁止 orig 与原文不一致（差一个字都会导致无法高亮）
+
+请根据我接下来提供的原文与改稿意见，直接输出符合上述要求的纯 JSON 数组。`;
+
+    const STORAGE_KEY = 'novel_editor_state';
+    const API_KEY_STORAGE = 'deepseek_api_key';
+    const API_TRUNCATE = 3000;
+
+    // ==================== 状态 ====================
+    let originalText = '';
+    let suggestions = [];
+    /** @type {Record<string, 'pending'|'modified'|'skipped'>} */
+    let suggestionStates = {};
+    let cardClickCounts = {};
+    let statusCheckTimer = null;
+    let pendingRulesSuggestions = null;
+
+    // ==================== DOM ====================
+    const $ = (id) => document.getElementById(id);
+
+    // ==================== 工具 ====================
+    function escapeHtml(s) {
+      return s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function countChars(s) {
+      return (s || '').replace(/\s/g, '').length;
+    }
+
+    function normalizeSuggestions(arr) {
+      if (!Array.isArray(arr)) throw new Error('解析结果必须是 JSON 数组');
+      return arr.map((item, i) => {
+        if (!item || typeof item !== 'object') throw new Error(`第 ${i + 1} 条不是有效对象`);
+        const orig = String(item.orig ?? '').trim();
+        const sug = String(item.sug ?? '').trim();
+        if (!orig) throw new Error(`第 ${i + 1} 条缺少 orig`);
+        return {
+          orig,
+          orig_context: String(item.orig_context ?? '').trim(),
+          sug,
+          reason: String(item.reason ?? '').trim(),
+        };
+      });
+    }
+
+    function showImportError(msg) {
+      const el = $('import-error');
+      if (msg) {
+        el.textContent = msg;
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    }
+
+    function getParseMode() {
+      return document.querySelector('input[name="parse-mode"]:checked')?.value || 'json';
+    }
+
+    function initSuggestionStates() {
+      suggestionStates = {};
+      cardClickCounts = {};
+      suggestions.forEach((_, i) => {
+        suggestionStates[String(i)] = 'pending';
+        cardClickCounts[String(i)] = 0;
+      });
+    }
+
+    // ==================== 高亮定位 ====================
+    /**
+     * @returns {{ start: number, end: number, id: string }[]}
+     */
+    function computeHighlightRanges(text, suggestionsList) {
+      const ranges = [];
+      suggestionsList.forEach((sug, idx) => {
+        const id = String(idx);
+        if (suggestionStates[id] === 'skipped') return;
+
+        const orig = sug.orig;
+        const ctx = sug.orig_context;
+        const positions = [];
+
+        if (ctx) {
+          let searchFrom = 0;
+          while (searchFrom < text.length) {
+            const ctxIdx = text.indexOf(ctx, searchFrom);
+            if (ctxIdx === -1) break;
+            const origInCtx = ctx.indexOf(orig);
+            if (origInCtx !== -1) {
+              const start = ctxIdx + origInCtx;
+              positions.push({ start, end: start + orig.length });
+            }
+            searchFrom = ctxIdx + 1;
+          }
+        }
+
+        if (positions.length === 0) {
+          let searchFrom = 0;
+          while (searchFrom < text.length) {
+            const idx = text.indexOf(orig, searchFrom);
+            if (idx === -1) break;
+            positions.push({ start: idx, end: idx + orig.length });
+            searchFrom = idx + 1;
+          }
+        }
+
+        positions.forEach((p) => {
+          ranges.push({ start: p.start, end: p.end, id });
+        });
+
+        sug._matchCount = positions.length;
+        sug._found = positions.length > 0;
+      });
+      return ranges;
+    }
+
+    function buildHighlightedHtml(plainText, suggestionsList) {
+      const ranges = computeHighlightRanges(plainText, suggestionsList);
+      ranges.sort((a, b) => b.start - a.start);
+
+      let html = escapeHtml(plainText);
+      // 在 escaped 文本上按原索引插入 — 需在未 escape 的 plainText 上算 range，再映射
+      // 简化：在未 escape 的字符串上插入 marker，再整体 escape span 外部分
+      let raw = plainText;
+      const rawRanges = computeHighlightRanges(raw, suggestionsList);
+      rawRanges.sort((a, b) => b.start - a.start);
+
+      for (const r of rawRanges) {
+        const state = suggestionStates[r.id];
+        if (state === 'skipped') continue;
+        const cls = state === 'modified' ? 'highlight-modified' : 'highlight-pending';
+        const before = raw.slice(0, r.start);
+        const mid = raw.slice(r.start, r.end);
+        const after = raw.slice(r.end);
+        raw = before + `\x00SPAN_START_${r.id}_${cls}\x00` + mid + `\x00SPAN_END\x00` + after;
+      }
+
+      html = escapeHtml(raw)
+        .replace(/\x00SPAN_START_(\d+)_(highlight-\w+)\x00/g, (_, id, cls) =>
+          `<span data-suggestion-id="${id}" class="${cls}">`)
+        .replace(/\x00SPAN_END\x00/g, '</span>');
+
+      return html.replace(/\n/g, '<br>');
+    }
+
+    function findHighlightElements(suggestionId) {
+      return Array.from(
+        $('editor-left').querySelectorAll(`span[data-suggestion-id="${suggestionId}"]`)
+      );
+    }
+
+    // ==================== 解析 ====================
+    function sanitizeJsonText(text) {
+      let s = String(text || '').trim();
+      const fenced = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+      if (fenced) s = fenced[1].trim();
+      else if (s.startsWith('```')) {
+        s = s.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+      }
+      const start = s.indexOf('[');
+      const end = s.lastIndexOf(']');
+      if (start !== -1 && end > start) {
+        s = s.slice(start, end + 1);
+      }
+      s = s
+        .replace(/[\u201c\u201d\u201e\u201f\uff02]/g, '"')
+        .replace(/[\u2018\u2019\u201a\u201b]/g, "'");
+      s = s.replace(/,\s*([}\]])/g, '$1');
+      return s;
+    }
+
+    function jsonParseErrorDetail(raw, err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const m = msg.match(/position (\d+)/i);
+      if (!m) return msg;
+      const pos = Number(m[1]);
+      const snippet = raw.slice(Math.max(0, pos - 40), Math.min(raw.length, pos + 40));
+      const line = raw.slice(0, pos).split('\n').length;
+      return (
+        msg +
+        `（约第 ${line} 行）\n附近内容：「${snippet.replace(/\n/g, '↵')}」\n` +
+        '常见原因：orig / sug 字段里含有未转义的双引号 "，请改为 \\"，或让 AI 重新按格式提示词输出。'
+      );
+    }
+
+    function parseJsonSuggestions(text) {
+      const candidates = [text.trim(), sanitizeJsonText(text)];
+      let lastErr = null;
+      for (const candidate of candidates) {
+        if (!candidate) continue;
+        try {
+          const data = JSON.parse(candidate);
+          return normalizeSuggestions(data);
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      const sanitized = sanitizeJsonText(text);
+      throw new Error(jsonParseErrorDetail(sanitized, lastErr));
+    }
+
+    async function parseApiSuggestions(text, apiKey) {
+      const content = text.slice(0, API_TRUNCATE);
+      const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'deepseek-chat',
+          temperature: 0,
+          messages: [
+            {
+              role: 'system',
+              content: '你只输出纯JSON，不输出任何解释、markdown标记或代码块。',
+            },
+            {
+              role: 'user',
+              content:
+                '请从以下内容中提取所有修改建议，输出JSON数组。每个对象包含以下字段：orig（原文片段，必须是原文中真实存在的文字）、orig_context（orig在原文中前后各15字的上下文，用于精确定位；若orig在原文开头或结尾则尽量取单侧上下文）、sug（建议改成的内容）、reason（原因，没有则空字符串）。\n\n内容如下：\n' +
+                content,
+            },
+          ],
+        }),
+      });
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => '');
+        throw new Error(`API 请求失败 (${res.status})：${errBody.slice(0, 200)}`);
+      }
+      const json = await res.json();
+      const reply = json.choices?.[0]?.message?.content?.trim();
+      if (!reply) throw new Error('API 返回内容为空');
+      return parseJsonSuggestions(reply);
+    }
+
+    function parseRulesSuggestions(text) {
+      const lines = text.split(/\r?\n/);
+      const items = [];
+      let current = { orig: '', sug: '', reason: '' };
+
+      const origKeys = ['原文：', '原句：', '修改前：'];
+      const sugKeys = ['建议：', '修改为：', '修改后：', '改为：'];
+      const reasonKeys = ['原因：', '理由：'];
+
+      function flush() {
+        if (current.orig || current.sug) {
+          items.push({
+            orig: current.orig.trim(),
+            orig_context: '',
+            sug: current.sug.trim(),
+            reason: current.reason.trim(),
+          });
+        }
+        current = { orig: '', sug: '', reason: '' };
+      }
+
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t) continue;
+        let matched = false;
+        for (const k of origKeys) {
+          if (t.startsWith(k)) {
+            flush();
+            current.orig = t.slice(k.length);
+            matched = true;
+            break;
+          }
+        }
+        if (matched) continue;
+        for (const k of sugKeys) {
+          if (t.startsWith(k)) {
+            current.sug = t.slice(k.length);
+            matched = true;
+            break;
+          }
+        }
+        if (matched) continue;
+        for (const k of reasonKeys) {
+          if (t.startsWith(k)) {
+            current.reason = t.slice(k.length);
+            matched = true;
+            break;
+          }
+        }
+        if (!matched && current.orig && !current.sug) {
+          current.orig += '\n' + t;
+        } else if (!matched && current.sug) {
+          current.sug += '\n' + t;
+        }
+      }
+      flush();
+      if (items.length === 0) {
+        throw new Error('未识别到建议，请检查格式或切换解析方式');
+      }
+      return normalizeSuggestions(items);
+    }
+
+    // ==================== 持久化 ====================
+    function saveState() {
+      const state = {
+        originalText,
+        suggestions,
+        suggestionStates,
+        editedHTML: $('editor-left').innerHTML,
+      };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch {
+        return null;
+      }
+    }
+
+    function clearState() {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+
+    // ==================== 界面切换 ====================
+    function enterEditor(restoreHtml) {
+      $('import-view').classList.add('hidden');
+      $('editor-view').classList.remove('hidden');
+      $('editor-view').classList.add('flex');
+
+      if (restoreHtml != null) {
+        $('editor-left').innerHTML = restoreHtml;
+      } else {
+        $('editor-left').innerHTML = buildHighlightedHtml(originalText, suggestions);
+      }
+      renderSuggestionList();
+      updateStats();
+      saveState();
+    }
+
+    function enterImport() {
+      $('editor-view').classList.add('hidden');
+      $('editor-view').classList.remove('flex');
+      $('import-view').classList.remove('hidden');
+    }
+
+    // ==================== 建议卡片 ====================
+    function renderSuggestionList() {
+      const list = $('suggestion-list');
+      list.innerHTML = '';
+      suggestions.forEach((sug, idx) => {
+        const id = String(idx);
+        const state = suggestionStates[id] || 'pending';
+        const card = document.createElement('div');
+        card.dataset.suggestionId = id;
+        card.className =
+          'rounded-lg border border-stone-200 bg-white p-3 text-sm shadow-sm ' +
+          (state === 'skipped' ? 'card-skipped' : '');
+
+        let badges = '';
+        if (!sug._found) {
+          badges += '<p class="text-amber-700 text-xs mb-1">⚠️ 未找到对应原文，请手动定位</p>';
+        } else if ((sug._matchCount || 0) > 1) {
+          badges += `<p class="text-blue-700 text-xs mb-1">共 ${sug._matchCount} 处匹配，请确认位置</p>`;
+        }
+
+        const stateLabel =
+          state === 'modified'
+            ? '<span class="text-emerald-700 text-xs">已修改</span>'
+            : state === 'skipped'
+              ? '<span class="text-stone-500 text-xs">已跳过</span>'
+              : '<span class="text-amber-700 text-xs">待处理</span>';
+
+        card.innerHTML = `
+          <div class="flex justify-between items-start mb-2">
+            <span class="font-medium text-stone-700">#${idx + 1}</span>
+            ${stateLabel}
+          </div>
+          ${badges}
+          <p class="line-through text-stone-500 text-xs mb-1 break-all">${escapeHtml(sug.orig)}</p>
+          <p class="text-stone-800 mb-1 break-all">${escapeHtml(sug.sug)}</p>
+          ${sug.reason ? `<p class="text-stone-400 text-xs mb-2">${escapeHtml(sug.reason)}</p>` : ''}
+          <div class="flex flex-wrap gap-2 mt-2">
+            <button type="button" class="btn-copy-sug rounded border border-stone-300 px-2 py-1 text-xs hover:bg-stone-50">复制建议</button>
+            ${
+              state === 'skipped'
+                ? '<button type="button" class="btn-undo-skip rounded border border-stone-300 px-2 py-1 text-xs hover:bg-stone-50">撤销跳过</button>'
+                : '<button type="button" class="btn-skip rounded border border-stone-300 px-2 py-1 text-xs hover:bg-stone-50">跳过</button>'
+            }
+          </div>
+        `;
+
+        card.querySelector('.btn-copy-sug').addEventListener('click', (e) => {
+          e.stopPropagation();
+          navigator.clipboard.writeText(sug.sug).catch(() => {});
+        });
+
+        card.querySelector('.btn-skip')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          skipSuggestion(id);
+        });
+
+        card.querySelector('.btn-undo-skip')?.addEventListener('click', (e) => {
+          e.stopPropagation();
+          undoSkipSuggestion(id);
+        });
+
+        card.addEventListener('click', () => scrollToSuggestion(id, card));
+        list.appendChild(card);
+      });
+    }
+
+    function scrollToSuggestion(id, cardEl) {
+      document.querySelectorAll('#suggestion-list > div').forEach((c) => c.classList.remove('card-active'));
+      cardEl?.classList.add('card-active');
+
+      const els = findHighlightElements(id);
+      if (els.length === 0) return;
+
+      const count = cardClickCounts[id] || 0;
+      const target = els[count % els.length];
+      cardClickCounts[id] = count + 1;
+
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function skipSuggestion(id) {
+      suggestionStates[id] = 'skipped';
+      findHighlightElements(id).forEach((el) => {
+        const parent = el.parentNode;
+        while (el.firstChild) parent.insertBefore(el.firstChild, el);
+        parent.removeChild(el);
+      });
+      renderSuggestionList();
+      updateStats();
+      saveState();
+    }
+
+    function undoSkipSuggestion(id) {
+      suggestionStates[id] = 'pending';
+      cardClickCounts[id] = 0;
+      // 重建全文高亮
+      const plain = getPlainTextFromEditor();
+      originalText = plain;
+      $('editor-left').innerHTML = buildHighlightedHtml(originalText, suggestions);
+      renderSuggestionList();
+      updateStats();
+      saveState();
+    }
+
+    function updateStats() {
+      let modified = 0;
+      let skipped = 0;
+      let pending = 0;
+      const total = suggestions.length;
+      for (let i = 0; i < total; i++) {
+        const s = suggestionStates[String(i)] || 'pending';
+        if (s === 'modified') modified++;
+        else if (s === 'skipped') skipped++;
+        else pending++;
+      }
+      $('stats-bar').textContent =
+        `已修改 ${modified} · 已跳过 ${skipped} · 待处理 ${pending} / 共 ${total} 条`;
+    }
+
+    function getPlainTextFromEditor() {
+      const el = $('editor-left');
+      return el.innerText.replace(/\r\n/g, '\n');
+    }
+
+    function debouncedStatusCheck() {
+      clearTimeout(statusCheckTimer);
+      statusCheckTimer = setTimeout(() => {
+        suggestions.forEach((_, idx) => {
+          const id = String(idx);
+          if (suggestionStates[id] === 'skipped') return;
+          const spans = findHighlightElements(id);
+          if (spans.length === 0) {
+            suggestionStates[id] = 'modified';
+            spans.forEach((el) => el.classList.remove('highlight-pending'));
+          } else {
+            suggestionStates[id] = 'pending';
+            spans.forEach((el) => {
+              el.classList.remove('highlight-modified');
+              el.classList.add('highlight-pending');
+            });
+          }
+        });
+        renderSuggestionList();
+        updateStats();
+        saveState();
+      }, 500);
+    }
+
+    // ==================== 导出 Word ====================
+    function isChapterTitle(line) {
+      return /^\s*第[0-9一二三四五六七八九十百千零]+[章节回幕]/u.test(line);
+    }
+
+    function isSectionTitle(line) {
+      return /^\s*【[^】]+】\s*$/u.test(line);
+    }
+
+    async function exportDocx() {
+      if (typeof docx === 'undefined') {
+        throw new Error('docx 库未加载，请检查网络或刷新页面');
+      }
+      const plain = getPlainTextFromEditor();
+      const lines = plain.split('\n');
+
+      const {
+        Document,
+        Packer,
+        Paragraph,
+        TextRun,
+        AlignmentType,
+      } = docx;
+
+      const children = [];
+      for (const line of lines) {
+        const trimmed = line.trimEnd();
+        if (!trimmed) {
+          children.push(new Paragraph({ children: [new TextRun('')] }));
+          continue;
+        }
+        if (isChapterTitle(trimmed)) {
+          children.push(
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              spacing: { before: 240, after: 240 },
+              children: [
+                new TextRun({
+                  text: trimmed,
+                  font: 'SimHei',
+                  bold: true,
+                  size: 32,
+                }),
+              ],
+            })
+          );
+        } else if (isSectionTitle(trimmed)) {
+          children.push(
+            new Paragraph({
+              spacing: { before: 160 },
+              children: [
+                new TextRun({
+                  text: trimmed,
+                  font: 'SimHei',
+                  bold: true,
+                  size: 26,
+                }),
+              ],
+            })
+          );
+        } else {
+          children.push(
+            new Paragraph({
+              spacing: { line: 360 },
+              indent: { firstLine: 480 },
+              children: [
+                new TextRun({
+                  text: trimmed,
+                  font: 'SimSun',
+                  size: 24,
+                }),
+              ],
+            })
+          );
+        }
+      }
+
+      const doc = new Document({
+        sections: [
+          {
+            properties: {
+              page: {
+                margin: {
+                  top: 1440,
+                  bottom: 1440,
+                  left: 1440,
+                  right: 1440,
+                },
+              },
+            },
+            children,
+          },
+        ],
+      });
+
+      const blob = await Packer.toBlob(doc);
+      const name = `修改稿_${formatDate(new Date())}.docx`;
+      downloadBlob(blob, name);
+    }
+
+    function formatDate(d) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}${m}${day}`;
+    }
+
+    function downloadBlob(blob, filename) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    // ==================== 开始编辑 ====================
+    async function startEditing() {
+      showImportError('');
+      originalText = $('original-input').value;
+      const sugText = $('suggestion-input').value;
+
+      if (!originalText.trim()) {
+        showImportError('请先输入或上传原文');
+        return;
+      }
+      if (!sugText.trim()) {
+        showImportError('请先输入或上传 AI 建议');
+        return;
+      }
+
+      const mode = getParseMode();
+
+      try {
+        if (mode === 'json') {
+          suggestions = parseJsonSuggestions(sugText);
+          initSuggestionStates();
+          computeHighlightRanges(originalText, suggestions);
+          enterEditor(null);
+        } else if (mode === 'api') {
+          const key = $('api-key-input').value.trim();
+          if (!key) {
+            showImportError('请填写 DeepSeek API Key');
+            return;
+          }
+          $('btn-start').disabled = true;
+          $('btn-start').textContent = '解析中…';
+          suggestions = await parseApiSuggestions(sugText, key);
+          localStorage.setItem(API_KEY_STORAGE, key);
+          initSuggestionStates();
+          computeHighlightRanges(originalText, suggestions);
+          enterEditor(null);
+        } else if (mode === 'rules') {
+          const parsed = parseRulesSuggestions(sugText);
+          pendingRulesSuggestions = parsed;
+          $('rules-preview-json').value = JSON.stringify(parsed, null, 2);
+          $('rules-preview-section').classList.remove('hidden');
+          return;
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (mode === 'json') {
+          showImportError('内容不是合法 JSON，请检查格式，或切换到其他解析方式。' + (msg ? `（${msg}）` : ''));
+        } else if (mode === 'api') {
+          showImportError(`API 解析失败：${msg}。请检查 Key 或手动切换解析方式。`);
+        } else {
+          showImportError(msg);
+        }
+      } finally {
+        $('btn-start').disabled = false;
+        $('btn-start').textContent = '开始编辑';
+      }
+    }
+
+    function confirmRulesPreview() {
+      showImportError('');
+      try {
+        const data = JSON.parse($('rules-preview-json').value);
+        suggestions = normalizeSuggestions(data);
+        initSuggestionStates();
+        computeHighlightRanges(originalText, suggestions);
+        $('rules-preview-section').classList.add('hidden');
+        pendingRulesSuggestions = null;
+        enterEditor(null);
+      } catch (e) {
+        showImportError(e instanceof Error ? e.message : '预览 JSON 无效');
+      }
+    }
+
+    // ==================== API Key ====================
+    async function testApiConnection() {
+      const key = $('api-key-input').value.trim();
+      const resultEl = $('api-test-result');
+      resultEl.classList.remove('hidden', 'text-emerald-700', 'text-red-700');
+      if (!key) {
+        resultEl.textContent = '❌ 请先输入 API Key';
+        resultEl.classList.add('text-red-700');
+        return;
+      }
+      resultEl.textContent = '测试中…';
+      try {
+        const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${key}`,
+          },
+          body: JSON.stringify({
+            model: 'deepseek-chat',
+            temperature: 0,
+            max_tokens: 5,
+            messages: [{ role: 'user', content: 'hi' }],
+          }),
+        });
+        if (res.ok) {
+          resultEl.textContent = '✅ 连接成功';
+          resultEl.classList.add('text-emerald-700');
+          localStorage.setItem(API_KEY_STORAGE, key);
+        } else {
+          const t = await res.text().catch(() => '');
+          resultEl.textContent = `❌ 连接失败：${res.status} ${t.slice(0, 100)}`;
+          resultEl.classList.add('text-red-700');
+        }
+      } catch (e) {
+        resultEl.textContent = `❌ 连接失败：${e instanceof Error ? e.message : '网络错误'}`;
+        resultEl.classList.add('text-red-700');
+      }
+    }
+
+    // ==================== 事件绑定 ====================
+    function bindEvents() {
+      $('original-input').addEventListener('input', () => {
+        $('original-count').textContent = `${countChars($('original-input').value)} 字`;
+      });
+      $('suggestion-input').addEventListener('input', () => {
+        const v = $('suggestion-input').value;
+        $('suggestion-count').textContent = `${countChars(v)} 字`;
+        const hint = $('api-truncate-hint');
+        if (getParseMode() === 'api' && v.length > API_TRUNCATE) {
+          hint.classList.remove('hidden');
+        } else {
+          hint.classList.add('hidden');
+        }
+      });
+
+      document.querySelectorAll('input[name="parse-mode"]').forEach((radio) => {
+        radio.addEventListener('change', () => {
+          const mode = getParseMode();
+          $('api-key-section').classList.toggle('hidden', mode !== 'api');
+          const v = $('suggestion-input').value;
+          $('api-truncate-hint').classList.toggle(
+            'hidden',
+            !(mode === 'api' && v.length > API_TRUNCATE)
+          );
+        });
+      });
+
+      $('original-file').addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          $('original-input').value = String(reader.result || '');
+          $('original-count').textContent = `${countChars($('original-input').value)} 字`;
+        };
+        reader.readAsText(file, 'UTF-8');
+      });
+
+      $('suggestion-file').addEventListener('change', (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          $('suggestion-input').value = String(reader.result || '');
+          $('suggestion-input').dispatchEvent(new Event('input'));
+        };
+        reader.readAsText(file, 'UTF-8');
+      });
+
+      $('btn-copy-prompt').addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(FORMAT_PROMPT);
+          const btn = $('btn-copy-prompt');
+          const orig = btn.textContent;
+          btn.textContent = '✅ 已复制';
+          setTimeout(() => {
+            btn.textContent = orig;
+          }, 1500);
+        } catch {
+          window.prompt('请手动复制以下内容：', FORMAT_PROMPT);
+        }
+      });
+
+      $('btn-test-api').addEventListener('click', () => void testApiConnection());
+      $('btn-start').addEventListener('click', () => void startEditing());
+      $('btn-confirm-rules').addEventListener('click', confirmRulesPreview);
+      $('btn-cancel-rules').addEventListener('click', () => {
+        $('rules-preview-section').classList.add('hidden');
+        pendingRulesSuggestions = null;
+      });
+
+      $('btn-reimport').addEventListener('click', () => {
+        if (!confirm('重新导入将清除当前编辑进度，确定吗？')) return;
+        clearState();
+        enterImport();
+        showImportError('');
+      });
+
+      $('btn-export').addEventListener('click', () => {
+        exportDocx().catch((e) => alert('导出失败：' + (e.message || e)));
+      });
+
+      $('editor-left').addEventListener('input', debouncedStatusCheck);
+
+      $('editor-left').addEventListener('click', (e) => {
+        const span = e.target.closest('span[data-suggestion-id]');
+        if (!span) return;
+        const id = span.getAttribute('data-suggestion-id');
+        const card = document.querySelector(`#suggestion-list [data-suggestion-id="${id}"]`);
+        scrollToSuggestion(id, card);
+      });
+
+      $('btn-recover').addEventListener('click', () => {
+        const state = loadState();
+        if (!state) return;
+        originalText = state.originalText || '';
+        suggestions = state.suggestions || [];
+        suggestionStates = state.suggestionStates || {};
+        $('recovery-banner').classList.add('hidden');
+        computeHighlightRanges(originalText, suggestions);
+        enterEditor(state.editedHTML || null);
+      });
+
+      $('btn-ignore-recovery').addEventListener('click', () => {
+        $('recovery-banner').classList.add('hidden');
+      });
+    }
+
+    // ==================== 初始化 ====================
+    function init() {
+      const savedKey = localStorage.getItem(API_KEY_STORAGE);
+      if (savedKey) $('api-key-input').value = savedKey;
+
+      if (loadState()) {
+        $('recovery-banner').classList.remove('hidden');
+      }
+
+      bindEvents();
+      $('original-count').textContent = '0 字';
+      $('suggestion-count').textContent = '0 字';
+    }
+
+    init();
+  </script>
+</body>
+</html>

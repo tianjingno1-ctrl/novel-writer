@@ -181,42 +181,6 @@ def scene_from_workshop_beat(chapter_num: int, beat: dict) -> dict:
     }
 
 
-def replace_scenes_from_workshop_beats(beats: list[dict]) -> bool:
-    """用工坊 beats 全量重建 plan.json 的 chapters/scenes（每 beat 一条 scene）。"""
-    parsed: list[dict] = []
-    for item in beats or []:
-        if not isinstance(item, dict):
-            continue
-        ch = _workshop_beat_chapter_num(item)
-        if ch is None:
-            continue
-        parsed.append({
-            "chapter": ch,
-            "title": str(item.get("title") or "").strip(),
-            "beat": str(item.get("beat") or "").strip(),
-        })
-    if not parsed:
-        return False
-
-    def edit(plan: dict) -> None:
-        by_ch: dict[int, list[dict]] = {}
-        for item in parsed:
-            by_ch.setdefault(item["chapter"], []).append(item)
-        plan["chapters"] = {}
-        for ch_num in sorted(by_ch.keys()):
-            key = str(ch_num)
-            items = by_ch[ch_num]
-            ch_title = items[0]["title"] if len(items) == 1 else f"第{ch_num}章"
-            scenes = [scene_from_workshop_beat(ch_num, item) for item in items]
-            plan["chapters"][key] = {"title": ch_title, "scenes": scenes}
-        first_ch = str(sorted(by_ch.keys())[0])
-        first_scenes = plan["chapters"][first_ch].get("scenes") or []
-        plan["active_scene_id"] = first_scenes[0]["id"] if first_scenes else None
-
-    _mutate_plan(edit)
-    return True
-
-
 def list_plan_chapters() -> list[dict]:
     plan = load_plan()
     items = []
@@ -331,6 +295,25 @@ def set_active_scene(scene_id: str | None) -> dict:
     return _mutate_plan(edit)
 
 
+def set_active_scene_for_chapter(chapter_num: int) -> str | None:
+    """将 plan.active_scene_id 同步为指定章的首个 scene。"""
+    if chapter_num < 1:
+        return None
+    plan = load_plan()
+    ch = plan.get("chapters", {}).get(str(chapter_num))
+    if not isinstance(ch, dict):
+        return None
+    scenes = ch.get("scenes") or []
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        sid = str(scene.get("id") or "").strip()
+        if sid:
+            set_active_scene(sid)
+            return sid
+    return None
+
+
 def update_chapter_title(chapter_num: int, title: str) -> dict | None:
     def edit(plan: dict) -> dict | None:
         key = str(chapter_num)
@@ -409,7 +392,11 @@ def format_emotion_anchor_instruction(scene: dict) -> str:
     return ""
 
 
-def get_scene_context_text() -> str:
+def get_scene_context_text(chapter_num: int | None = None) -> str:
+    if chapter_num and chapter_num > 0:
+        by_chapter = _scene_context_from_chapter(chapter_num)
+        if by_chapter:
+            return by_chapter
     scene = get_active_scene()
     if not scene:
         return ""
@@ -422,6 +409,61 @@ def get_scene_context_text() -> str:
         parts.append(emotion)
     if scene.get("summary"):
         parts.append(f"【场景概述】\n{scene['summary']}")
+    return "\n\n".join(parts)
+
+
+def _scene_context_from_chapter(chapter_num: int) -> str:
+    plan = load_plan()
+    ch = plan.get("chapters", {}).get(str(chapter_num))
+    if not isinstance(ch, dict):
+        return ""
+    parts: list[str] = []
+    title = str(ch.get("title") or "").strip()
+    if title:
+        parts.append(f"【第{chapter_num}章】{title}")
+    target = int(ch.get("word_count_target") or 0)
+    if target > 0:
+        low = int(target * 0.85)
+        parts.append(
+            f"【本章目标字数】约 {target} 字（正文不少于约 {low} 字，写满场景再收束到章末钩子）"
+        )
+    hook = str(ch.get("hook") or "").strip()
+    if hook:
+        parts.append(f"【章末钩子】{hook}")
+    role = str(ch.get("role") or "").strip()
+    if role:
+        parts.append(f"【章叙事角色】{role}")
+    intent = ch.get("intent")
+    if isinstance(intent, dict):
+        final = intent.get("final")
+        if isinstance(final, str) and final.strip():
+            parts.append(f"【叙事意图】\n{final.strip()}")
+        elif isinstance(final, dict):
+            lines = [
+                f"{k}：{v}" for k, v in final.items()
+                if str(v or "").strip()
+            ]
+            if lines:
+                parts.append("【叙事意图】\n" + "\n".join(lines))
+        elif str(intent.get("ai_suggest") or "").strip():
+            parts.append(f"【叙事意图】\n{intent['ai_suggest'].strip()}")
+    scenes = ch.get("scenes") or []
+    for idx, scene in enumerate(scenes, start=1):
+        if not isinstance(scene, dict):
+            continue
+        st = str(scene.get("title") or f"场景{idx}").strip()
+        block_parts = [f"【场景】{st}"]
+        beat = str(scene.get("beat") or "").strip()
+        if beat:
+            block_parts.append(f"【Scene Beat】\n{beat}")
+        block_parts.append(PACE_INSTRUCTIONS[resolve_scene_pace(scene)])
+        emotion = format_emotion_anchor_instruction(scene)
+        if emotion:
+            block_parts.append(emotion)
+        summary = str(scene.get("summary") or "").strip()
+        if summary:
+            block_parts.append(f"【场景概述】\n{summary}")
+        parts.append("\n".join(block_parts))
     return "\n\n".join(parts)
 
 
@@ -540,84 +582,6 @@ def save_project_meta(**fields: str) -> dict:
             meta[key] = str(value).strip()
     _save_json(PROJECT_FILE, meta)
     return meta
-
-
-def _excerpt(text: str, limit: int = 480) -> str:
-    t = (text or "").strip()
-    if len(t) <= limit:
-        return t
-    return t[:limit].rstrip() + "…"
-
-
-def build_bookshelf_overview(
-    *,
-    chapters: list[tuple[int, object]],
-    chapter_stats: list[dict],
-    summaries_text: str,
-    world_text: str,
-    current_chapter: int | None,
-) -> dict:
-    """书架概览：书名、世界、大纲、章节目录。"""
-    project = get_project_meta()
-    plan = load_plan()
-    stats_by_num = {c["num"]: c for c in chapter_stats}
-    active_ids = get_active_codex_ids()
-
-    file_nums = {n for n, _ in chapters}
-    plan_nums = {int(k) for k in plan.get("chapters", {})}
-    all_nums = sorted(file_nums | plan_nums)
-
-    outline = []
-    for num in all_nums:
-        key = str(num)
-        ch = plan.get("chapters", {}).get(key, {})
-        scenes = []
-        for s in ch.get("scenes", []):
-            scenes.append({
-                "id": s.get("id"),
-                "title": s.get("title", ""),
-                "beat": _excerpt(s.get("beat", ""), 200),
-                "done": bool(s.get("done")),
-            })
-        outline.append({
-            "num": num,
-            "title": ch.get("title") or f"第{num}章",
-            "chars": stats_by_num.get(num, {}).get("chars", 0),
-            "has_body": num in file_nums,
-            "scenes": scenes,
-        })
-
-    active_worlds = []
-    for entry_id in active_ids:
-        entry = get_codex_entry(entry_id)
-        if not entry:
-            continue
-        active_worlds.append({
-            "id": entry["id"],
-            "name": entry["name"],
-            "preview": _excerpt(entry["content"], 600),
-        })
-
-    current_title = None
-    if current_chapter is not None:
-        ch = plan.get("chapters", {}).get(str(current_chapter), {})
-        current_title = ch.get("title") or f"第{current_chapter}章"
-
-    return {
-        "project": project,
-        "single_book_mode": True,
-        "multi_book_hint": (
-            "当前为单书模式（一个 data/ 目录 = 一本书）。"
-            "同时写多本：复制整个 novel_writer 文件夹，或 Git 分支隔离各自的 data/。"
-        ),
-        "current_chapter": current_chapter,
-        "current_chapter_title": current_title,
-        "world_excerpt": _excerpt(world_text, 800),
-        "active_worlds": active_worlds,
-        "outline": outline,
-        "summaries_excerpt": _excerpt(summaries_text, 1200),
-        "chapter_count": len(all_nums),
-    }
 
 
 _OUTLINE_BLOCK_RE = re.compile(

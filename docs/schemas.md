@@ -1,6 +1,6 @@
 # LLM JSON Fence 索引
 
-> 机器可读的类型定义见 `core/schemas/llm.py`；磁盘格式见 `core/schemas/persist.py`；**产品数据 Schema** 见 [data-schema.md](./data-schema.md)。
+> 机器可读的类型定义见 `core/schemas/llm.py`；磁盘格式见 [persist-formats.md](./persist-formats.md)；**产品数据 Schema** 见 [data-schema.md](./data-schema.md)。
 
 本文档列出项目中所有 **LLM 回复里用 fence 标记包裹的 JSON 块**，便于新功能对齐格式、避免重复造 parser。
 
@@ -114,22 +114,9 @@
 
 | 标记 | 位置 | 用途 |
 |------|------|------|
-| `---DRAFT---` / `---REPLY---` / `---EXTRACT---` / `---END---` | `core/orchestration/workshop` | 规划对话：自然语言 + JSON extract |
 | ` ```json `（通用回退） | 多数 parser | 所有 parse_* 在专用 fence 失败时会尝试 |
 
----
-
-## Workshop EXTRACT JSON（无专用 fence 名）
-
-`core/orchestration/workshop` 解析 EXTRACT 段：
-
-```json
-{
-  "world": "string",
-  "characters": "string",
-  "beats": [{ "chapter": 1, "title": "", "beat": "" }]
-}
-```
+> 旧 Web「规划工坊」(`---DRAFT---` / `---EXTRACT---` 等) 已移除（2026-06-09）；开书规划走 `prefill/*` API。
 
 ---
 
@@ -137,22 +124,19 @@
 
 | 函数 | 文件 | 输入 | 用途 |
 |------|------|------|------|
-| `parse_outline_suggestions` | `novel_data.py` | Markdown | 续章灵感 |
-| `parse_chapter_spans` | `batch_world.py` | 多章文本 | 批量审阅分章 |
-| `parse_workshop_response` | `core/orchestration/workshop` | workshop 回复 | 规划模块 |
+| `parse_outline_suggestions` | `novel_data.py` | Markdown | 续章灵感（finalize 内部；无独立 HTTP） |
+| `parse_chapter_spans` | `core/plan_chapters.py` | 场景 summary/beat | Plan 章号区间 |
 
 ---
 
-## 迁移状态
+## 架构迁移（schemas 层）
 
-| 阶段 | 内容 | 状态 |
-|------|------|------|
-| P0 | `core/schemas/` 类型 + parse 副本 | ✅ |
-| P0 | 本文档 | ✅ |
-| P1 | `maintain.call_bundle` / `persist` 两阶段 | 进行中 |
-| P1 | `BookStore.load_snapshot` | 进行中 |
-| P1 | `BookStore.persist_summary` / `apply_observe` | ✅ 已实装（main 薄封装） |
-| P2 | summarizer → schemas 单源；Deps Callable 清理 | 待做 |
+| 项 | 状态 |
+|----|------|
+| `core/schemas/` 类型 + parse 副本 | ✅ |
+| `maintain.call_bundle` / `persist` 两阶段 | ✅ |
+| `BookStore.load_snapshot` / `persist_summary` / `apply_observe` | ✅ |
+| summarizer → schemas 单源；Deps Callable 清理 | 待做（非产品排期） |
 
 ---
 

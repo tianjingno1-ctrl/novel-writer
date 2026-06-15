@@ -1,0 +1,35 @@
+{
+  "id": "ms-4f62be375a",
+  "book_id": "e2e-api全路径-1781150483554-6233a7c9",
+  "title": "E2E API全路径 1781150483554",
+  "state": "result",
+  "language": "zh",
+  "market_tags": [],
+  "ip_tags": [],
+  "submissions": [
+    {
+      "id": "sub-b3083909",
+      "target": "text_editor",
+      "target_name": "",
+      "platform_profile": "tomato_text_editor_v1",
+      "submitted_at": "2026-06-11",
+      "result": "passed",
+      "reject_reason": "",
+      "reject_tags": [],
+      "reject_kind": "",
+      "notes": "",
+      "pushed_to_taste": false,
+      "compliance_checked": true
+    }
+  ],
+  "versions": [
+    {
+      "version": 1,
+      "created_at": "2026-06-11 12:01:26",
+      "note": "从当前书交接为稿件"
+    }
+  ],
+  "created_at": "2026-06-11 12:01:26",
+  "updated_at": "2026-06-11 12:01:27",
+  "notes": ""
+}

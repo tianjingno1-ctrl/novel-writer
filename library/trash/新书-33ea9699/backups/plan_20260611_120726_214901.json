@@ -1,0 +1,113 @@
+{
+  "active_scene_id": "ch1_543f6314",
+  "chapters": {
+    "1": {
+      "title": "重生，报警抓人",
+      "status": "pending",
+      "hook": "渣男被押时诡秘一笑，暗示背后另有主谋。",
+      "word_count_target": 2500,
+      "scenes": [
+        {
+          "id": "ch1_543f6314",
+          "title": "重生，报警抓人",
+          "beat": "【场景目的】展示重生复仇原点，立女主冷静果断人设\n【核心动作】录音取证→报警→对峙\n【节奏档位】快\n【结尾钩子】渣男的笑背后隐藏什么？",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-11T12:07:26",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "hook_open",
+      "intent": {
+        "kind": "hook_open",
+        "ai_suggest": "重生反转梗+报警打脸+紧张解密+代入女主",
+        "final": {}
+      }
+    },
+    "2": {
+      "title": "第一步棋，拿下董事会",
+      "status": "pending",
+      "hook": "投票前最后一刻，女主手机收到匿名威胁：“你以为你赢了？”",
+      "word_count_target": 2500,
+      "scenes": [
+        {
+          "id": "ch2_df7fc556",
+          "title": "第一步棋，拿下董事会",
+          "beat": "【场景目的】建立商界博弈主线，设置付费悬念\n【核心动作】揭露叛徒→争取股东→遭威胁\n【节奏档位】中\n【结尾钩子】匿名威胁来自谁？女主如何破局？",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-11T12:07:26",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "paywall",
+      "intent": {
+        "kind": "paywall",
+        "ai_suggest": "读者付费前的心理状态：主角能否逆袭？神秘势力的身份？后续如何颠覆整个棋局？",
+        "final": {}
+      }
+    },
+    "3": {
+      "title": "暗棋落定，谁在局中",
+      "status": "pending",
+      "hook": "计谋得逞，但闺蜜家族背后竟隐现更大的利益集团。",
+      "word_count_target": 2500,
+      "scenes": [
+        {
+          "id": "ch3_02148d49",
+          "title": "暗棋落定，谁在局中",
+          "beat": "【场景目的】解付费悬念并升级冲突\n【核心动作】调查来源→设反间计→引蛇出洞\n【节奏档位】快\n【结尾钩子】大鱼未现，女主决定主动出击。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-11T12:07:26",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "paid_open"
+    },
+    "4": {
+      "title": "终局，大仇得报",
+      "status": "pending",
+      "hook": "一切落幕，女主收到陌生消息：“游戏才刚刚开始。”",
+      "word_count_target": 2500,
+      "scenes": [
+        {
+          "id": "ch4_d36ce769",
+          "title": "终局，大仇得报",
+          "beat": "【场景目的】完成复仇主线，回收所有伏笔，留续集可能\n【核心动作】联合警方→终极对峙→大获全胜\n【节奏档位】中\n【结尾钩子】开放式结局，新危机初显。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-11T12:07:26",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "finale",
+      "intent": {
+        "kind": "finale",
+        "ai_suggest": "{'core_task': {'opening_gap': '从被闺蜜和渣男害死到掌控商界、真相大白', 'freeze_frame': '女主站在新公司天台，微笑展望未来', 'open_ending': '手机神秘消息暗示更大棋局'}}",
+        "final": {}
+      }
+    }
+  },
+  "meta": {
+    "title": "重生千金，手撕棋局",
+    "platform": "tomato",
+    "writing_mode": "standard",
+    "wizard_step": "plan",
+    "chapter_count": 4,
+    "word_count_per_chapter": null,
+    "total_word_target": 10000,
+    "logline": "前世被渣男闺蜜害死，重生当日直接报警抓人，步步为营颠覆商界。",
+    "sell_point": "重生复仇+高智商博弈，每章一个小目标达成，爽点密集无尿点。",
+    "tone": "冷静复仇，智商碾压",
+    "option_id": "B",
+    "risk_note": "需注意逻辑自洽，女主报复手段要新颖，避免教科书式复仇降低爽感。",
+    "characters": [],
+    "paywall_chapter": 2
+  },
+  "version": 2
+}

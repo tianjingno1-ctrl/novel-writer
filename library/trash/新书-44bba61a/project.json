@@ -1,0 +1,15 @@
+{
+  "title": "新书",
+  "world_label": "",
+  "tagline": "",
+  "notes": "",
+  "type": "short",
+  "platform": "tomato",
+  "created_at": "2026-06-10T19:13:49",
+  "updated_at": "2026-06-11T11:50:24",
+  "lifecycle": {
+    "status": "complete",
+    "manuscript_id": "ms-caef143cc8",
+    "deconstruct_refs": []
+  }
+}

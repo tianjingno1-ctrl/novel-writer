@@ -68,6 +68,23 @@ class ComplianceRetentionTests(unittest.TestCase):
         warn = reader_retention.check_rhythm_warning(self.book_dir, [1, 2, 3], window=3)
         self.assertTrue(warn.get("warning"))
 
+    def test_parse_llm_reader_metrics(self) -> None:
+        text = """## 读者审阅
+        不错
+        RISK: high
+        PAYOFF: medium
+        """
+        metrics = reader_retention.parse_llm_reader_metrics(text)
+        self.assertEqual(metrics["drop_off_risk"], "high")
+        self.assertEqual(metrics["payoff_density"], "medium")
+
+    def test_parse_llm_reader_json_line(self) -> None:
+        text = '## 读者审阅\n{"risk":"low","payoff":"high","notes":"章尾钩子够劲"}'
+        metrics = reader_retention.parse_llm_reader_metrics(text)
+        self.assertEqual(metrics["drop_off_risk"], "low")
+        self.assertEqual(metrics["payoff_density"], "high")
+        self.assertEqual(metrics["reader_review_summary"], "章尾钩子够劲")
+
     def test_author_profile_extract_and_apply(self) -> None:
         taste_doc = {
             "rules": [{"content": "章末留钩子", "weight": "soft"}],

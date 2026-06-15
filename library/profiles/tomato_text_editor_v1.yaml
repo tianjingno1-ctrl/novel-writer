@@ -4,7 +4,6 @@ platform_label: 番茄
 submission_target: text_editor
 book_types:
   - short
-  - novel
 review_prompt_id: short-tomato
 version: 1
 updated_at: "2026-06-09"

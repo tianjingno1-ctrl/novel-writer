@@ -1,17 +1,65 @@
 /** 手写 API 类型（后续可用 openapi-typescript 生成到 api/generated/） */
 
+import type { PlanChapterRow } from '@/lib/chapterRoles'
+
+export type CostSummaryStep = {
+  tag: string
+  cost: number
+}
+
+export type CostSummaryBook = {
+  book_id: string
+  total_cost: number
+  steps: CostSummaryStep[]
+}
+
+export type CostSummaryResponse = {
+  ok?: boolean
+  by_book?: CostSummaryBook[]
+}
+
+export type StatsResponse = {
+  total_chars?: number
+  chapter_count?: number
+  scene_count?: number
+  codex_count?: number
+  summary_count?: number
+  total_cost?: number
+}
+
+export type ActiveBookResponse = {
+  ok?: boolean
+  book_id?: string
+  book?: LibraryBook
+}
+
 export type LibraryBook = {
   id: string
   title?: string
   type?: string
   platform?: string
   world_label?: string
+  created_at?: string
+  progress_pct?: number
+  shelf_status?: 'draft' | 'active' | 'done'
+  chapter_label?: string
+  wizard_complete?: boolean
+  wizard_step?: string | null
+  chapter_total?: number
+  chapter_approved?: number
+  lifecycle_status?: string
+  trashed_at?: string
 }
 
 export type LibraryListResponse = {
   ok?: boolean
   books?: LibraryBook[]
   active_book_id?: string
+}
+
+export type LibraryTrashResponse = {
+  ok?: boolean
+  books?: LibraryBook[]
 }
 
 export type AppStatus = {
@@ -23,29 +71,12 @@ export type AppStatus = {
   model?: string
   chapter_num?: number | null
   write_chapter_num?: number | null
+  history_len?: number
+  session_on_disk?: boolean
+  session_saved_at?: string | null
+  session_chapter_num?: number | null
   api_key_ok?: boolean
   total_cost?: number
-}
-
-export type FlowManualStep = {
-  id: string
-  label: string
-  method: string
-  path: string
-  note?: string
-  human_gate?: boolean
-}
-
-export type FlowRunResponse = {
-  ok: boolean
-  stop_reason?: string
-  stopped_at?: string
-  chapter_num?: number | null
-  log_id?: string | null
-  next_manual?: FlowManualStep
-  manual_apis_note?: string
-  error?: string | null
-  executed?: Array<Record<string, unknown>>
 }
 
 export type WorkQueueResponse = {
@@ -69,6 +100,7 @@ export type ResolvedCriterion = {
   content?: string
   description?: string
   weight?: string
+  source?: string
 }
 
 export type ResolvedCriteria = {
@@ -90,7 +122,15 @@ export type SSEDoneEvent = {
   provider?: string
 }
 export type SSEErrorEvent = { type: 'error'; message: string }
-export type SSEEvent = SSEChunkEvent | SSEDoneEvent | SSEErrorEvent
+export type SSEChapterClearedEvent = {
+  type: 'chapter_cleared'
+  chapter_num?: number
+}
+export type SSEEvent =
+  | SSEChunkEvent
+  | SSEDoneEvent
+  | SSEErrorEvent
+  | SSEChapterClearedEvent
 
 export type ChatStreamRequest = {
   instruction: string
@@ -136,17 +176,20 @@ export type PrefillDirectionResponse = {
 
 export type PrefillPlanResponse = {
   ok: boolean
-  option?: {
+  options?: Array<{
+    id?: string
+    summary?: string
     title?: string
-    chapters?: Array<{
-      num?: number
-      title?: string
-      beat?: string
-      hook?: string
-    }>
+    chapters?: PlanChapterRow[]
+  }>
+  option?: {
+    id?: string
+    title?: string
+    chapters?: PlanChapterRow[]
   }
   log_id?: string
   error?: string
+  validation_warnings?: Array<{ message?: string; severity?: string }>
 }
 
 export type PromptCacheStatus = {

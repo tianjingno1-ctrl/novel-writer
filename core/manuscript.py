@@ -126,12 +126,65 @@ def load_manuscript(manuscript_id: str) -> dict | None:
     return raw if isinstance(raw, dict) else None
 
 
+def _submission_summary(entry: dict) -> dict:
+    return {
+        "id": entry.get("id", ""),
+        "target": entry.get("target", ""),
+        "target_name": entry.get("target_name", ""),
+        "platform_profile": entry.get("platform_profile", ""),
+        "submitted_at": entry.get("submitted_at", ""),
+        "result": entry.get("result", ""),
+        "reject_reason": entry.get("reject_reason", ""),
+        "reject_tags": list(entry.get("reject_tags") or []),
+        "reject_kind": entry.get("reject_kind", ""),
+        "diagnosis_id": entry.get("diagnosis_id", ""),
+        "compliance_checked": bool(entry.get("compliance_checked")),
+    }
+
+
+def _last_pending_submission(doc: dict) -> dict | None:
+    subs = doc.get("submissions") or []
+    if not subs:
+        return None
+    last = subs[-1]
+    if str(last.get("result") or "").strip():
+        return None
+    return last
+
+
+def patch_last_submission(manuscript_id: str, fields: dict[str, Any]) -> dict:
+    doc = load_manuscript(manuscript_id)
+    if not doc:
+        return {"ok": False, "error": "稿件不存在"}
+    subs = doc.get("submissions") or []
+    if not subs:
+        return {"ok": False, "error": "无投递记录"}
+    entry = subs[-1]
+    for key, value in fields.items():
+        if value is not None:
+            entry[key] = value
+    doc["updated_at"] = _now()
+    _write_doc(doc)
+    return {"ok": True, "manuscript": doc}
+
+
 def list_manuscripts(*, book_id: str | None = None) -> list[dict]:
     index = _load_index()
     rows = list(index.get("manuscripts") or [])
     if book_id:
         rows = [r for r in rows if r.get("book_id") == book_id]
-    return rows
+    enriched: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        doc = load_manuscript(str(row.get("id") or ""))
+        if doc:
+            subs = doc.get("submissions") or []
+            if subs:
+                summary = _submission_summary(subs[-1])
+                item["submission"] = summary
+                item["last_submission"] = summary
+        enriched.append(item)
+    return enriched
 
 
 def create_from_book(
@@ -206,30 +259,60 @@ def update_manuscript(manuscript_id: str, fields: dict[str, Any]) -> dict:
     if "submission" in fields and isinstance(fields["submission"], dict):
         sub = fields["submission"]
         target = str(sub.get("target") or sub.get("target_type") or "").strip()
-        if target and target not in SUBMISSION_TARGETS:
-            return {
-                "ok": False,
-                "error": f"无效投递类型: {target}；允许: {', '.join(sorted(SUBMISSION_TARGETS))}",
-            }
-        result_val = str(sub.get("result") or "").strip().lower()
-        entry = {
-            "id": _sub_id(),
-            "target": target,
-            "target_name": str(sub.get("target_name") or "").strip(),
-            "platform_profile": str(sub.get("platform_profile") or "").strip(),
-            "submitted_at": str(sub.get("submitted_at") or "").strip() or _now(),
-            "result": str(sub.get("result", "")).strip(),
-            "reject_reason": str(sub.get("reject_reason", "")).strip(),
-            "reject_tags": [
+        pending = _last_pending_submission(doc)
+        if pending and str(sub.get("result") or "").strip():
+            entry = pending
+            if target:
+                entry["target"] = target
+            if sub.get("target_name"):
+                entry["target_name"] = str(sub.get("target_name") or "").strip()
+            if sub.get("platform_profile"):
+                entry["platform_profile"] = str(sub.get("platform_profile") or "").strip()
+            entry["result"] = str(sub.get("result", "")).strip()
+            entry["reject_reason"] = str(sub.get("reject_reason", "")).strip()
+            entry["reject_tags"] = [
                 str(t).strip()
                 for t in (sub.get("reject_tags") or [])
                 if str(t).strip()
-            ],
-            "notes": str(sub.get("notes", "")).strip()[:500],
-            "pushed_to_taste": False,
-        }
-        doc.setdefault("submissions", []).append(entry)
-        if entry["result"]:
+            ]
+            if sub.get("reject_kind") or sub.get("rejection_kind"):
+                entry["reject_kind"] = str(
+                    sub.get("reject_kind") or sub.get("rejection_kind") or ""
+                ).strip()
+            if sub.get("notes"):
+                entry["notes"] = str(sub.get("notes", "")).strip()[:500]
+            if sub.get("compliance_checked"):
+                entry["compliance_checked"] = True
+        else:
+            if target and target not in SUBMISSION_TARGETS:
+                return {
+                    "ok": False,
+                    "error": f"无效投递类型: {target}；允许: {', '.join(sorted(SUBMISSION_TARGETS))}",
+                }
+            entry = {
+                "id": _sub_id(),
+                "target": target,
+                "target_name": str(sub.get("target_name") or "").strip(),
+                "platform_profile": str(sub.get("platform_profile") or "").strip(),
+                "submitted_at": str(sub.get("submitted_at") or "").strip() or _now(),
+                "result": str(sub.get("result", "")).strip(),
+                "reject_reason": str(sub.get("reject_reason", "")).strip(),
+                "reject_tags": [
+                    str(t).strip()
+                    for t in (sub.get("reject_tags") or [])
+                    if str(t).strip()
+                ],
+                "reject_kind": str(
+                    sub.get("reject_kind") or sub.get("rejection_kind") or ""
+                ).strip(),
+                "notes": str(sub.get("notes", "")).strip()[:500],
+                "pushed_to_taste": False,
+                "compliance_checked": bool(sub.get("compliance_checked")),
+            }
+            doc.setdefault("submissions", []).append(entry)
+
+        result_val = str(entry.get("result") or "").strip().lower()
+        if entry.get("result"):
             doc["state"] = "result"
         elif doc.get("state") == "complete":
             doc["state"] = "submitting"

@@ -126,8 +126,29 @@ def run_post_chapter_finalize(
 ) -> dict:
     skipped = hooks.short_story_skip("本章定稿")
     if skipped:
-        skipped["chapter_num"] = chapter_num
-        return skipped
+        from core import plan_product
+
+        num = chapter_num
+        resolved = hooks.resolve_chapter(chapter_num)
+        if isinstance(resolved, dict):
+            if num is None:
+                return {
+                    **skipped,
+                    "ok": False,
+                    "error": resolved.get("error", "无法解析章节"),
+                }
+        else:
+            num, _ = resolved
+        try:
+            plan_product.set_chapter_status(num, "approved")
+        except ValueError:
+            pass
+        return {
+            **skipped,
+            "chapter_num": num,
+            "chapter_complete": True,
+            "summary_skipped": True,
+        }
     if repetition_scope not in ("current", "recent3", "all"):
         return {"ok": False, "error": "repetition_scope 必须是 current / recent3 / all"}
 

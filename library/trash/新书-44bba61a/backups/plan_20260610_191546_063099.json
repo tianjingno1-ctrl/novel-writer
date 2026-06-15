@@ -1,0 +1,126 @@
+{
+  "active_scene_id": "ch1_e42a1844",
+  "chapters": {
+    "1": {
+      "title": "离婚签字，他以为我会哭",
+      "status": "pending",
+      "hook": "限量跑车引擎轰鸣，前夫和白月光脸色煞白，女主头也不回。",
+      "word_count_target": 2503,
+      "scenes": [
+        {
+          "id": "ch1_e42a1844",
+          "title": "离婚签字，他以为我会哭",
+          "beat": "【场景目的】三句话讲清丧偶式婚姻，离婚现场一刀两断，用跑车钩子宣告女主新身份。\\n【核心动作】女主提出离婚、签字、拒绝前夫施舍、亮出车钥匙、驾车离开。\\n【节奏档位】快\\n【结尾钩子】白月光尖叫：“那辆车…是她的？！”",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-10T19:15:45",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "hook_open",
+      "intent": {
+        "kind": "hook_open",
+        "ai_suggest": "离婚梗+冷漠打脸+转折+爽感代入女主",
+        "final": {}
+      }
+    },
+    "2": {
+      "title": "全球限量跑车的主人",
+      "status": "pending",
+      "hook": "会所经理宣布“老板来了”，女主对前夫说：“还用我自我介绍吗？”",
+      "word_count_target": 2503,
+      "scenes": [
+        {
+          "id": "ch2_f01bf6db",
+          "title": "全球限量跑车的主人",
+          "beat": "【场景目的】马甲掉落，引爆前夫情绪，为付费后倒追蓄力。\\n【核心动作】前夫跟踪被拒、闯进会所、目睹众人簇拥女主、身份曝光、前夫震惊、女主冷漠离开。\\n【节奏档位】中快\\n【结尾钩子】前夫冲出会所大喊：“颜颜，我错了！”",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-10T19:15:45",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "paywall",
+      "intent": {
+        "kind": "paywall",
+        "ai_suggest": "马甲掉落+身份反转+打脸+爽感+前夫后悔",
+        "final": {}
+      }
+    },
+    "3": {
+      "title": "前夫跪在雨里",
+      "status": "pending",
+      "hook": "收购协议曝光，前夫瘫坐雨中。",
+      "word_count_target": 2503,
+      "scenes": [
+        {
+          "id": "ch3_4dc014be",
+          "title": "前夫跪在雨里",
+          "beat": "【场景目的】展示女主事业开挂，前夫倒追不断受挫，铺垫最终打脸。\\n【核心动作】女主与男二商谈合同、签约、前夫雨中拦车下跪、女主视而不见、收购消息传来。\\n【节奏档位】快\\n【结尾钩子】前夫手机掉落，屏幕显示公司易主。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-10T19:15:45",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "paid_open"
+    },
+    "4": {
+      "title": "再也没有我们",
+      "status": "pending",
+      "hook": "女主对镜头微笑：“感谢当年不娶之恩。”",
+      "word_count_target": 2503,
+      "scenes": [
+        {
+          "id": "ch4_1bfa2bef",
+          "title": "再也没有我们",
+          "beat": "【场景目的】情感闭环，女主全面获胜，前夫彻底出局，篇章收束。\\n【核心动作】前夫破产求见、女主拒绝、活动现场女主与新男神登对出入、发表感言、前夫远处观看、女主转身离开。\\n【节奏档位】中\\n【结尾钩子】女主背影融入灯光，前夫喃喃：“我弄丢了她。”",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-10T19:15:45",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "finale",
+      "intent": {
+        "kind": "finale",
+        "ai_suggest": "",
+        "final": {}
+      }
+    }
+  },
+  "meta": {
+    "title": "离婚当天，前夫跪求我别走",
+    "platform": "tomato",
+    "genre": "urban",
+    "writing_mode": "standard",
+    "wizard_step": "plan",
+    "chapter_count": 4,
+    "word_count_per_chapter": null,
+    "total_word_target": 10012,
+    "logline": "三年丧偶式婚姻，女主离婚后光芒四射，前夫彻底慌了，开始疯狂倒追。",
+    "sell_point": "追妻火葬场，女主离婚后变美、事业开挂，前夫狼狈挽回，爽感递进",
+    "tone": "追妻、虐渣",
+    "option_id": "C",
+    "risk_note": "前期的虐女篇幅需极度压缩，第一章就要进入离婚和女主逆袭阶段",
+    "characters": [],
+    "paywall_chapter": 2
+  },
+  "version": 2,
+  "review_criteria": {
+    "platform_profile": "tomato_text_editor_v1",
+    "hard_rules": [
+      "profile:p_hard_001",
+      "profile:p_hard_002"
+    ],
+    "soft_rules": [
+      "profile:p_soft_001",
+      "profile:p_soft_002"
+    ],
+    "custom_checks": []
+  }
+}

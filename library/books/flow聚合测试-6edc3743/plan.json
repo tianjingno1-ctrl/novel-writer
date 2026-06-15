@@ -1,0 +1,54 @@
+{
+  "active_scene_id": "ch1_96a6a972",
+  "chapters": {
+    "1": {
+      "title": "初遇",
+      "status": "approved",
+      "hook": "结尾反转",
+      "word_count_target": 2000,
+      "scenes": [
+        {
+          "id": "ch1_96a6a972",
+          "title": "初遇",
+          "beat": "男女主误会",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-09T16:46:21",
+          "emotion_anchor": {}
+        }
+      ]
+    },
+    "2": {
+      "title": "再遇",
+      "status": "drafting",
+      "hook": "新悬念",
+      "word_count_target": null,
+      "scenes": [
+        {
+          "id": "ch2_0881cddd",
+          "title": "再遇",
+          "beat": "误会加深",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-09T16:46:21",
+          "emotion_anchor": {}
+        }
+      ]
+    }
+  },
+  "review_criteria": {
+    "platform_profile": "tomato_text_editor_v1",
+    "hard_rules": [
+      "profile:p_hard_001",
+      "profile:p_hard_002"
+    ],
+    "soft_rules": [
+      "profile:p_soft_001",
+      "profile:p_soft_002"
+    ],
+    "custom_checks": []
+  },
+  "version": 2
+}

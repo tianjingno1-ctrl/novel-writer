@@ -1,4 +1,4 @@
-"""跨模块数据契约：LLM 解析结构、服务 IO、持久化格式说明。"""
+"""跨模块数据契约：LLM 解析结构、服务 IO。磁盘格式见 docs/persist-formats.md。"""
 
 from core.schemas.llm import (
     BulkStatePayload,

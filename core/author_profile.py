@@ -118,8 +118,9 @@ def apply_to_book_taste(
     *,
     rule_ids: list[str] | None = None,
     inherit_all: bool = True,
+    source_book_id: str | None = None,
 ) -> dict[str, Any]:
-    """将作者资产写入本书 taste（A4 继承）。"""
+    """将作者资产写入本书 taste（A4 继承 / P3d 中途换风格）。"""
     profile = load_author_profile()
     selected = profile.get("rules") or []
     if rule_ids:
@@ -127,6 +128,10 @@ def apply_to_book_taste(
         selected = [r for i, r in enumerate(selected) if str(i) in id_set or r.get("content") in id_set]
     elif not inherit_all:
         selected = []
+
+    if source_book_id:
+        bid = source_book_id.strip()
+        selected = [r for r in selected if str(r.get("source_book_id") or "") == bid]
 
     out = dict(book_taste) if isinstance(book_taste, dict) else {}
     out.setdefault("rules", [])
@@ -144,10 +149,14 @@ def apply_to_book_taste(
             existing.add(c)
 
     rp_list = profile.get("reader_patterns") or []
+    if source_book_id:
+        bid = source_book_id.strip()
+        rp_list = [rp for rp in rp_list if str(rp.get("book_id") or "") == bid]
     if rp_list:
         latest = rp_list[-1]
         out["reader_pattern"] = {
             "good_emotions": latest.get("good_emotions") or [],
             "source": "author_profile",
+            "source_book_id": latest.get("book_id") or source_book_id or "",
         }
     return out

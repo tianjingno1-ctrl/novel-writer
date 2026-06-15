@@ -1,0 +1,36 @@
+{
+  "version": 2,
+  "inherit_global": true,
+  "preferences": {},
+  "notes": "",
+  "overrides": {
+    "rules": [],
+    "append_rules": [],
+    "append_examples": [
+      {
+        "id": "ex-551b16d1",
+        "type": "good",
+        "text": "自动试跑通过",
+        "annotation": "用户标注亮点",
+        "tags": [
+          "hook_strong"
+        ],
+        "source": "highlight",
+        "chapter_num": 1,
+        "created_at": "2026-06-11 12:04:11"
+      },
+      {
+        "id": "ex-a7c6c63a",
+        "type": "good",
+        "text": "自动试跑通过",
+        "annotation": "用户标注亮点",
+        "tags": [
+          "hook_strong"
+        ],
+        "source": "highlight",
+        "chapter_num": 1,
+        "created_at": "2026-06-11 12:14:26"
+      }
+    ]
+  }
+}

@@ -1,6 +1,19 @@
 import { create } from 'zustand'
 
-export type WizardStep = 'reference' | 'direction' | 'plan' | 'criteria'
+import {
+  applyBookTypeWordDefaults,
+  clampShortChapterCount,
+  DEFAULT_NOVEL_CHAPTER_COUNT,
+  DEFAULT_SHORT_CHAPTER_COUNT,
+  DEFAULT_SHORT_TOTAL_WORDS,
+  DEFAULT_WORDS_PER_CHAPTER,
+  deriveShortChapterCount,
+  platformDefaultWordsPerChapter,
+} from '@/lib/wordBudget'
+import type { PlanChapterRow } from '@/lib/chapterRoles'
+import type { BookFormatId, GenreId } from '@/lib/bookMeta'
+
+export type WizardStep = 'basic' | 'reference' | 'direction' | 'plan' | 'criteria'
 
 export type DirectionOption = {
   id?: string
@@ -13,19 +26,24 @@ export type DirectionOption = {
   [key: string]: unknown
 }
 
-export type PlanChapter = {
-  num?: number
-  title?: string
-  beat?: string
-  hook?: string
-  [key: string]: unknown
-}
+export type PlanChapter = PlanChapterRow
 
 type WizardState = {
   step: WizardStep
+  basicTitle: string
+  basicPlatform: string
+  basicBookType: BookFormatId
+  basicGenre: GenreId | ''
   referenceExcerpt: string
   seed: string
-  chapterCount: number
+  /** 短篇：全书目标字数 */
+  totalWords: number
+  /** 短篇：目标章数（3～10） */
+  shortChapterCount: number
+  /** 长篇：目标章数 */
+  novelChapterCount: number
+  /** 长篇：每章目标字数（短篇由总字数反推，只读展示） */
+  wordsPerChapter: number
   directionOptions: DirectionOption[]
   selectedDirection: DirectionOption | null
   directionLogId: string | null
@@ -35,9 +53,18 @@ type WizardState = {
   deconstructLogId: string | null
   deconstructSummary: string
   setStep: (step: WizardStep) => void
+  setBasic: (patch: {
+    title?: string
+    platform?: string
+    bookType?: BookFormatId
+    genre?: GenreId | ''
+  }) => void
+  setTotalWords: (n: number) => void
+  setShortChapterCount: (n: number) => void
+  setNovelChapterCount: (n: number) => void
+  setWordsPerChapter: (n: number) => void
   setReference: (text: string) => void
   setSeed: (text: string) => void
-  setChapterCount: (n: number) => void
   setDirectionOptions: (opts: DirectionOption[], logId?: string | null) => void
   selectDirection: (opt: DirectionOption) => void
   setPlan: (title: string, chapters: PlanChapter[], logId?: string | null) => void
@@ -46,10 +73,17 @@ type WizardState = {
 }
 
 const initial = {
-  step: 'reference' as WizardStep,
+  step: 'basic' as WizardStep,
+  basicTitle: '',
+  basicPlatform: 'tomato',
+  basicBookType: 'novel' as BookFormatId,
+  basicGenre: '' as GenreId | '',
   referenceExcerpt: '',
   seed: '',
-  chapterCount: 20,
+  totalWords: DEFAULT_SHORT_TOTAL_WORDS,
+  shortChapterCount: DEFAULT_SHORT_CHAPTER_COUNT,
+  novelChapterCount: DEFAULT_NOVEL_CHAPTER_COUNT,
+  wordsPerChapter: DEFAULT_WORDS_PER_CHAPTER,
   directionOptions: [] as DirectionOption[],
   selectedDirection: null as DirectionOption | null,
   directionLogId: null as string | null,
@@ -63,9 +97,49 @@ const initial = {
 export const useWizardStore = create<WizardState>((set) => ({
   ...initial,
   setStep: (step) => set({ step }),
+  setBasic: (patch) =>
+    set((s) => {
+      const bookType = patch.bookType ?? s.basicBookType
+      const platform = patch.platform ?? s.basicPlatform
+      const bookTypeChanged =
+        patch.bookType !== undefined && patch.bookType !== s.basicBookType
+      const platformChanged =
+        patch.platform !== undefined && patch.platform !== s.basicPlatform
+      let totalWords = s.totalWords
+      let shortChapterCount = s.shortChapterCount
+      let novelChapterCount = s.novelChapterCount
+      let wordsPerChapter = s.wordsPerChapter
+      if (bookTypeChanged) {
+        const d = applyBookTypeWordDefaults(bookType, platform)
+        totalWords = d.totalWords
+        shortChapterCount = d.shortChapterCount
+        novelChapterCount = d.novelChapterCount
+        wordsPerChapter = d.wordsPerChapter
+      } else if (platformChanged) {
+        wordsPerChapter = platformDefaultWordsPerChapter(platform)
+        if (bookType === 'short') {
+          shortChapterCount = deriveShortChapterCount(totalWords, platform)
+        }
+      }
+      return {
+        basicTitle: patch.title ?? s.basicTitle,
+        basicPlatform: platform,
+        basicBookType: bookType,
+        basicGenre: patch.genre !== undefined ? patch.genre : s.basicGenre,
+        totalWords,
+        shortChapterCount,
+        novelChapterCount,
+        wordsPerChapter,
+      }
+    }),
+  setTotalWords: (n) => set({ totalWords: Math.max(1000, n) }),
+  setShortChapterCount: (n) =>
+    set({ shortChapterCount: clampShortChapterCount(n) }),
+  setNovelChapterCount: (n) =>
+    set({ novelChapterCount: Math.max(1, Math.min(200, n)) }),
+  setWordsPerChapter: (n) => set({ wordsPerChapter: Math.max(500, n) }),
   setReference: (text) => set({ referenceExcerpt: text }),
   setSeed: (text) => set({ seed: text }),
-  setChapterCount: (n) => set({ chapterCount: n }),
   setDirectionOptions: (opts, logId = null) =>
     set({ directionOptions: opts, directionLogId: logId }),
   selectDirection: (opt) => set({ selectedDirection: opt }),

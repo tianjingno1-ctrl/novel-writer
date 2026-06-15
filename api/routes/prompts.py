@@ -14,11 +14,13 @@ MAX_PROMPT_CHARS = 80_000
 
 class PromptOverrideBody(BaseModel):
     system: str | None = None
+    append: str | None = None
+    prepend: str | None = None
     clear: bool = False
 
-    @field_validator("system")
+    @field_validator("system", "append", "prepend")
     @classmethod
-    def check_system(cls, v: str | None) -> str | None:
+    def check_text(cls, v: str | None) -> str | None:
         if v is not None and len(v) > MAX_PROMPT_CHARS:
             raise ValueError(f"prompt 过长（上限 {MAX_PROMPT_CHARS} 字符）")
         return v
@@ -47,6 +49,8 @@ def put_prompt_node(node_id: str, body: PromptOverrideBody, request: Request) ->
         _ctx(request),
         node_id,
         system=body.system,
+        append=body.append,
+        prepend=body.prepend,
         clear=body.clear,
     )
     if not result.get("ok"):

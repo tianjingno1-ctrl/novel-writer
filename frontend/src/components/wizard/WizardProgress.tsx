@@ -1,54 +1,87 @@
 import type { WizardStep } from '@/stores/wizardStore'
 import { cn } from '@/lib/utils'
+import { WIZARD_STEP_ORDER, wizardStepIndex } from '@/components/wizard/wizardPersist'
 
-const STEPS: { id: WizardStep; label: string }[] = [
-  { id: 'reference', label: '参考' },
-  { id: 'direction', label: '方向' },
-  { id: 'plan', label: '规划' },
-  { id: 'criteria', label: '标准' },
-]
+const STEP_LABELS: Record<WizardStep, string> = {
+  basic: '基本',
+  reference: '偏好',
+  direction: '方向',
+  plan: '规划',
+  criteria: '标准',
+}
 
 type Props = {
   current: WizardStep
+  minStep?: WizardStep
+  onStepClick?: (step: WizardStep) => void
 }
 
-export function WizardProgress({ current }: Props) {
-  const idx = STEPS.findIndex((s) => s.id === current)
+export function WizardProgress({ current, minStep = 'basic', onStepClick }: Props) {
+  const idx = wizardStepIndex(current)
+  const minIdx = wizardStepIndex(minStep)
 
   return (
-    <div className="flex items-center justify-center gap-2 py-6">
-      {STEPS.map((step, i) => (
-        <div key={step.id} className="flex items-center gap-2">
-          <div className="flex flex-col items-center gap-1">
+    <div className="flex items-center justify-center gap-1 py-6">
+      {WIZARD_STEP_ORDER.map((stepId, i) => {
+        const step = { id: stepId, label: STEP_LABELS[stepId] }
+        const clickable =
+          Boolean(onStepClick) && i <= idx && i >= minIdx && i !== idx
+        const dot = (
+          <>
             <div
               className={cn(
-                'flex h-8 w-8 items-center justify-center rounded-full text-sm font-medium transition-colors',
-                i < idx && 'bg-primary text-primary-foreground',
-                i === idx && 'bg-primary text-primary-foreground ring-4 ring-primary/20',
-                i > idx && 'border border-border bg-surface text-muted',
+                'h-3 w-3 rounded-full border transition-colors',
+                i < idx &&
+                  'border-[var(--color-primary)] bg-[var(--color-primary)]',
+                i === idx &&
+                  'border-[var(--color-primary)] bg-[var(--color-primary)] ring-4 ring-[var(--color-border)]',
+                i > idx &&
+                  'border-[var(--color-border-secondary)] bg-transparent',
               )}
-            >
-              {i < idx ? '✓' : i + 1}
-            </div>
+            />
             <span
               className={cn(
-                'text-xs',
-                i === idx ? 'text-foreground font-medium' : 'text-muted',
+                'text-[10px]',
+                i === idx
+                  ? 'font-medium text-[var(--color-text-primary)]'
+                  : 'text-[var(--color-text-tertiary)]',
+                clickable && 'group-hover:text-[var(--color-text-secondary)]',
               )}
             >
               {step.label}
             </span>
-          </div>
-          {i < STEPS.length - 1 ? (
-            <div
-              className={cn(
-                'mb-5 h-px w-12 sm:w-20',
-                i < idx ? 'bg-primary' : 'bg-border',
+          </>
+        )
+
+        return (
+          <div key={step.id} className="flex items-center gap-1">
+            <div className="flex flex-col items-center gap-1">
+              {clickable ? (
+                <button
+                  type="button"
+                  className="group flex flex-col items-center gap-1 rounded-[var(--border-radius-sm)] px-1 py-0.5 transition-colors hover:bg-[var(--color-background-secondary)]"
+                  onClick={() => onStepClick?.(step.id)}
+                  title={`返回：${step.label}`}
+                >
+                  {dot}
+                </button>
+              ) : (
+                dot
               )}
-            />
-          ) : null}
-        </div>
-      ))}
+            </div>
+            {i < WIZARD_STEP_ORDER.length - 1 ? (
+              <div
+                className={cn(
+                  'mb-4 h-px w-8 sm:w-12',
+                  i < idx
+                    ? 'bg-[var(--color-primary)]'
+                    : 'bg-[var(--color-border)]',
+                )}
+              />
+            ) : null}
+          </div>
+        )
+      })}
     </div>
   )
 }

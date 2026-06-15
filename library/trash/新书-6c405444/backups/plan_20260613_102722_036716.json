@@ -1,0 +1,127 @@
+{
+  "active_scene_id": "ch1_d79fefdd",
+  "chapters": {
+    "1": {
+      "title": "餐桌上的黑卡",
+      "status": "pending",
+      "hook": "黑卡亮相后，婆婆脸色铁青，小姑子尖叫“假的！”，苏晚宁嘴角微扬——下一秒，银行经理亲自赶到。",
+      "word_count_target": 1000,
+      "scenes": [
+        {
+          "id": "ch1_d79fefdd",
+          "title": "餐桌上的黑卡",
+          "beat": "【场景目的】建立女主被欺压的弱势形象，引爆黑卡悬念。\n【核心动作】羞辱→黑卡出场→众人震惊。\n【节奏档位】快\n【结尾钩子】经理进门，小姑子慌乱。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-13T10:27:18",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "hook_open",
+      "intent": {
+        "kind": "hook_open",
+        "ai_suggest": "羞辱+黑卡亮相+反转+愤怒+代入女主",
+        "final": {}
+      }
+    },
+    "2": {
+      "title": "限量黑卡背后",
+      "status": "pending",
+      "hook": "电话挂断，苏晚宁淡淡道：“我自己的公司，还需要靠男人？”——屏幕切到新闻头条：神秘女富豪收购家族企业。",
+      "word_count_target": 2500,
+      "scenes": [
+        {
+          "id": "ch2_a9575e27",
+          "title": "限量黑卡背后",
+          "beat": "【场景目的】深度打脸，揭示女主隐藏实力，制造付费冲动。\n【核心动作】验证黑卡→揭发→电话首富。\n【节奏档位】快\n【结尾钩子】新闻头条出现，女主身份悬念升级。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-13T10:27:18",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "paywall",
+      "intent": {
+        "kind": "paywall",
+        "ai_suggest": "",
+        "final": {}
+      }
+    },
+    "3": {
+      "title": "她才是掌权者",
+      "status": "pending",
+      "hook": "丈夫抱住她腿：“晚宁，我错了！” 苏晚宁看着钻戒：“从今天起，你听我的。”",
+      "word_count_target": 2500,
+      "scenes": [
+        {
+          "id": "ch3_e89fc697",
+          "title": "她才是掌权者",
+          "beat": "【场景目的】付费后立即返还爽感，彻底翻盘。\n【核心动作】亮身份→夺权→丈夫下跪。\n【节奏档位】中\n【结尾钩子】夫妻关系反转，预示下一章更高能。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-13T10:27:18",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "paid_open"
+    },
+    "4": {
+      "title": "新女王登基",
+      "status": "pending",
+      "hook": "尾声彩蛋：苏晚宁手机响起——国际神秘组织邀请她担任荣誉会长。",
+      "word_count_target": 2500,
+      "scenes": [
+        {
+          "id": "ch4_32fb0202",
+          "title": "新女王登基",
+          "beat": "【场景目的】完成终极打脸，收束所有伏笔，给人留下“她还有更大舞台”的期待。\n【核心动作】夺回一切→前夫家庭煮夫→新事业启航。\n【节奏档位】慢（松弛有度）\n【结尾钩子】神秘邀请，开放式遐想。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-13T10:27:18",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "finale",
+      "intent": {
+        "kind": "finale",
+        "ai_suggest": "",
+        "final": {}
+      }
+    }
+  },
+  "meta": {
+    "title": "假装废柴炸翻全场",
+    "platform": "tomato",
+    "writing_mode": "standard",
+    "wizard_step": "criteria",
+    "chapter_count": null,
+    "word_count_per_chapter": null,
+    "total_word_target": 10000,
+    "logline": "豪门大嫂扮猪吃虎，直到她随手甩出全球限量黑卡。",
+    "sell_point": "隐藏大佬+打脸爽文，反转密集，每章一个高光时刻。",
+    "tone": "轻松爽文，打脸逆袭",
+    "option_id": "C",
+    "risk_note": "注意扮猪吃虎的铺垫自然，避免人设前后矛盾。",
+    "characters": [],
+    "paywall_chapter": 2
+  },
+  "version": 2,
+  "review_criteria": {
+    "platform_profile": "tomato_text_editor_v1",
+    "hard_rules": [
+      "profile:p_hard_001",
+      "profile:p_hard_002"
+    ],
+    "soft_rules": [
+      "profile:p_soft_001",
+      "profile:p_soft_002"
+    ],
+    "custom_checks": [
+      "前300字必须多个反转让人读下去"
+    ]
+  }
+}

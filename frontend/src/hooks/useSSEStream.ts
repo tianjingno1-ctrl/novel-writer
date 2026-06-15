@@ -111,6 +111,13 @@ export function useSSEStream() {
                   lastEvent: event,
                 }
               }
+              if (event.type === 'chapter_cleared') {
+                return {
+                  ...s,
+                  text: '',
+                  lastEvent: event,
+                }
+              }
               if (event.type === 'error') {
                 return {
                   ...s,
@@ -128,6 +135,11 @@ export function useSSEStream() {
         }
       } catch (err) {
         if (controller.signal.aborted) {
+          setState((s) => ({
+            ...s,
+            streaming: false,
+            error: s.text.trim() ? null : '已取消生成',
+          }))
           return
         }
         const message =

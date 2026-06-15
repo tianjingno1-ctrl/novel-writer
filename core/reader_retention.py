@@ -80,6 +80,8 @@ def analyze_reader_perspective(
     *,
     chapter_num: int,
     reader_pattern: dict[str, Any] | None = None,
+    drop_risk_thresholds: dict[str, float] | None = None,
+    chapter_role: str | None = None,
 ) -> dict[str, Any]:
     """读者视角：爽点密度 + 章尾弃文风险（启发式）。"""
     text = (content or "").strip()
@@ -108,8 +110,13 @@ def analyze_reader_perspective(
         hook_score += 0.35
     if len(tail.strip()) < 80:
         hook_score += 0.2
+    if chapter_role in ("paywall", "hook_open"):
+        hook_score -= 0.05
     drop_score = max(0.0, min(1.0, 0.65 - hook_score + (0.15 if payoff_level == "low" else 0)))
-    drop_level = _level_from_score(drop_score, high=0.55, medium=0.35)
+    th = drop_risk_thresholds if isinstance(drop_risk_thresholds, dict) else {}
+    high_th = float(th.get("high", 0.55))
+    medium_th = float(th.get("medium", 0.35))
+    drop_level = _level_from_score(drop_score, high=high_th, medium=medium_th)
 
     reason_parts: list[str] = []
     if payoff_level == "low":
@@ -121,13 +128,152 @@ def analyze_reader_perspective(
 
     return {
         "chapter_num": chapter_num,
+        "chapter_role": chapter_role,
         "payoff_density": payoff_level,
         "payoff_score": round(density_score, 2),
         "matched_emotions": matched[:6],
         "drop_off_risk": drop_level,
         "drop_off_score": round(drop_score, 3),
         "drop_off_reason": "；".join(reason_parts) or "节奏正常",
+        "source": "heuristic",
     }
+
+
+def _normalize_level(value: Any) -> str | None:
+    raw = str(value or "").strip().lower()
+    if raw in ("high", "medium", "low"):
+        return raw
+    if raw in ("高", "偏高"):
+        return "high"
+    if raw in ("中", "一般"):
+        return "medium"
+    if raw in ("低", "偏低"):
+        return "low"
+    return None
+
+
+def _parse_reader_json_line(text: str) -> dict[str, str] | None:
+    for line in reversed((text or "").splitlines()):
+        candidate = line.strip()
+        if not candidate.startswith("{") or "}" not in candidate:
+            continue
+        start = candidate.find("{")
+        end = candidate.rfind("}") + 1
+        blob = candidate[start:end]
+        try:
+            raw = json.loads(blob)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(raw, dict):
+            continue
+        out: dict[str, str] = {}
+        risk = _normalize_level(raw.get("risk"))
+        payoff = _normalize_level(raw.get("payoff"))
+        notes = str(raw.get("notes") or raw.get("summary") or "").strip()
+        if risk:
+            out["drop_off_risk"] = risk
+        if payoff:
+            out["payoff_density"] = payoff
+        if notes:
+            out["reader_review_summary"] = notes
+        if out:
+            return out
+    return None
+
+
+def _parse_drop_level_from_llm(text: str) -> str | None:
+    parsed = _parse_reader_json_line(text)
+    if parsed and parsed.get("drop_off_risk"):
+        return parsed["drop_off_risk"]
+    match = re.search(r"RISK:\s*(high|medium|low)\b", text or "", re.IGNORECASE)
+    if match:
+        return match.group(1).lower()
+    for line in (text or "").splitlines():
+        if "弃读" in line or "弃文" in line:
+            if "高" in line:
+                return "high"
+            if "中" in line:
+                return "medium"
+            if "低" in line:
+                return "low"
+    return None
+
+
+def _parse_payoff_level_from_llm(text: str) -> str | None:
+    parsed = _parse_reader_json_line(text)
+    if parsed and parsed.get("payoff_density"):
+        return parsed["payoff_density"]
+    match = re.search(r"PAYOFF:\s*(high|medium|low)\b", text or "", re.IGNORECASE)
+    if match:
+        return match.group(1).lower()
+    for line in (text or "").splitlines():
+        if "爽点" in line or "情绪落点" in line:
+            if "高" in line:
+                return "high"
+            if "中" in line:
+                return "medium"
+            if "低" in line:
+                return "low"
+    return None
+
+
+def parse_llm_reader_metrics(text: str) -> dict[str, str]:
+    parsed = _parse_reader_json_line(text)
+    if parsed:
+        return parsed
+    out: dict[str, str] = {}
+    risk = _parse_drop_level_from_llm(text)
+    payoff = _parse_payoff_level_from_llm(text)
+    if risk:
+        out["drop_off_risk"] = risk
+    if payoff:
+        out["payoff_density"] = payoff
+    return out
+
+
+def try_llm_reader_review(
+    content: str,
+    *,
+    plan: dict,
+    chapter_num: int,
+    base: dict[str, Any],
+) -> dict[str, Any] | None:
+    """L2：按 role + intent 调用 reader_review prompt；失败时返回 None。"""
+    import infra.config as config
+    from core import chapter_role_overlay
+    from core import llm
+    from core import prompts
+    from core.llm import CallOptions
+
+    pid = config.CHECK_PROVIDER
+    if not config.is_api_key_configured(pid):
+        return None
+    user = chapter_role_overlay.l2_reader_user_prompt(plan, chapter_num, content)
+    if not user.strip():
+        return None
+    try:
+        system = prompts.load_system("reader_review")
+        reply, _usage = llm.complete(
+            system,
+            [{"role": "user", "content": user}],
+            options=CallOptions(provider=pid, max_tokens=1200, temperature=0.3),
+        )
+    except Exception:
+        return None
+    metrics = parse_llm_reader_metrics(reply)
+    out = dict(base)
+    out["source"] = "llm+heuristic"
+    out["reader_review_text"] = reply.strip()
+    if metrics.get("drop_off_risk"):
+        out["drop_off_risk"] = metrics["drop_off_risk"]
+        out["drop_off_reason"] = f"读者模拟：{metrics['drop_off_risk']} 风险（LLM）"
+    if metrics.get("payoff_density"):
+        out["payoff_density"] = metrics["payoff_density"]
+    if metrics.get("reader_review_summary"):
+        out["reader_review_summary"] = metrics["reader_review_summary"]
+        if not metrics.get("drop_off_risk"):
+            out["drop_off_reason"] = metrics["reader_review_summary"]
+    return out
 
 
 def check_rhythm_warning(

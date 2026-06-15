@@ -1,40 +1,128 @@
 @import 'tailwindcss';
 
-/* 暖白 + 墨绿 — 设计令牌（Tailwind v4 @theme，等同 tailwind.config 扩展） */
+/*
+ * 色板（Canonical）
+ *
+ * 亮色（默认）
+ *   --bg #FAF9F7   暖白，像纸
+ *   --surface #FFFFFF  卡片白
+ *   --border #E8E4DC  暖灰边框
+ *   --text-primary #1A1814
+ *   --text-muted #8C8780
+ *   --primary #2D6A4F  墨绿
+ *   --primary-hover #1B4332
+ *   --success #2D6A4F
+ *   --warning #B45309
+ *   --danger #9B1C1C
+ *
+ * 亮色为唯一默认主题（不跟随系统深色模式）
+ */
+
 @theme {
-  --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-sans: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
   --font-serif: 'Noto Serif SC', 'Songti SC', 'SimSun', serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
   --color-background: #faf9f7;
   --color-surface: #ffffff;
-  --color-foreground: #1a1814;
-  --color-muted: #8c8780;
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f3f1ed;
   --color-border: #e8e4dc;
+  --color-border-secondary: #d4cfc6;
+  --color-border-tertiary: #d4cfc6;
+  --color-text-primary: #1a1814;
+  --color-text-secondary: #5c5850;
+  --color-text-tertiary: #8c8780;
+  --color-text-light: #b5b0a8;
+  --color-muted: #8c8780;
+  --color-foreground: #1a1814;
+  --color-card: #ffffff;
+  --color-accent: #f3f1ed;
+  --color-overlay: rgb(26 24 20 / 0.45);
+
   --color-primary: #2d6a4f;
   --color-primary-hover: #1b4332;
   --color-primary-foreground: #ffffff;
-  --color-card: #ffffff;
-  --color-accent: #f3f1ec;
-  --color-warning: #b45309;
-  --color-danger: #9b1c1c;
+  --color-brand: #2d6a4f;
+  --color-brand-hover: #1b4332;
+  --color-brand-light: #eaf4ef;
+  --color-brand-foreground: #ffffff;
+
   --color-success: #2d6a4f;
-  --color-overlay: rgb(26 24 20 / 0.45);
+  --color-success-bg: #eaf4ef;
+  --color-success-text: #1b4332;
+  --color-warning: #b45309;
+  --color-warning-bg: #fef3c7;
+  --color-warning-text: #854f0b;
+  --color-danger: #9b1c1c;
+  --color-danger-bg: #fee2e2;
+  --color-draft: #b4b2a9;
+
+  --border-radius-sm: 8px;
+  --border-radius-md: 8px;
+  --border-radius-lg: 12px;
+  --sidebar-width: 220px;
+  --topbar-height: 48px;
+  --shadow-sm: 0 1px 3px rgb(0 0 0 / 0.06), 0 1px 2px rgb(0 0 0 / 0.04);
+  --shadow-md: 0 4px 16px rgb(0 0 0 / 0.08), 0 2px 6px rgb(0 0 0 / 0.05);
 }
 
-@media (prefers-color-scheme: dark) {
-  @theme {
-    --color-background: #141210;
-    --color-surface: #1c1a17;
-    --color-foreground: #ede9e3;
-    --color-muted: #9c968e;
-    --color-border: #2e2b26;
-    --color-primary: #40916c;
-    --color-primary-hover: #2d6a4f;
-    --color-card: #1c1a17;
-    --color-accent: #252220;
-    --color-overlay: rgb(0 0 0 / 0.55);
-  }
+:root {
+  --bg: #faf9f7;
+  --surface: #ffffff;
+  --border: #e8e4dc;
+  --text-primary: #1a1814;
+  --text-muted: #8c8780;
+  --primary: #2d6a4f;
+  --primary-hover: #1b4332;
+  --success: #2d6a4f;
+  --warning: #b45309;
+  --danger: #9b1c1c;
+
+  --color-background: #faf9f7;
+  --color-surface: #ffffff;
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #f3f1ed;
+  --color-border: #e8e4dc;
+  --color-border-secondary: #d4cfc6;
+  --color-border-tertiary: #d4cfc6;
+  --color-text-primary: #1a1814;
+  --color-text-secondary: #5c5850;
+  --color-text-tertiary: #8c8780;
+  --color-text-light: #b5b0a8;
+  --color-muted: #8c8780;
+  --color-overlay: rgb(26 24 20 / 0.45);
+
+  --color-primary: #2d6a4f;
+  --color-primary-hover: #1b4332;
+  --color-primary-foreground: #ffffff;
+  --color-brand: #2d6a4f;
+  --color-brand-hover: #1b4332;
+  --color-brand-light: #eaf4ef;
+  --color-brand-foreground: #ffffff;
+
+  --color-success: #2d6a4f;
+  --color-success-bg: #eaf4ef;
+  --color-success-text: #1b4332;
+  --color-warning: #b45309;
+  --color-warning-bg: #fef3c7;
+  --color-warning-text: #854f0b;
+  --color-danger: #9b1c1c;
+  --color-danger-bg: #fee2e2;
+  --color-draft: #b4b2a9;
+
+  --sidebar-width: 220px;
+  --topbar-height: 48px;
+  --border-radius-sm: 8px;
+  --border-radius-md: 8px;
+  --border-radius-lg: 12px;
+
+  accent-color: #2d6a4f;
+  color-scheme: light only;
+}
+
+html {
+  color-scheme: light only;
 }
 
 * {
@@ -45,14 +133,40 @@ html,
 body,
 #root {
   min-height: 100%;
+  background: var(--bg);
 }
 
 body {
   margin: 0;
   font-family: var(--font-sans);
-  background: var(--color-background);
-  color: var(--color-foreground);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.6;
+  background: var(--bg);
+  color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--primary);
+}
+
+a:hover {
+  color: var(--primary-hover);
+}
+
+input:not([type='checkbox']):not([type='radio']),
+select,
+textarea {
+  accent-color: var(--primary);
+}
+
+input:not([type='checkbox']):not([type='radio']):focus,
+select:focus,
+textarea:focus {
+  border-color: var(--primary) !important;
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(45 106 79 / 0.12);
 }
 
 .font-serif {
@@ -61,4 +175,209 @@ body {
 
 .font-ui {
   font-family: var(--font-sans);
+}
+
+.page-shell {
+  padding: 32px 40px;
+  max-width: 1120px;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 28px;
+}
+
+.page-title {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+.page-sub {
+  margin-top: 3px;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.btn-base {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--border-radius-sm);
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-base:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  border: none;
+  background: var(--primary);
+  color: #ffffff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.card-ui {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--border-radius-lg);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+}
+
+.book-card {
+  position: relative;
+  overflow: hidden;
+  text-align: left;
+  transition: border-color 0.18s, box-shadow 0.18s, transform 0.18s;
+}
+
+.book-card:hover {
+  border-color: var(--primary);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.book-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: transparent;
+}
+
+.book-card--active::before {
+  background: var(--primary);
+}
+
+.book-card--done::before {
+  background: var(--text-muted);
+}
+
+.book-card--draft::before {
+  background: var(--warning);
+}
+
+.progress-track {
+  height: 3px;
+  background: var(--color-background-secondary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--primary);
+  transition: width 0.3s;
+}
+
+.progress-fill-success {
+  background: var(--success);
+}
+
+.ai-note {
+  background: var(--surface);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--border-radius-md);
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ai-warn {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  border-radius: var(--border-radius-md);
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.badge-hard {
+  background: var(--color-danger-bg);
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.badge-soft {
+  background: var(--color-background-secondary);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.badge-accent {
+  background: var(--color-brand-light);
+  color: var(--primary);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.chip-selected {
+  border: 1px solid var(--primary);
+  background: var(--surface);
+  color: var(--primary);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.badge-done {
+  background: var(--color-background-secondary);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.badge-warn {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  font-size: 10px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.gate-dim {
+  opacity: 0.4;
+  pointer-events: none;
+  transition: opacity 0.2s;
+}
+
+.wizard-shell {
+  min-height: calc(100vh - var(--topbar-height));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 20px 48px;
+  background: var(--bg);
 }

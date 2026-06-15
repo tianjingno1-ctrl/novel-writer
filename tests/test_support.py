@@ -37,7 +37,7 @@ class StoreOnlyLibraryTests(unittest.TestCase):
 
 class MockLlmTests(unittest.TestCase):
     def test_mock_llm_complete_returns_tuple(self) -> None:
-        """mock_llm patch 后 core.api.complete 返回 (str, TokenUsage)"""
+        """mock_llm patch 后 core.llm.call_api 返回 (str, TokenUsage)"""
         from tests.support.mock_llm import mock_llm
         import core.llm as api
 

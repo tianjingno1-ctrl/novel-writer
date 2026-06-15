@@ -1,3 +1,4 @@
+# 平台/投递 profile 层：`library/profiles/*.yaml`（书型×平台×投递），含审阅模板与 profile 内嵌 rules；与章 role YAML 不是同一目录。
 """平台审阅 profile（标准层）：library/profiles/*.yaml"""
 
 from __future__ import annotations
@@ -65,6 +66,28 @@ def list_profiles() -> list[dict[str, Any]]:
     return rows
 
 
+def _profile_matches(
+    profile: dict[str, Any],
+    *,
+    book_type: str,
+    platform: str,
+    submission_target: str,
+) -> bool:
+    types = profile.get("book_types") or []
+    if types:
+        allowed = {str(t).strip().lower() for t in types}
+        bt = book_type if book_type != "world" else "novel"
+        if bt not in allowed and not (bt == "novel" and "world" in allowed):
+            return False
+    pf = str(profile.get("platform") or "").strip().lower()
+    if pf and pf != platform:
+        return False
+    st = str(profile.get("submission_target") or "text_editor").strip().lower()
+    if st != submission_target:
+        return False
+    return True
+
+
 def resolve_default_profile_id(
     *,
     book_type: str = "short",
@@ -74,12 +97,37 @@ def resolve_default_profile_id(
     """按书型×平台×投递类型匹配 profile；无则回退 review_prompts 路由 id。"""
     ensure_profiles_dir()
     bt = (book_type or "short").strip().lower()
+    if bt == "world":
+        bt = "novel"
     pf = (platform or "tomato").strip().lower()
     st = (submission_target or "text_editor").strip().lower()
 
+    scored: list[tuple[int, str]] = []
+    for path in sorted(PROFILES_DIR.glob("*.yaml")):
+        if path.name.startswith("_"):
+            continue
+        profile = load_profile(path.stem)
+        if not profile:
+            continue
+        if not _profile_matches(profile, book_type=bt, platform=pf, submission_target=st):
+            continue
+        pid = str(profile.get("id") or path.stem)
+        score = 0
+        types = profile.get("book_types") or []
+        if types and bt in {str(t).strip().lower() for t in types}:
+            score += 10
+        if str(profile.get("platform") or "").strip().lower() == pf:
+            score += 5
+        if f"{bt}" in pid or f"_{bt}_" in pid:
+            score += 3
+        scored.append((score, pid))
+    if scored:
+        scored.sort(key=lambda x: (-x[0], x[1]))
+        return scored[0][1]
+
     candidates = [
-        f"{pf}_{st}_v1",
         f"{pf}_{bt}_{st}_v1",
+        f"{pf}_{st}_v1",
         f"{bt}_{pf}_{st}_v1",
         f"{pf}_text_editor_v1",
     ]

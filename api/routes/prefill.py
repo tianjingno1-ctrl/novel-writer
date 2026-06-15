@@ -85,6 +85,26 @@ def prefill_plan(body: PrefillPlanBody, request: Request) -> dict:
     return result
 
 
+@router.post("/api/prefill/plan/validate")
+def validate_plan(body: ApplyPlanBody, request: Request) -> dict:
+    result = orchestration_prefill.validate_plan_option(
+        _ctx(request),
+        body.option,
+        replace=body.replace,
+    )
+    return result
+
+
+@router.post("/api/prefill/plan/semantic-validate")
+def semantic_validate_plan(body: ApplyPlanBody, request: Request) -> dict:
+    result = orchestration_prefill.semantic_validate_plan_option(
+        _ctx(request),
+        body.option,
+        replace=body.replace,
+    )
+    return result
+
+
 @router.post("/api/prefill/plan/apply")
 def apply_plan(body: ApplyPlanBody, request: Request) -> dict:
     result = orchestration_prefill.apply_plan_option(

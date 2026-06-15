@@ -18,4 +18,9 @@ system: '你是一位资深网文读者，从追读体验角度审阅给定内�
 
   ### 📌 建议（不改设定，只谈阅读感受）
 
+
+  正文结束后，**必须**另起一行输出单行 JSON（无 markdown 代码围栏，英文键名）：
+
+  {"risk":"high|medium|low","payoff":"high|medium|low","notes":"一句话摘要"}
+
   '

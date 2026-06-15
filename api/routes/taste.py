@@ -32,6 +32,8 @@ class TasteEventBody(BaseModel):
 class ImportDeconstructBody(BaseModel):
     quality_log_id: str
     merge_global: bool = True
+    hook_patterns: list[str] | None = None
+    structure_notes: list[str] | None = None
 
 
 class ApplyAuthorProfileBody(BaseModel):
@@ -112,6 +114,8 @@ def taste_import_deconstruct(body: ImportDeconstructBody, request: Request) -> d
         _ctx(request),
         body.quality_log_id.strip(),
         merge_global=body.merge_global,
+        hook_patterns=body.hook_patterns,
+        structure_notes=body.structure_notes,
     )
     if not result.get("ok"):
         raise HTTPException(400, result.get("error", "导入失败"))
@@ -145,3 +149,19 @@ def taste_put_reader_pattern(body: ReaderPatternBody, request: Request) -> dict:
     if not fields:
         raise HTTPException(400, "无更新字段")
     return orchestration_taste.put_reader_pattern(_ctx(request), fields)
+
+
+@router.delete("/api/taste/rules/{rule_id}")
+def taste_delete_rule(rule_id: str) -> dict:
+    result = orchestration_taste.delete_rule(rule_id.strip())
+    if not result.get("ok"):
+        raise HTTPException(404, result.get("error", "规则不存在"))
+    return result
+
+
+@router.post("/api/taste/rules/{rule_id}/localize")
+def taste_localize_rule(rule_id: str, request: Request) -> dict:
+    result = orchestration_taste.localize_rule(_ctx(request), rule_id.strip())
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error", "本地化失败"))
+    return result

@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
 
 from api.deps import require_ok
-from api.routes.review import ChapterQualityRequest
+from api.routes.maintain import ChapterQualityRequest
 
 router = APIRouter(tags=["writing"])
 
@@ -27,19 +27,10 @@ class ChatRequest(BaseModel):
     scene_beat: str = ""
     scene_id: str = ""
     chapter_num: int | None = None
+    regenerate: bool = False
 
     _validate_instruction = field_validator("instruction")(_check_api_text)
     _validate_scene_beat = field_validator("scene_beat")(_check_api_text)
-
-
-class ChatPromptItem(BaseModel):
-    id: str
-    title: str
-    content: str = ""
-
-
-class ChatPromptsBody(BaseModel):
-    prompts: list[ChatPromptItem]
 
 
 @router.get("/api/chat/history")
@@ -56,6 +47,7 @@ def chat(req: ChatRequest) -> dict:
             scene_beat=req.scene_beat,
             scene_id=req.scene_id,
             chapter_num=req.chapter_num,
+            regenerate=req.regenerate,
         ),
         "写书对话失败",
     )
@@ -71,6 +63,7 @@ def chat_stream(req: ChatRequest) -> StreamingResponse:
             scene_beat=req.scene_beat,
             scene_id=req.scene_id,
             chapter_num=req.chapter_num,
+            regenerate=req.regenerate,
         ):
             yield f"data: {event}\n\n"
 
@@ -100,14 +93,3 @@ def set_write_chapter(body: ChapterQualityRequest) -> dict:
 @router.post("/api/chat/restore")
 def chat_restore() -> dict:
     return require_ok(orchestration_writing.restore_chat(), "恢复失败")
-
-
-@router.get("/api/chat/prompts")
-def get_chat_prompts() -> dict:
-    return orchestration_writing.get_prompts()
-
-
-@router.put("/api/chat/prompts")
-def put_chat_prompts(body: ChatPromptsBody) -> dict:
-    prompts = [p.model_dump() for p in body.prompts]
-    return orchestration_writing.save_prompts(prompts)

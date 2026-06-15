@@ -434,6 +434,16 @@ def run_editor_review(
         return {"ok": False, "error": "选定范围内没有正文或概述"}
     scope_lbl = scope_label(scope, num)
     snap = deps.store.load_snapshot(num, for_purpose="check", chapter_body=work.body)
+    from core import plan_product
+    from core import story_context
+
+    plan = plan_product.load_plan()
+    world_block = story_context.build_story_context_block(
+        plan,
+        snap.world,
+        chapter_num=num,
+        book_dir=deps.store.paths.data_dir,
+    )
     pid = config.CHECK_PROVIDER
     system = deps.llm.build_cached_system(EDITOR_REVIEW_SYSTEM, provider=pid)
     messages = [
@@ -444,7 +454,7 @@ def run_editor_review(
                 scope_lbl,
                 primary,
                 summaries,
-                snap.world,
+                world_block,
             ),
         }
     ]
@@ -554,6 +564,7 @@ def run_female_fiction_review(
     profile_id: str | None = None,
     project: dict | None = None,
     taste_excerpt: str = "",
+    revise_note: str = "",
 ) -> dict:
     """女频审阅纯 LLM：不读档、不写盘、不记 quality_log。"""
     project = project or {}
@@ -569,6 +580,7 @@ def run_female_fiction_review(
         system_text,
         provider=pid,
         include_scene_context=use_writing,
+        chapter_num=chapter_num if chapter_num > 0 else None,
     )
     messages = [
         {
@@ -582,6 +594,7 @@ def run_female_fiction_review(
                 revise=revise and not rewrite_only,
                 rewrite_only=rewrite_only,
                 taste_excerpt=taste_excerpt,
+                revise_note=revise_note,
             ),
         }
     ]

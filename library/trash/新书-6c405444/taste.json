@@ -1,0 +1,24 @@
+{
+  "version": 2,
+  "inherit_global": true,
+  "preferences": {},
+  "notes": "",
+  "overrides": {
+    "rules": [],
+    "append_rules": [],
+    "append_examples": [
+      {
+        "id": "ex-328fccec",
+        "type": "good",
+        "text": "gaps\":[{\"rule_ref\":\"custom:0",
+        "annotation": "审阅报告中引用的有效片段",
+        "tags": [
+          "hook_strong"
+        ],
+        "source": "highlight",
+        "chapter_num": 1,
+        "created_at": "2026-06-13 10:36:00"
+      }
+    ]
+  }
+}

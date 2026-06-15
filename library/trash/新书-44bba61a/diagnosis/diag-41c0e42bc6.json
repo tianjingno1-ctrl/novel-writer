@@ -1,0 +1,22 @@
+{
+  "id": "diag-41c0e42bc6",
+  "book_id": "新书-44bba61a",
+  "created_at": "2026-06-10 19:28:06",
+  "quality_log_id": "d9d761f14e74",
+  "trigger": "chapter_fail",
+  "trigger_ref": {},
+  "issue_tags": [],
+  "analysis": "问题标签为 review_gap，最可能因 review.platform 节点缺少针对番茄平台风格的强审阅规则，导致生成内容未满足首章钩子与节奏要求",
+  "patch": {
+    "target_node": "review.platform",
+    "diff_preview": "在 review.platform 的审阅指令中追加以下规则：\n1. 首章3000字内必须出现明确的核心冲突或强钩子，若未满足则直接标记并要求重写。\n2. 每章结尾必须留有悬念句或情绪钩子，若无则标记缺失。\n3. 检查并删除所有不推动情绪的铺垫句，用【删】标出。\n4. 输出评语时优先检查以上三项，缺一不可。",
+    "override": {
+      "prepend": "",
+      "append": "在 review.platform 的审阅指令中追加以下规则：\n1. 首章3000字内必须出现明确的核心冲突或强钩子，若未满足则直接标记并要求重写。\n2. 每章结尾必须留有悬念句或情绪钩子，若无则标记缺失。\n3. 检查并删除所有不推动情绪的铺垫句，用【删】标出。\n4. 输出评语时优先检查以上三项，缺一不可。",
+      "system": null
+    }
+  },
+  "decision": {},
+  "status": "pending",
+  "updated_at": "2026-06-10 19:28:06"
+}

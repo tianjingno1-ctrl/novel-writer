@@ -60,24 +60,11 @@ def _env_int(name: str, default: int) -> int:
 
 # 单次 API 输出 token 上限（写书续写、概述、检查等）
 MAX_TOKENS = _env_int("NOVEL_MAX_TOKENS", 8192)
-# 世界批次审阅（按约 5 万字 / 15 章世界校准，中文粗估 1.6 字/token）
-# 15 章×≈3300 字 ≈ 5 万正文；分 3 段×5 章，每段正文约 1.6 万 + 档案约 1.2 万 ≈ 2.8 万字符 ≈ 1.75 万 input tokens/次
-BATCH_REVIEW_CHUNK_CHAPTERS = _env_int("NOVEL_BATCH_REVIEW_CHUNK_CHAPTERS", 5)
-# 单段 user 消息字符上限（5 章正文 + 世界观/人物/伏笔档案）
-BATCH_REVIEW_INPUT_MAX_CHARS = _env_int("NOVEL_BATCH_REVIEW_INPUT_MAX_CHARS", 36000)
-# 单章正文上限（均值 3k 时不截断；超长章才头尾省略）
-BATCH_REVIEW_CHAPTER_MAX_CHARS = _env_int("NOVEL_BATCH_REVIEW_CHAPTER_MAX_CHARS", 12000)
-# 分段审阅单次输出上限（报告目标 ≤3500 字 ≈ 2200 token，留足余量）
-BATCH_REVIEW_MAX_TOKENS = _env_int("NOVEL_BATCH_REVIEW_MAX_TOKENS", 6144)
-# 合并总报告输出上限（目标 ≤5000 字 ≈ 3100 token）
-BATCH_REVIEW_MERGE_MAX_TOKENS = _env_int("NOVEL_BATCH_REVIEW_MERGE_MAX_TOKENS", 10240)
-# 预览/UI：典型输出 token（非上限，用于发送前估算）
-BATCH_REVIEW_TYPICAL_CHUNK_OUTPUT = _env_int("NOVEL_BATCH_REVIEW_TYPICAL_CHUNK_OUTPUT", 2800)
-BATCH_REVIEW_TYPICAL_CROSS_OUTPUT = _env_int("NOVEL_BATCH_REVIEW_TYPICAL_CROSS_OUTPUT", 1800)
-BATCH_REVIEW_TYPICAL_MERGE_OUTPUT = _env_int("NOVEL_BATCH_REVIEW_TYPICAL_MERGE_OUTPUT", 3600)
-# 自由聊单独上限（默认按 Claude 超长输出；DeepSeek 若报错请在 .env 略降）
-FREE_CHAT_MAX_TOKENS = _env_int("NOVEL_FREE_CHAT_MAX_TOKENS", 64000)
-
+# 预填章规划 JSON 较长，单独提高上限（仍可能被模型/API 封顶）
+PREFILL_PLAN_MAX_TOKENS = _env_int("NOVEL_PREFILL_PLAN_MAX_TOKENS", 16384)
+# 整批档案同步：多章正文拼接输入上限
+BULK_ARCHIVE_INPUT_MAX_CHARS = _env_int("NOVEL_BULK_ARCHIVE_INPUT_MAX_CHARS", 36000)
+BULK_ARCHIVE_CHAPTER_MAX_CHARS = _env_int("NOVEL_BULK_ARCHIVE_CHAPTER_MAX_CHARS", 12000)
 USE_1H_CACHE = True
 CACHE_TTL = "1h" if USE_1H_CACHE else "5m"
 
@@ -93,10 +80,6 @@ CHAT_CONTEXT_TURNS = _env_int("NOVEL_CONTEXT_TURNS", 10)
 
 # 上下文策略: turns | summaries | beats | codex
 CONTEXT_MODE = os.environ.get("NOVEL_CONTEXT_MODE", "beats")
-
-# 自由聊天（与写作分离，默认 DeepSeek 省钱）
-FREE_CHAT_PROVIDER = os.environ.get("NOVEL_FREE_CHAT_PROVIDER", "deepseek")
-FREE_CHAT_CONTEXT_TURNS = _env_int("NOVEL_FREE_CHAT_TURNS", 20)
 
 # Web 最小鉴权：设置后所有 /api/* 须带请求头 X-Novel-Token
 WEB_TOKEN = os.environ.get("NOVEL_WEB_TOKEN", "").strip()
@@ -233,7 +216,7 @@ def _read_runtime_data() -> dict:
 
 def load_runtime_settings() -> None:
     """从 library/runtime.json 恢复 Web 端修改过的 provider / 上下文配置。"""
-    global PROVIDER, CONTEXT_MODE, CHAT_CONTEXT_TURNS, FREE_CHAT_CONTEXT_TURNS
+    global PROVIDER, CONTEXT_MODE, CHAT_CONTEXT_TURNS
     global HEARTBEAT_ENABLED
     data = _read_runtime_data()
     if not data:
@@ -247,9 +230,6 @@ def load_runtime_settings() -> None:
     turns = _coerce_turns(data.get("context_turns"))
     if turns is not None:
         CHAT_CONTEXT_TURNS = turns
-    free_turns = _coerce_turns(data.get("free_chat_context_turns"))
-    if free_turns is not None:
-        FREE_CHAT_CONTEXT_TURNS = free_turns
     if isinstance(data.get("heartbeat_enabled"), bool):
         HEARTBEAT_ENABLED = data["heartbeat_enabled"]
     if isinstance(data.get("prompt_cache_auto_refresh"), bool):
@@ -289,7 +269,6 @@ def save_runtime_settings() -> None:
         "provider": PROVIDER,
         "context_mode": CONTEXT_MODE,
         "context_turns": CHAT_CONTEXT_TURNS,
-        "free_chat_context_turns": FREE_CHAT_CONTEXT_TURNS,
         "heartbeat_enabled": HEARTBEAT_ENABLED,
         "prompt_cache_auto_refresh": model_routing.PROMPT_CACHE_AUTO_REFRESH,
         "node_models": model_routing.NODE_MODEL_OVERRIDES,

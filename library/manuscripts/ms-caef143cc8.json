@@ -1,0 +1,20 @@
+{
+  "id": "ms-caef143cc8",
+  "book_id": "新书-44bba61a",
+  "title": "新书",
+  "state": "draft",
+  "language": "zh",
+  "market_tags": [],
+  "ip_tags": [],
+  "submissions": [],
+  "versions": [
+    {
+      "version": 1,
+      "created_at": "2026-06-11 11:50:24",
+      "note": "从当前书交接为稿件"
+    }
+  ],
+  "created_at": "2026-06-11 11:50:24",
+  "updated_at": "2026-06-11 11:50:24",
+  "notes": ""
+}

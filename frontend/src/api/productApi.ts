@@ -12,14 +12,25 @@ export function fetchPlanProduct() {
   }>('/api/plan/product')
 }
 
-export type ReaderPreviewResult = {
-  chapter_num?: number
-  payoff_density?: string
-  payoff_score?: number
-  drop_off_risk?: string
-  drop_off_score?: number
-  drop_off_reason?: string
-  matched_emotions?: string[]
+export function updatePlanMeta(meta: Record<string, unknown>) {
+  return api<{ ok: boolean; meta?: Record<string, unknown> }>(
+    '/api/plan/meta',
+    { method: 'PUT', body: JSON.stringify({ meta }) },
+  )
+}
+
+export function fetchRhythmCheck(chapterNum: number) {
+  return api<{
+    ok: boolean
+    l5b_mandatory?: boolean
+    l5b_priority?: string
+    chapter_role?: string
+    rhythm_warning?: {
+      warning?: boolean
+      message?: string
+      chapters?: number[]
+    }
+  }>(`/api/chapters/${chapterNum}/rhythm-check`, { method: 'POST' })
 }
 
 export type CompliancePreviewResult = {
@@ -43,13 +54,6 @@ export function fetchCompliancePreview(submissionTarget: string) {
   })
 }
 
-export function fetchReaderPreview(chapterNum: number, content = '') {
-  return api<{ ok: boolean; reader_preview?: ReaderPreviewResult }>(
-    `/api/chapters/${chapterNum}/reader-preview`,
-    { method: 'POST', body: JSON.stringify({ content }) },
-  )
-}
-
 export function fetchChapterSummary(num: number) {
   return api<{
     ok: boolean
@@ -61,16 +65,58 @@ export function fetchChapterSummary(num: number) {
   }>(`/api/chapters/${num}/summary`)
 }
 
+export type ChapterReviewGap = {
+  rule_ref?: string
+  description?: string
+  severity?: 'hard' | 'soft' | string
+}
+
+export type ChapterReviewRound = {
+  round?: number
+  judgment?: string
+  issue_tags?: string[]
+  gaps?: ChapterReviewGap[]
+  quality_log_id?: string
+  review_excerpt?: string
+  profile_id?: string
+  ts?: string
+  judged_at?: string
+}
+
+export function fetchChapterReview(num: number) {
+  return api<{
+    ok: boolean
+    chapter_num?: number
+    round_count?: number
+    review?: { rounds?: ChapterReviewRound[] }
+  }>(`/api/chapters/${num}/review`)
+}
+
 export function fetchChaptersList() {
-  return api<{ chapters?: Array<{ num: number; title?: string; chars?: number }> }>(
-    '/api/chapters',
-  )
+  return api<{
+    chapters?: Array<{
+      num: number
+      title?: string
+      chars?: number
+      word_count_target?: number | null
+    }>
+  }>('/api/chapters')
 }
 
 export function fetchChapter(num: number) {
-  return api<{ num?: number; content?: string; title?: string }>(
-    `/api/chapters/${num}`,
-  )
+  return api<{
+    num?: number
+    content?: string
+    title?: string
+    plan?: {
+      title?: string
+      hook?: string
+      role?: string
+      intent?: import('@/lib/chapterRoles').ChapterIntent
+      word_count_target?: number | null
+      scenes?: Array<{ title?: string; beat?: string; summary?: string }>
+    }
+  }>(`/api/chapters/${num}`)
 }
 
 export function saveChapter(num: number, content: string) {
@@ -78,6 +124,21 @@ export function saveChapter(num: number, content: string) {
     method: 'PUT',
     body: JSON.stringify({ content }),
   })
+}
+
+export function fetchDiagnosis(diagnosisId: string) {
+  return api<{
+    ok: boolean
+    diagnosis?: {
+      id?: string
+      analysis?: string
+      issue_tags?: string[]
+      patch?: {
+        target_node?: string
+        override?: { append?: string }
+      }
+    }
+  }>(`/api/diagnosis/${diagnosisId}`)
 }
 
 export function runPromptDiagnose(qualityLogId: string) {
@@ -118,6 +179,8 @@ export function decideDiagnosis(
     from_chapter_num?: number
     apply_override?: boolean
     execute_rerun?: boolean
+    apply_author_profile?: boolean
+    author_profile_book_id?: string
   },
 ) {
   return api<Record<string, unknown>>(`/api/diagnosis/${diagnosisId}/decide`, {
@@ -155,10 +218,23 @@ export function patchManuscript(
   id: string,
   fields: Record<string, unknown>,
 ) {
-  return api<Record<string, unknown>>(`/api/manuscripts/${id}`, {
+  return api<ManuscriptPatchResponse>(`/api/manuscripts/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(fields),
   })
+}
+
+export type ManuscriptSubmission = {
+  id?: string
+  target?: string
+  target_name?: string
+  submitted_at?: string
+  result?: string
+  reject_tags?: string[]
+  reject_reason?: string
+  reject_kind?: string
+  diagnosis_id?: string
+  compliance_checked?: boolean
 }
 
 export type ManuscriptRow = {
@@ -166,6 +242,16 @@ export type ManuscriptRow = {
   title?: string
   state?: string
   book_id?: string
+  submission?: ManuscriptSubmission
+  last_submission?: ManuscriptSubmission
+}
+
+export type ManuscriptPatchResponse = {
+  ok?: boolean
+  diagnosis_id?: string
+  rejection_fork?: 'content' | 'strategy'
+  next_action?: string
+  manuscript?: Record<string, unknown>
 }
 
 export type DiagnoseSuspect = {

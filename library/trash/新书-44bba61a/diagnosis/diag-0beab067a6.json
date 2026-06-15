@@ -1,0 +1,28 @@
+{
+  "id": "diag-0beab067a6",
+  "book_id": "新书-44bba61a",
+  "created_at": "2026-06-10 19:43:47",
+  "quality_log_id": "6909542cb3e0",
+  "trigger": "chapter_fail",
+  "trigger_ref": {},
+  "issue_tags": [],
+  "analysis": "已采纳的剧情规划无问题，但生成的正文多次未能通过平台审阅，普遍缺乏核心冲突与强钩子，导致‘审阅差距’（review_gap）。",
+  "patch": {
+    "target_node": "writing.main",
+    "diff_preview": "在 writing.main 节点的 prompt 中追加以下段落：\n\n【硬性约束·平台审核】\n1. 必须在开篇 300 字内出现核心冲突或强钩子（如人物对峙、价值翻转、高情绪事件），禁止用环境描写或背景交代开场。\n2. 每章结尾必须留下一个可感知的钩子（悬念、情绪转折、信息差），不能以平淡的叙述或动作收束。\n3. 严格按照提供的 Scene Beat 执行，尤其确保‘结尾钩子’被完整写出，不可省略或弱化。\n4. 杜绝任何不推动情绪的铺垫句，直接进入戏剧性事件。",
+    "override": {
+      "prepend": "",
+      "append": "在 writing.main 节点的 prompt 中追加以下段落：\n\n【硬性约束·平台审核】\n1. 必须在开篇 300 字内出现核心冲突或强钩子（如人物对峙、价值翻转、高情绪事件），禁止用环境描写或背景交代开场。\n2. 每章结尾必须留下一个可感知的钩子（悬念、情绪转折、信息差），不能以平淡的叙述或动作收束。\n3. 严格按照提供的 Scene Beat 执行，尤其确保‘结尾钩子’被完整写出，不可省略或弱化。\n4. 杜绝任何不推动情绪的铺垫句，直接进入戏剧性事件。",
+      "system": null
+    }
+  },
+  "decision": {
+    "accepted": true,
+    "rerun_scope": "from_chapter_n",
+    "rerun_from_chapter_num": 1,
+    "impact_preview": "将影响第 1 章及之后共 4 章的规划。",
+    "decided_at": "2026-06-10 19:44:15"
+  },
+  "status": "accepted",
+  "updated_at": "2026-06-10 19:44:15"
+}

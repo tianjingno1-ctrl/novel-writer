@@ -1,4 +1,4 @@
-"""跨模块依赖注入容器（避免 pipeline / batch 直接 import main）。"""
+"""跨模块依赖注入容器（避免 orchestration 直接 import main）。"""
 
 from __future__ import annotations
 

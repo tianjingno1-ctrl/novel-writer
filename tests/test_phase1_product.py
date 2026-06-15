@@ -90,6 +90,12 @@ class PrefillParseTests(unittest.TestCase):
         payload = _parse_json_payload('说明文字\n{"options":[{"id":"A"}]}\n')
         self.assertEqual(payload["options"][0]["id"], "A")
 
+    def test_parse_json_with_markdown_fence(self) -> None:
+        from core.orchestration.prefill import _parse_json_payload
+
+        payload = _parse_json_payload('```json\n{"options":[{"id":"B"}]}\n```')
+        self.assertEqual(payload["options"][0]["id"], "B")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,6 +4,8 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+const apiPort = process.env.NOVEL_WEB_PORT ?? '8765'
+
 export default defineConfig({
   plugins: [
     react(),
@@ -49,10 +51,11 @@ export default defineConfig({
     },
   },
   server: {
+    host: '127.0.0.1',
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8765',
+        target: `http://127.0.0.1:${apiPort}`,
         changeOrigin: true,
       },
     },

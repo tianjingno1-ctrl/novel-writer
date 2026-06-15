@@ -1,0 +1,14 @@
+{
+  "active_scene_id": null,
+  "chapters": {},
+  "meta": {
+    "title": "新书",
+    "platform": "tomato",
+    "writing_mode": "standard",
+    "wizard_step": "direction",
+    "chapter_count": 4,
+    "word_count_per_chapter": 2500,
+    "total_word_target": 10000
+  },
+  "version": 2
+}

@@ -1,0 +1,22 @@
+id: paid_open
+label: 付费首章
+l4: '### 本章额外审阅维度（paid_open · 付费首章）
+
+  - 顺序任务：**还债 → 续航 → 基调转换**（悬→燃/稳）
+
+  - 以 paywall 章作者确认意图为基准对照是否「值」
+
+  - 次级钩子强度须 **低于** paywall 章钩子（勿再次强切割）
+
+  - 勿重复 paywall 已完成的情感任务'
+l1b:
+  min_ratio: 0.85
+l2:
+  high: 0.48
+  medium: 0.3
+l2_focus: 还债→续航→基调转换；次级钩子是否低于 paywall
+l5b_priority: high
+l2_questions:
+- 是否完成还债→续航→基调转换？
+- 次级钩子是否弱于 paywall 章？
+- 读完是否觉得值？

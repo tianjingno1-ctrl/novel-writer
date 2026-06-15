@@ -21,7 +21,6 @@ BACKUPS_DIR: Path | None = None
 CONTEXT_LOG_JSONL: Path | None = None
 SESSION_FILE: Path | None = None
 SESSION_MD_FILE: Path | None = None
-FREE_CHAT_FILE: Path | None = None
 WORLD_FILE: Path | None = None
 STYLE_FILE: Path | None = None
 CHARACTERS_FILE: Path | None = None
@@ -54,7 +53,7 @@ def init_default_paths() -> None:
     """从项目根目录初始化默认路径（不依赖 main）。"""
     global BASE_DIR, COST_LOG, COST_LOG_JSONL
     global DATA_DIR, CHAPTERS_DIR, BACKUPS_DIR, CONTEXT_LOG_JSONL
-    global SESSION_FILE, SESSION_MD_FILE, FREE_CHAT_FILE
+    global SESSION_FILE, SESSION_MD_FILE
     global WORLD_FILE, STYLE_FILE, CHARACTERS_FILE, CHAR_CURRENT_FILE
     global CHAR_STATIC_FILE, CHAR_DYNAMIC_FILE
     global SUMMARIES_FILE, SUMMARIES_ARCHIVE_FILE, SUMMARIES_RECENT_FILE
@@ -73,7 +72,6 @@ def init_default_paths() -> None:
     CONTEXT_LOG_JSONL = DATA_DIR / "context_log.jsonl"
     SESSION_FILE = DATA_DIR / "session_autosave.json"
     SESSION_MD_FILE = DATA_DIR / "session_autosave.md"
-    FREE_CHAT_FILE = DATA_DIR / "free_chat.json"
     WORLD_FILE = DATA_DIR / "world.md"
     STYLE_FILE = DATA_DIR / "style.md"
     CHARACTERS_FILE = DATA_DIR / "characters.md"
@@ -149,7 +147,7 @@ def init_defaults() -> None:
 def sync_from_context(ctx: BookContext) -> None:
     """切书时从 BookContext 更新书相关路径。"""
     global DATA_DIR, CHAPTERS_DIR, BACKUPS_DIR, CONTEXT_LOG_JSONL
-    global SESSION_FILE, SESSION_MD_FILE, FREE_CHAT_FILE
+    global SESSION_FILE, SESSION_MD_FILE
     global WORLD_FILE, STYLE_FILE, CHARACTERS_FILE, CHAR_CURRENT_FILE
     global CHAR_STATIC_FILE, CHAR_DYNAMIC_FILE
     global SUMMARIES_FILE, SUMMARIES_ARCHIVE_FILE, SUMMARIES_RECENT_FILE
@@ -166,7 +164,6 @@ def sync_from_context(ctx: BookContext) -> None:
     CONTEXT_LOG_JSONL = ctx.context_log_jsonl
     SESSION_FILE = ctx.session_file
     SESSION_MD_FILE = ctx.session_md_file
-    FREE_CHAT_FILE = ctx.free_chat_file
     WORLD_FILE = ctx.world_file
     STYLE_FILE = ctx.style_file
     CHARACTERS_FILE = ctx.characters_file
@@ -207,7 +204,6 @@ def mirror_to_main() -> None:
     main.CONTEXT_LOG_JSONL = CONTEXT_LOG_JSONL
     main.SESSION_FILE = SESSION_FILE
     main.SESSION_MD_FILE = SESSION_MD_FILE
-    main.FREE_CHAT_FILE = FREE_CHAT_FILE
     main.WORLD_FILE = WORLD_FILE
     main.STYLE_FILE = STYLE_FILE
     main.CHARACTERS_FILE = CHARACTERS_FILE

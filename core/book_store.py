@@ -200,6 +200,11 @@ class BookStore:
         return nums[-1] if nums else 0
 
     def count_summaries(self) -> int:
+        from core.data import book_context
+        from core import context as writing_context
+
+        if book_context.is_short_book():
+            return writing_context.count_short_written_chapters()
         _, entries = split_summary_entries(self._read(self._paths.summaries_recent_file))
         return len(entries)
 
@@ -489,7 +494,12 @@ class BookStore:
         )
 
         if for_purpose in ("check", "writing"):
-            snap.summaries_combined = self._summaries_combined()
+            self._bind_writing_context()
+            from core import context as writing_context
+
+            snap.summaries_combined = writing_context.get_summaries_combined_for_snapshot(
+                chapter_num
+            )
         if for_purpose == "check":
             snap.char_context_for_check = self._char_context_for_check()
 

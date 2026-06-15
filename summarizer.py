@@ -13,8 +13,6 @@ CROSS_CHAPTER_CONTINUITY_SYSTEM = load_system("cross_chapter_continuity")
 READER_REVIEW_SYSTEM = load_system("reader_review")
 EDITOR_REVIEW_SYSTEM = load_system("editor_review")
 DECONSTRUCT_SYSTEM = load_system("deconstruct")
-WORLD_BATCH_CHUNK_REVIEW_SYSTEM = load_system("world_batch_chunk_review")
-WORLD_BATCH_MERGE_SYSTEM = load_system("world_batch_merge")
 OUTLINE_SYSTEM = load_system("outline")
 CHARACTER_DRIFT_SYSTEM = load_system("character_drift")
 DETAIL_EXTRACT_SYSTEM = load_system("detail_extract")
@@ -23,11 +21,8 @@ PACING_CHECK_SYSTEM = load_system("pacing_check")
 OBSERVE_SYSTEM = load_system("observe")
 POST_CHAPTER_MAINTAIN_SYSTEM = load_system("post_chapter_maintain")
 QUALITY_CHECK_BUNDLE_SYSTEM = load_system("quality_check_bundle")
-WORLD_REMEDIATE_DIAGNOSE_SYSTEM = load_system("world_remediate_diagnose")
 BULK_ARCHIVE_SUMMARIES_SYSTEM = load_system("bulk_archive_summaries")
 BULK_ARCHIVE_STATE_SYSTEM = load_system("bulk_archive_state")
-WORLD_REMEDIATE_BULK_CHANGE_LOG_SYSTEM = load_system("world_remediate_bulk_change_log")
-WORLD_REMEDIATE_CHANGE_LOG_SYSTEM = load_system("world_remediate_change_log")
 
 # LLM 结构化 JSON 解析：canonical 实现在 core.schemas.llm，此处 re-export 保持兼容。
 from core.schemas.llm import (
@@ -37,9 +32,6 @@ from core.schemas.llm import (
     parse_observe_proposals,
     parse_post_chapter_maintain,
     parse_quality_bundle,
-    parse_remediate_bulk_change_log,
-    parse_remediate_change_log,
-    parse_remediate_diagnose,
 )
 
 
@@ -112,66 +104,6 @@ def build_cross_chapter_check_user_message(
     return "\n".join(parts)
 
 
-def build_world_batch_chunk_user_message(
-    world_label: str,
-    chapter_from: int,
-    chapter_to: int,
-    chunk_from: int,
-    chunk_to: int,
-    world: str,
-    characters: str,
-    char_current: str,
-    plot_locked: str,
-    plot_active: str,
-    chapters_text: str,
-    *,
-    input_truncated: bool = False,
-) -> str:
-    trunc_note = (
-        "\n\n> ⚠️ 本段部分章节正文因长度限制已截断（保留开篇+章末），请结合已有信息审阅。\n"
-        if input_truncated
-        else ""
-    )
-    return (
-        f"世界：{world_label or '当前世界'}\n"
-        f"本世界计划范围：第{chapter_from}–{chapter_to}章\n"
-        f"本段审阅范围：第{chunk_from}–{chunk_to}章（读者连读）\n"
-        f"{trunc_note}\n"
-        f"## 世界观\n{world or '（未维护）'}\n\n"
-        f"## 人物设定\n{characters or '（未维护）'}\n\n"
-        f"## 人物当前状态\n{char_current or '（未维护）'}\n\n"
-        f"## 细节钉子\n{truncate_context_tail(plot_locked) or '（暂无）'}\n\n"
-        f"## 未回收伏笔\n{truncate_context_tail(plot_active) or '（暂无）'}\n\n"
-        f"## 本段正文\n{chapters_text}"
-    )
-
-
-def build_world_batch_merge_user_message(
-    world_label: str,
-    chapter_from: int,
-    chapter_to: int,
-    written_from: int,
-    written_to: int,
-    chunk_reports: str,
-    cross_continuity: str,
-    *,
-    world_in_progress: bool,
-) -> str:
-    progress = (
-        f"（进行中：目前仅有第{written_from}–{written_to}章正文，世界计划至第{chapter_to}章）"
-        if world_in_progress
-        else "（本世界范围内章节已全部有正文）"
-    )
-    return (
-        f"请合并以下分段审阅为世界总报告。\n\n"
-        f"世界：{world_label or '当前世界'}\n"
-        f"计划范围：第{chapter_from}–{chapter_to}章\n"
-        f"实际有正文：第{written_from}–{written_to}章 {progress}\n\n"
-        f"## 跨章连续性检查\n{cross_continuity or '（未执行）'}\n\n"
-        f"## 各分段审阅\n{chunk_reports}"
-    )
-
-
 def build_reader_review_user_message(
     chapter_num: int,
     scope_label: str,
@@ -197,7 +129,7 @@ def build_editor_review_user_message(
     kind = "正文" if content.strip() else "概述"
     return (
         f"请从编辑视角审阅：{scope_label}（锚点第{chapter_num}章，主要依据{kind}）\n\n"
-        f"## 世界观节拍参考\n{world or '（未维护）'}\n\n"
+        f"## 故事背景参考\n{world or '（未维护）'}\n\n"
         f"## 审阅材料（{kind}）\n{body}"
     )
 
@@ -273,6 +205,7 @@ def build_female_fiction_review_user_message(
     revise: bool = False,
     rewrite_only: bool = False,
     taste_excerpt: str = "",
+    revise_note: str = "",
 ) -> str:
     if rewrite_only and mode == "chapter":
         parts = [_FEMALE_REVIEW_REWRITE_ONLY_HINT, ""]
@@ -281,6 +214,9 @@ def build_female_fiction_review_user_message(
         parts = [hint, ""]
         if revise:
             parts.insert(0, _FEMALE_REVIEW_REVISE_HINT)
+    note = (revise_note or "").strip()
+    if note and (revise or rewrite_only):
+        parts.insert(1 if rewrite_only and mode == "chapter" else 0, f"【改稿说明】\n{note}\n")
     if book_title:
         parts.append(f"书名：{book_title}")
     if chapter_num > 0:
@@ -646,211 +582,6 @@ def build_quality_bundle_user_message(
     )
 
 
-WORLD_REMEDIATE_DIAGNOSE_SYSTEM = """你是网文责编，正在诊断单章正文问题，为自动改稿提供结构化意见。
-用户会提供：世界观、人物、伏笔档案、Plan Beat、本章正文。
-
-严格只输出一个 JSON 代码块，fence 标记必须是 remediate-diagnose-json：
-
-```remediate-diagnose-json
-{
-  "num": 1,
-  "action": "patch",
-  "issues": [
-    {
-      "severity": "must_fix",
-      "summary": "问题简述",
-      "location": "第2段或情节位置"
-    }
-  ],
-  "skip_reason": ""
-}
-```
-
-规则：
-- action 只能是 patch（需修改）、full_rewrite（建议整章重写但仍直接改）、skip（本章无需改）
-- skip 时 issues 为空，skip_reason 必填
-- issues 只列本章可改的问题；severity: must_fix 或 should_fix
-- 不要输出正文，不要 [讨论]
-"""
-
-
-BULK_ARCHIVE_SUMMARIES_SYSTEM = """你是网文章节概述助手。用户会提供多章改后正文，请为每一章生成概述块。
-
-严格只输出一个 JSON 代码块，fence 标记必须是 bulk-summaries-json：
-
-```bulk-summaries-json
-{
-  "summaries": [
-    {
-      "num": 1,
-      "text": "【第1章：标题】\\n核心事件：...\\n人物变化：...\\n伏笔/关键信息：..."
-    }
-  ]
-}
-```
-
-规则：
-- 每章一条，num 与正文章号一致
-- text 格式与单章概述一致，以【第N章：…】开头
-- 150–300 字/章，用中文
-- 不要输出 JSON 外的任何文字
-"""
-
-BULK_ARCHIVE_STATE_SYSTEM = """你是长篇档案维护助手。用户会提供多章改后正文、刚生成的章节概述，以及当前人物/伏笔档案。
-请根据**整批范围**输出更新后的动态档案（一份 char_dynamic、一份 plot_threads_active），并可追加细节钉子与新伏笔。
-
-严格只输出一个 JSON 代码块，fence 标记必须是 bulk-state-json：
-
-```bulk-state-json
-{
-  "char_dynamic": "完整 Markdown，可直接覆盖 char_dynamic.md",
-  "plot_threads_active": "完整 Markdown，可直接覆盖 plot_threads_active.md（含 ## 未回收 / ## 已回收）",
-  "detail_locked_append": "## 第N章新增细节钉子\\n- …（无则空字符串）",
-  "plot_new_threads": "- 【伏笔名】…（追加到未回收；无则空字符串）"
-}
-```
-
-规则：
-- char_dynamic / plot_threads_active 必须是**整份**合并后的结果，不要按章拆多份
-- 保留 char_static 未提及的深层锚点，只更新当前状态、关系、表层软肋
-- detail_locked_append 仅新增钉子，勿重复已有
-- plot_new_threads 仅本章新埋设、值得追踪的线
-- 不要输出 JSON 外的任何文字
-"""
-
-WORLD_REMEDIATE_BULK_CHANGE_LOG_SYSTEM = """你是编辑助理。用户会提供多章的诊断意见与改前改后正文摘要，请一次性生成各章变更记录。
-
-严格只输出一个 JSON 代码块，fence 标记必须是 remediate-bulk-change-json：
-
-```remediate-bulk-change-json
-{
-  "chapters": [
-    {
-      "num": 1,
-      "action": "patch",
-      "changes": [
-        {"id": "ch1-001", "issue": "原问题", "done": "已做修改", "location": "开篇"}
-      ],
-      "skipped": [{"issue": "某建议", "reason": "保留原因"}]
-    }
-  ]
-}
-```
-
-规则：
-- 仅包含实际改稿的章（action 为 patch 或 full_rewrite）；skip 章可省略或 changes 为空
-- 改前改后相同则 changes 为空并在 skipped 说明
-- 用中文，简洁
-"""
-
-WORLD_REMEDIATE_CHANGE_LOG_SYSTEM = """你是编辑助理，根据改稿前后的章节正文与诊断意见，生成给作者看的「变更记录」。
-用户会提供：章号、诊断意见、改前正文、改后正文。
-
-严格只输出一个 JSON 代码块，fence 标记必须是 remediate-change-json：
-
-```remediate-change-json
-{
-  "num": 1,
-  "action": "patch",
-  "changes": [
-    {
-      "id": "ch1-001",
-      "issue": "原问题",
-      "done": "已做的修改",
-      "location": "第2段"
-    }
-  ],
-  "skipped": [
-    {
-      "issue": "某建议",
-      "reason": "保留原因"
-    }
-  ]
-}
-```
-
-规则：
-- 若改前改后相同或 action 为 skip，changes 可为空，在 skipped 说明
-- changes.id 格式 ch{num}-001 递增
-- 用中文，简洁，不要复述大段原文
-"""
-
-
-def build_remediate_diagnose_user_message(
-    chapter_num: int,
-    chapter_title: str,
-    scene_beat: str,
-    world: str,
-    characters: str,
-    char_current: str,
-    plot_locked: str,
-    plot_active: str,
-    chapter_content: str,
-    cross_notes: str = "",
-) -> str:
-    cross = (
-        f"\n## 跨章上下文（前序章节已处理时注意）\n{cross_notes}\n"
-        if cross_notes.strip()
-        else ""
-    )
-    return (
-        f"请诊断第{chapter_num}章，输出 remediate-diagnose-json。\n\n"
-        f"## 章节标题（plan）\n{chapter_title or '（无）'}\n\n"
-        f"## Scene Beat\n{scene_beat or '（无 Beat）'}\n"
-        f"{cross}\n"
-        f"## 世界观\n{world or '（未维护）'}\n\n"
-        f"## 人物设定\n{characters or '（未维护）'}\n\n"
-        f"## 人物当前状态\n{char_current or '（未维护）'}\n\n"
-        f"## 细节钉子\n{truncate_context_tail(plot_locked) or '（暂无）'}\n\n"
-        f"## 未回收伏笔\n{truncate_context_tail(plot_active) or '（暂无）'}\n\n"
-        f"## 第{chapter_num}章正文\n{chapter_content}"
-    )
-
-
-def build_remediate_fix_instruction(
-    chapter_num: int,
-    chapter_title: str,
-    scene_beat: str,
-    diagnose: dict,
-    cross_notes: str = "",
-) -> str:
-    issues = diagnose.get("issues") or []
-    must_lines = [
-        f"- {i.get('summary', '')}（{i.get('location', '')}）"
-        for i in issues
-        if i.get("severity") == "must_fix" and i.get("summary")
-    ]
-    should_lines = [
-        f"- {i.get('summary', '')}（{i.get('location', '')}）"
-        for i in issues
-        if i.get("severity") == "should_fix" and i.get("summary")
-    ]
-    title_line = chapter_title.strip() or f"第{chapter_num}章"
-    parts = [
-        "【文风参考 style.md】按诊断意见重写本章全文（覆盖旧稿，不是续写）。",
-        f"【章节标题】{title_line}",
-    ]
-    if scene_beat.strip():
-        parts.append(f"【场景 Beat】\n{scene_beat.strip()}")
-    if must_lines:
-        parts.append("【必须修改】\n" + "\n".join(must_lines))
-    if should_lines:
-        parts.append("【建议修改】\n" + "\n".join(should_lines))
-    if cross_notes.strip():
-        parts.append(f"【跨章注意】\n{cross_notes.strip()}")
-    if diagnose.get("action") == "full_rewrite":
-        parts.append(
-            "【改稿强度】本章问题较多，可大幅调整结构，但须保持 Beat 核心事件与设定一致。"
-        )
-    parts.append(
-        "【输出要求】\n"
-        "- 输出完整一章正文\n"
-        "- 第一行必须是【章节标题】简短标题\n"
-        "- 空一行后只输出正文，不要解释，不要 [讨论]"
-    )
-    return "\n\n".join(parts)
-
-
 def build_bulk_summaries_user_message(
     chapter_nums: list[int],
     chapters_text: str,
@@ -886,89 +617,3 @@ def build_bulk_state_user_message(
         f"## plot_threads_locked（勿重复）\n{truncate_context_tail(plot_locked) or '（暂无）'}\n\n"
         f"## 未回收伏笔（当前）\n{plot_active_unresolved or '（暂无）'}"
     )
-
-
-def build_remediate_bulk_change_log_user_message(
-    chapter_payloads: list[dict],
-) -> str:
-    """chapter_payloads: [{num, action, diagnose, before_text, after_text}, ...]"""
-    parts = ["请为以下各章生成 remediate-bulk-change-json。\n"]
-    for item in chapter_payloads:
-        num = item.get("num", 0)
-        diag_json = json.dumps(item.get("diagnose") or {}, ensure_ascii=False, indent=2)
-        before = (item.get("before_text") or "")[:12000]
-        after = (item.get("after_text") or "")[:12000]
-        parts.append(
-            f"### 第{num}章 · action={item.get('action', 'patch')}\n"
-            f"#### 诊断\n{diag_json}\n\n"
-            f"#### 改前正文\n{before}\n\n"
-            f"#### 改后正文\n{after}\n"
-        )
-    return "\n".join(parts)
-
-
-def build_remediate_change_log_user_message(
-    chapter_num: int,
-    diagnose: dict,
-    before_text: str,
-    after_text: str,
-) -> str:
-    diag_json = json.dumps(diagnose, ensure_ascii=False, indent=2)
-    return (
-        f"请为第{chapter_num}章生成变更记录 remediate-change-json。\n\n"
-        f"## 诊断意见\n{diag_json}\n\n"
-        f"## 改前正文\n{before_text}\n\n"
-        f"## 改后正文\n{after_text}"
-    )
-
-
-def format_remediate_closure_report(
-    label: str,
-    chapter_from: int,
-    chapter_to: int,
-    chapter_results: list[dict],
-    *,
-    warnings: list[str] | None = None,
-    errors: list[str] | None = None,
-) -> str:
-    lines = [
-        f"# 世界闭环 · {label} · 第{chapter_from}–{chapter_to}章",
-        "",
-        "AI 已完成审阅、改稿与整批档案同步。以下为变更记录。",
-        "",
-    ]
-    if warnings:
-        lines.append("## ⚠️ 注意")
-        for w in warnings:
-            lines.append(f"- {w}")
-        lines.append("")
-    if errors:
-        lines.append("## ❌ 部分失败")
-        for e in errors:
-            lines.append(f"- {e}")
-        lines.append("")
-    for ch in chapter_results:
-        num = ch.get("num", 0)
-        if ch.get("error"):
-            lines.append(f"## 第{num}章 · 失败")
-            lines.append(f"- {ch['error']}")
-            lines.append("")
-            continue
-        if ch.get("action") == "skip":
-            lines.append(f"## 第{num}章 · 未改动")
-            lines.append(f"- {ch.get('skip_reason') or 'AI 判断无需修改'}")
-            lines.append("")
-            continue
-        lines.append(f"## 第{num}章")
-        for item in ch.get("changes") or []:
-            loc = item.get("location") or ""
-            loc_part = f" · {loc}" if loc else ""
-            lines.append(f"- **{item.get('issue', '问题')}**")
-            lines.append(f"  → 已改：{item.get('done', '')}{loc_part}")
-        for item in ch.get("skipped") or []:
-            lines.append(f"- 未改：{item.get('issue', '')} — {item.get('reason', '')}")
-        lines.append("")
-    lines.append("---")
-    lines.append("✅ 全部接受 = 确认满意（文件已写入）")
-    lines.append("↩️ 撤销某章 = 从任务快照恢复正文（档案请用 git 或重跑档案同步）")
-    return "\n".join(lines)

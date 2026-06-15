@@ -1,0 +1,129 @@
+{
+  "active_scene_id": "ch2_04461f70",
+  "chapters": {
+    "1": {
+      "title": "**【第1章】我，恶毒女配，不干了**",
+      "status": "approved",
+      "hook": "男主突然开口：“你以前不是这样的。”",
+      "word_count_target": 2501,
+      "scenes": [
+        {
+          "id": "ch1_7e410d85",
+          "title": "我，恶毒女配，不干了",
+          "beat": "【场景目的】1. 快速建立穿越身份+系统设定；2. 制造与剧情预期的反差（摆烂）；3. 男主首次产生好奇心。\n【核心动作】女主对系统翻白眼→当众推翻原主陷害动作→用逻辑反杀女主→转身去喝茶。\n【节奏档位】快\n【结尾钩子】男主那句“你以前不是这样的”留下悬念，暗示男主已察觉异常。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-11T12:19:43",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "hook_open",
+      "intent": {
+        "kind": "hook_open",
+        "ai_suggest": "穿越梗+当场打脸+沙雕吐槽+男主困惑，开篇500字内出现“陷害+穿越觉醒”双重冲突",
+        "final": {}
+      }
+    },
+    "2": {
+      "title": "## 第2章 搞钱才是正事",
+      "status": "approved",
+      "hook": "系统：“警告！男主好感度出现异常波动！”",
+      "word_count_target": 2501,
+      "scenes": [
+        {
+          "id": "ch2_04461f70",
+          "title": "搞钱才是正事",
+          "beat": "【场景目的】1. 展现女主搞钱过程（爽点）；2. 男主第二次被吸引，好感度异常；3. 付费前制造“后续剧情无法预测”的期待。\n【核心动作】女主卖新奇玩意赚第一桶金→男主下朝路过撞见→女主不卑不亢→系统报错。\n【节奏档位】中\n【结尾钩子】系统警告+男主嘴角不经意的笑意。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-11T12:19:43",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "paywall",
+      "intent": {
+        "kind": "paywall",
+        "ai_suggest": "读者付费前的心理预期：想看到男主如何进一步被吸引、女主的自救计划如何展开，爽感已出但甜度刚起步，吊住胃口",
+        "final": {}
+      }
+    },
+    "3": {
+      "title": "男主他不对劲",
+      "status": "approved",
+      "hook": "男主站在墙头，女主刚洗完澡只穿着寝衣抬头，四目相对。",
+      "word_count_target": 2501,
+      "scenes": [
+        {
+          "id": "ch3_234d15bc",
+          "title": "男主他不对劲",
+          "beat": "【场景目的】1. 女主主动做好事（反差萌）；2. 男主心理变化具体化（内心OS）；3. 制造暧昧名场面。\n【核心动作】女主设计让原女主躲过一劫→男主听到风声赶来→发现和自己想象不同→晚上翻墙。\n【节奏档位】中\n【结尾钩子】寝衣对视，气氛暧昧。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-11T12:19:43",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "paid_open"
+    },
+    "4": {
+      "title": "我认栽了",
+      "status": "pending",
+      "hook": "最后的画外音：“殿下，违约金可是十倍哦。”",
+      "word_count_target": 2501,
+      "scenes": [
+        {
+          "id": "ch4_635cbb32",
+          "title": "我认栽了",
+          "beat": "【场景目的】1. 男主表白被打脸（爽）；2. 用合伙协议达成事业HE；3. 开放式结局保持余韵。\n【核心动作】男主单膝跪地表白→女主拒绝→男主急中生智提议合伙→女主同意签字→系统提示任务完成。\n【节奏档位】慢→中\n【结尾钩子】协议中的违约金条款暗示男主别想逃。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-11T12:19:43",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "finale",
+      "intent": {
+        "kind": "finale",
+        "ai_suggest": "{'core_task': {'opening_gap': '从拒绝舔狗到男主主动放低姿态，女主已不再是恶毒女配', 'freeze_frame': '两人坐在一起看账本，窗外是夕阳', 'open_ending': '男主低头追问利息怎么算，女主笑而不答——未来还有故事'}}",
+        "final": {}
+      }
+    }
+  },
+  "meta": {
+    "title": "穿成恶毒女配自救",
+    "platform": "tomato",
+    "genre": "ancient",
+    "writing_mode": "standard",
+    "wizard_step": null,
+    "chapter_count": 4,
+    "word_count_per_chapter": null,
+    "total_word_target": 10003,
+    "logline": "穿进虐文，拒绝舔狗剧本，专心搞钱虐渣。",
+    "sell_point": "反套路，恶毒女配摆烂后男主疯狂上头，又甜又爽",
+    "tone": "沙雕甜爽，反pua，日常打脸",
+    "option_id": "B",
+    "risk_note": "避免拖沓，前三章要完成身份反转+男主真香",
+    "characters": [],
+    "paywall_chapter": 2,
+    "wizard_complete": true
+  },
+  "version": 2,
+  "review_criteria": {
+    "platform_profile": "tomato_text_editor_v1",
+    "hard_rules": [
+      "profile:p_hard_001",
+      "profile:p_hard_002"
+    ],
+    "soft_rules": [
+      "profile:p_soft_001",
+      "profile:p_soft_002"
+    ],
+    "custom_checks": [
+      "前300字必须多个反转让人读下去"
+    ]
+  }
+}

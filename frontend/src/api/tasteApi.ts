@@ -1,7 +1,7 @@
 import { api } from '@/api/client'
 
 export function fetchTasteGlobal() {
-  return api<{ ok?: boolean; doc?: TasteDoc }>('/api/taste/global')
+  return api<{ ok?: boolean; global?: TasteDoc }>('/api/taste/global')
 }
 
 export function updateTasteGlobal(preferences: Record<string, unknown>) {
@@ -12,7 +12,26 @@ export function updateTasteGlobal(preferences: Record<string, unknown>) {
 }
 
 export function fetchTasteBook() {
-  return api<{ ok?: boolean; doc?: TasteDoc }>('/api/taste/book')
+  return api<{
+    ok?: boolean
+    book_id?: string
+    taste?: TasteDoc
+    merged_preferences?: Record<string, unknown>
+  }>('/api/taste/book')
+}
+
+export function deleteTasteRule(ruleId: string) {
+  return api<{ ok?: boolean; rule?: { id?: string; content?: string } }>(
+    `/api/taste/rules/${encodeURIComponent(ruleId)}`,
+    { method: 'DELETE' },
+  )
+}
+
+export function localizeTasteRule(ruleId: string) {
+  return api<{ ok?: boolean; book_id?: string; rule?: { id?: string } }>(
+    `/api/taste/rules/${encodeURIComponent(ruleId)}/localize`,
+    { method: 'POST' },
+  )
 }
 
 export function fetchTasteSummary() {
@@ -53,10 +72,17 @@ export type AuthorProfileDoc = {
   books?: Array<{ book_id?: string; book_title?: string }>
 }
 
+export type TasteRule = {
+  id?: string
+  content?: string
+  ref?: string
+  weight?: 'hard' | 'soft'
+}
+
 export type TasteDoc = {
   version?: number
-  rules?: Array<{ id?: string; content?: string; ref?: string }>
-  examples?: Array<{ id?: string; content?: string; annotation?: string }>
+  rules?: TasteRule[]
+  examples?: Array<{ id?: string; content?: string; text?: string; annotation?: string }>
   preferences?: Record<string, unknown>
 }
 

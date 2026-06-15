@@ -4,19 +4,25 @@ import type { ButtonHTMLAttributes } from 'react'
 import { cn } from '@/lib/utils'
 
 const buttonVariants = cva(
-  'inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors disabled:pointer-events-none disabled:opacity-50',
+  'inline-flex items-center justify-center rounded-[var(--border-radius-md)] text-[13px] font-medium transition-colors disabled:pointer-events-none disabled:opacity-40',
   {
     variants: {
       variant: {
         default:
-          'bg-primary text-primary-foreground hover:bg-[var(--color-primary-hover)]',
-        outline: 'border border-border bg-card hover:bg-accent',
-        ghost: 'hover:bg-accent',
+          'h-[34px] border-[0.5px] border-[var(--color-border-secondary)] bg-[var(--color-text-primary)] px-4 text-[var(--color-background-primary)] hover:opacity-90',
+        outline:
+          'h-[34px] border border-[var(--color-border)] bg-[var(--color-background-primary)] px-4 hover:bg-[var(--color-background-secondary)]',
+        ghost:
+          'h-[34px] border border-transparent px-4 hover:bg-[var(--color-background-secondary)]',
+        danger:
+          'h-[30px] border-[0.5px] border-[#f09595] bg-transparent px-3 text-[var(--color-danger)] hover:bg-[var(--color-danger-bg)]',
+        dangerOutline:
+          'h-[30px] border-[0.5px] border-[#f09595] bg-transparent px-3 text-[var(--color-danger)] hover:bg-[var(--color-danger-bg)]',
       },
       size: {
-        default: 'h-9 px-4 py-2',
-        sm: 'h-8 rounded-md px-3 text-xs',
-        lg: 'h-10 rounded-md px-6',
+        default: 'h-[30px] px-3',
+        sm: 'h-[26px] px-2.5 text-[11px]',
+        lg: 'h-[36px] px-4',
       },
     },
     defaultVariants: {

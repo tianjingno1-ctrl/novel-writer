@@ -1,11 +1,12 @@
+# Gate/CLI 续写主链：组消息、调 LLM（含 stream）、回复后决定是否写入章节；`/api/chat/stream` 走这里。
 """写作对话主链（P3-4d）：prepare/finalize/stream + 回复后章节保存。"""
 
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 
-from app import batch_state
+from infra.console import safe_print
+
 import infra.config as config
 from core.data import novel_data
 from app import chapter_io as ch
@@ -15,6 +16,30 @@ from app.factories import invalidate_chapter_injection
 from infra.state import state
 from core.llm import APIError, CallOptions, TokenUsage, complete, get_client, reset_client, stream
 from summarizer import WRITING_INSTRUCTION
+
+CHAPTER_REGENERATE_INSTRUCTION = (
+    "根据 plan.json 中本章的规划（场景、Beat、钩子、字数目标），"
+    "从零重写本章正文全文。只输出完整章节正文，覆盖旧稿；"
+    "不要讨论、不要只写片段、不要在旧稿后追加内容。"
+)
+
+
+def _begin_chapter_regenerate(chapter_num: int | None) -> dict:
+    """整章重写：清空会话与章节正文占位，后续 stream 走 replace 写盘。"""
+    write_num = ch.resolve_write_chapter_num(chapter_num)
+    reset_r = ch.reset_chapter_for_regenerate(write_num)
+    if not reset_r.get("ok"):
+        return reset_r
+    state.conversation_history.clear()
+    state.appended_indices.clear()
+    state.session_includes_chapter = False
+    state.last_injected_chapter_num = 0
+    state.write_chapter_num = write_num
+    return {
+        "ok": True,
+        "write_chapter_num": write_num,
+        "instruction": CHAPTER_REGENERATE_INSTRUCTION,
+    }
 
 
 def _clear_assistant_appended_indices() -> None:
@@ -34,12 +59,12 @@ def save_chapter_after_reply(
     if not ch.should_append_to_chapter(reply):
         if not config.AUTO_APPEND_CHAPTER:
             return None
-        print("💡 本条为讨论/说明，未写入章节（如需保存请手动编辑章节文件）")
+        safe_print("💡 本条为讨论/说明，未写入章节（如需保存请手动编辑章节文件）")
         return None
 
     if not config.AUTO_APPEND_CHAPTER:
         pending = ch.count_unsaved_chapter_turns()
-        print(f"💡 本条正文尚未写入章节，输入 /save 保存（待保存 {pending} 条）")
+        safe_print(f"💡 本条正文尚未写入章节，输入 /save 保存（待保存 {pending} 条）")
         return None
 
     chapter_num, chapter_path = ch.get_or_create_write_chapter(write_chapter_num)
@@ -48,9 +73,12 @@ def save_chapter_after_reply(
         chars, title = ch.append_to_chapter(
             reply, chapter_path, msg_index=msg_index, chapter_num=chapter_num
         )
+        if chars <= 0:
+            safe_print("💡 本条回复无可用正文，未写入章节")
+            return None
         state.appended_indices.add(msg_index)
         title_note = f" · 《{title}》" if title else ""
-        print(
+        safe_print(
             f"💾 已追加到 data/chapters/ch{chapter_num:03d}.md{title_note}（+{chars} 字）"
         )
         if not title:
@@ -61,10 +89,13 @@ def save_chapter_after_reply(
     chars, title = ch.replace_chapter_content(
         reply, chapter_path, chapter_num, msg_index=msg_index
     )
+    if chars <= 0:
+        safe_print("💡 本条回复无可用正文，未写入章节")
+        return None
     _clear_assistant_appended_indices()
     state.appended_indices.add(msg_index)
     title_note = f" · 《{title}》" if title else ""
-    print(
+    safe_print(
         f"💾 已覆盖保存到 data/chapters/ch{chapter_num:03d}.md{title_note}（{chars} 字）"
     )
     if not title:
@@ -117,6 +148,22 @@ def _finalize_writing_turn(
     }
 
 
+def _sync_writing_session_for_chapter(write_num: int) -> None:
+    """切章时清会话；仅章号变化时同步 plan.active_scene_id。"""
+    prev = state.last_injected_chapter_num or state.write_chapter_num
+    if write_num != prev and (
+        state.conversation_history or state.last_injected_chapter_num
+    ):
+        ws.reset_conversation_for_chapter(write_num)
+    else:
+        state.write_chapter_num = write_num
+        if write_num != state.last_injected_chapter_num:
+            state.session_includes_chapter = False
+    if write_num != state.last_synced_active_scene_chapter:
+        novel_data.set_active_scene_for_chapter(write_num)
+        state.last_synced_active_scene_chapter = write_num
+
+
 def _prepare_writing_turn(
     instruction: str,
     scene_beat: str = "",
@@ -124,8 +171,9 @@ def _prepare_writing_turn(
     chapter_num: int | None = None,
 ) -> dict:
     """追加用户消息并构建 API 请求上下文。"""
-    if batch_state.is_batch_job_running():
-        return {"ok": False, "error": "世界闭环任务进行中，请稍后再使用写书对话"}
+    write_num = ch.resolve_write_chapter_num(chapter_num, scene_id)
+    _sync_writing_session_for_chapter(write_num)
+
     beat_text = scene_beat.strip()
     if not beat_text and scene_id:
         scene = novel_data.get_scene(scene_id)
@@ -144,26 +192,36 @@ def _prepare_writing_turn(
     if not full_instruction:
         return {"ok": False, "error": "指令不能为空"}
 
-    write_num = ch.resolve_write_chapter_num(chapter_num, scene_id)
-    state.write_chapter_num = write_num
     injection_snapshot = {
         "session_includes_chapter": state.session_includes_chapter,
         "last_injected_chapter_num": state.last_injected_chapter_num,
     }
-    if write_num != state.last_injected_chapter_num:
-        state.session_includes_chapter = False
 
     chapter_content = ch.read_chapter_content(write_num)
     if not chapter_content.strip():
         chapter_content = "（本章尚无正文）"
 
+    prior_block = None
+    try:
+        from core.data import book_context
+
+        if book_context.is_short_book() and write_num > 1:
+            from app import writing_ctx as wctx
+
+            prior_block = wctx.get_prior_chapters_block(
+                write_num,
+                for_user_message=True,
+            )
+    except RuntimeError:
+        prior_block = None
+
     injected_this_turn = False
     if not state.session_includes_chapter:
-        user_content = (
-            f"【当前章节：第{write_num}章】\n\n"
-            f"{chapter_content}\n\n"
-            f"【写作指令】\n{full_instruction}"
-        )
+        user_parts = [f"【当前章节：第{write_num}章】", chapter_content]
+        if prior_block:
+            user_parts.append(f"【已写章节正文（续写参考）】\n{prior_block}")
+        user_parts.append(f"【写作指令】\n{full_instruction}")
+        user_content = "\n\n".join(user_parts)
         state.session_includes_chapter = True
         state.last_injected_chapter_num = write_num
         injected_this_turn = True
@@ -181,6 +239,7 @@ def _prepare_writing_turn(
         "system": llm.build_cached_system(
             WRITING_INSTRUCTION,
             include_scene_context=not beat_text,
+            chapter_num=write_num,
         ),
         "messages": llm.prepare_messages_for_context(state.conversation_history),
     }
@@ -191,8 +250,16 @@ def writing_chat(
     scene_beat: str = "",
     scene_id: str = "",
     chapter_num: int | None = None,
+    *,
+    regenerate: bool = False,
 ) -> dict:
     """Web/API：结构化写作对话，返回 JSON 友好结果。"""
+    if regenerate:
+        begin = _begin_chapter_regenerate(chapter_num)
+        if not begin.get("ok"):
+            return begin
+        instruction = begin["instruction"]
+        chapter_num = begin["write_chapter_num"]
     prep = _prepare_writing_turn(
         instruction, scene_beat, scene_id, chapter_num=chapter_num
     )
@@ -222,8 +289,27 @@ def writing_chat_stream(
     scene_beat: str = "",
     scene_id: str = "",
     chapter_num: int | None = None,
+    *,
+    regenerate: bool = False,
 ) -> Iterator[str]:
     """流式写作对话，yield JSON 字符串事件（同步 generator）。"""
+    if regenerate:
+        begin = _begin_chapter_regenerate(chapter_num)
+        if not begin.get("ok"):
+            yield json.dumps(
+                {"type": "error", "message": begin.get("error", "整章重写准备失败")},
+                ensure_ascii=False,
+            )
+            return
+        instruction = begin["instruction"]
+        chapter_num = begin["write_chapter_num"]
+        yield json.dumps(
+            {
+                "type": "chapter_cleared",
+                "chapter_num": chapter_num,
+            },
+            ensure_ascii=False,
+        )
     prep = _prepare_writing_turn(
         instruction, scene_beat, scene_id, chapter_num=chapter_num
     )

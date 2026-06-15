@@ -35,6 +35,22 @@ def record_quality_judgment(
     )
     if not row:
         return {"ok": False, "error": "记录不存在或 outcome 为空"}
+    if ctx is not None:
+        from core import chapter_review
+
+        num = int(row.get("chapter_num") or 0)
+        if num > 0:
+            try:
+                chapter_review.update_round_by_log_id(
+                    ctx.store.paths.data_dir,
+                    num,
+                    entry_id,
+                    judgment=outcome,
+                    issue_tags=issue_tags,
+                    user_note=note,
+                )
+            except OSError:
+                pass
     event_id = None
     highlight_result = None
     if ctx is not None:
@@ -93,3 +109,11 @@ def list_runtime_entries(
 
 def get_runtime_entry(entry_id: str) -> dict | None:
     return runtime_log.get_entry(entry_id)
+
+
+def get_cost_summary() -> dict:
+    from app import paths as app_paths
+    from infra.billing.cost_summary import summarize_cost_by_book
+
+    path = app_paths.resolved("COST_LOG_JSONL")
+    return summarize_cost_by_book(path)

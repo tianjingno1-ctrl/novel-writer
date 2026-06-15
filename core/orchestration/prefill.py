@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any
 
 import infra.config as config
 
+from core import chapter_roles
+
 from core import plan_product
 
 from core import profiles
@@ -66,18 +68,32 @@ def _read_direction_context(ctx: AppContext) -> str:
 
         return meta_text
 
-    path = ctx.store.paths.data_dir / "brief.md"
-
-    if path.is_file():
-
-        legacy = path.read_text(encoding="utf-8").strip()
-
-        if legacy:
-
-            return f"（legacy brief.md）\n{legacy[:4000]}"
-
     return ""
 
+
+
+
+def _word_budget_lines(
+    ctx: AppContext,
+    *,
+    chapter_count: int | None = None,
+) -> list[str]:
+    plan = novel_data.load_plan()
+    meta = plan_product.get_meta(plan)
+    project = _load_project(ctx)
+    book_type = str(project.get("type") or "short")
+    max_ch = 10 if book_type == "short" else 200
+    cc = int(chapter_count or meta.get("chapter_count") or 0)
+    lines: list[str] = []
+    if cc:
+        lines.append(f"目标章数：{max(1, min(max_ch, cc))}")
+    wpc = int(meta.get("word_count_per_chapter") or 0)
+    if wpc:
+        lines.append(f"每章目标字数：{wpc}")
+    tw = int(meta.get("total_word_target") or 0)
+    if tw:
+        lines.append(f"全书目标总字数：{tw}")
+    return lines
 
 
 
@@ -89,6 +105,12 @@ def _parse_json_payload(text: str) -> dict[str, Any]:
     if not raw:
 
         raise ValueError("AI 返回为空")
+
+    if raw.startswith("```"):
+
+        raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.IGNORECASE)
+
+        raw = re.sub(r"\s*```$", "", raw).strip()
 
     try:
 
@@ -108,13 +130,43 @@ def _parse_json_payload(text: str) -> dict[str, Any]:
 
         raise ValueError("无法解析 AI 输出的 JSON")
 
-    data = json.loads(m.group(0))
+    try:
+
+        data = json.loads(m.group(0))
+
+    except json.JSONDecodeError as exc:
+
+        raise ValueError("无法解析 AI 输出的 JSON") from exc
 
     if not isinstance(data, dict):
 
         raise ValueError("JSON 须为对象")
 
     return data
+
+
+
+
+
+def _prefill_parse_error(ctx: AppContext, exc: ValueError, reply: str) -> str:
+
+    msg = str(exc)
+
+    info = ctx.reviewer_deps.llm.get_last_call_info()
+
+    if info.get("output_truncated"):
+
+        max_tok = info.get("max_tokens") or config.MAX_TOKENS
+
+        return (
+
+            f"{msg}（回复在 {max_tok} token 上限处被截断，JSON 不完整。"
+
+            "可在 .env 提高 NOVEL_PREFILL_PLAN_MAX_TOKENS，或减少章数/让 AI 只出 1 套方案后重试）"
+
+        )
+
+    return msg
 
 
 
@@ -133,6 +185,8 @@ def _call_prefill_llm(
     tag: str,
 
     kind: str,
+
+    max_tokens: int | None = None,
 
 ) -> dict:
 
@@ -154,6 +208,8 @@ def _call_prefill_llm(
 
         system, messages, node_id=node_id, tag=tag, silent=True,
 
+        max_tokens=max_tokens,
+
     )
 
     if reply is None:
@@ -172,7 +228,21 @@ def _call_prefill_llm(
 
     except ValueError as exc:
 
-        return {"ok": False, "error": str(exc), "raw_reply": reply}
+        return {
+
+            "ok": False,
+
+            "error": _prefill_parse_error(ctx, exc, reply),
+
+            "raw_reply": reply,
+
+            "output_truncated": ctx.reviewer_deps.llm.get_last_call_info().get(
+
+                "output_truncated",
+
+            ),
+
+        }
 
 
 
@@ -248,9 +318,17 @@ def run_prefill_direction(
 
         f"平台：{project.get('platform', 'tomato')}",
 
-        f"目标章数：{max(1, min(20, chapter_count))}",
-
     ]
+
+    budget = _word_budget_lines(ctx, chapter_count=chapter_count)
+
+    if budget:
+
+        parts.extend(budget)
+
+    else:
+
+        parts.append(f"目标章数：{max(1, min(20, chapter_count))}")
 
     if taste_block:
 
@@ -382,7 +460,13 @@ def run_prefill_plan(
 
         parts.append(f"选定方向 JSON：\n{json.dumps(direction_option, ensure_ascii=False)}")
 
-    if chapter_count:
+    budget = _word_budget_lines(ctx, chapter_count=chapter_count)
+
+    if budget:
+
+        parts.extend(budget)
+
+    elif chapter_count:
 
         parts.append(f"目标章数：{chapter_count}")
 
@@ -390,7 +474,15 @@ def run_prefill_plan(
 
         parts.append(extra_context.strip())
 
-    return _call_prefill_llm(
+    parts.append(
+
+        "只输出 1 套完整方案（options 数组仅 1 项）；"
+
+        "beat 每项单行简述，intent 按 role 填 ai_suggest 必要字段即可。"
+
+    )
+
+    result = _call_prefill_llm(
 
         ctx,
 
@@ -402,10 +494,77 @@ def run_prefill_plan(
 
         kind="prefill_plan",
 
+        max_tokens=config.PREFILL_PLAN_MAX_TOKENS,
+
     )
 
+    if not result.get("ok"):
+
+        return result
+
+    payload = chapter_roles.normalize_prefill_plan_payload(result.get("payload") or {})
+
+    options = payload.get("options") or []
+
+    return {
+
+        **result,
+
+        "payload": payload,
+
+        "options": options,
+
+        "option": options[0] if options else {},
+
+    }
 
 
+
+
+
+def validate_plan_option(
+    ctx: AppContext,
+    option: dict[str, Any],
+    *,
+    replace: bool = True,
+) -> dict:
+    if not isinstance(option, dict):
+        return {"ok": False, "error": "option 须为对象"}
+    project = _load_project(ctx)
+    book_type = str(project.get("type") or "short")
+    preview = chapter_roles.build_plan_preview(
+        plan_product.load_plan(),
+        option,
+        replace=replace,
+    )
+    validation = chapter_roles.validate_plan_sequence(preview, book_type=book_type)
+    errors = chapter_roles.validation_errors(validation)
+    warnings = chapter_roles.validation_warnings(validation)
+    return {
+        "ok": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+        "validation": validation,
+        "error": chapter_roles.format_validation_error(errors) if errors else "",
+    }
+
+
+def semantic_validate_plan_option(
+    ctx: AppContext,
+    option: dict[str, Any],
+    *,
+    replace: bool = True,
+) -> dict:
+    if not isinstance(option, dict):
+        return {"ok": False, "error": "option 须为对象"}
+    from core import plan_semantic_validate
+
+    preview = chapter_roles.build_plan_preview(
+        plan_product.load_plan(),
+        option,
+        replace=replace,
+    )
+    return plan_semantic_validate.run_semantic_validation(preview)
 
 
 def apply_plan_option(
@@ -428,6 +587,26 @@ def apply_plan_option(
 
         return {"ok": False, "error": "option 须为对象"}
 
+    project = _load_project(ctx)
+
+    book_type = str(project.get("type") or "short")
+
+    preview = chapter_roles.build_plan_preview(
+        plan_product.load_plan(),
+        option,
+        replace=replace,
+    )
+
+    validation = chapter_roles.validate_plan_sequence(preview, book_type=book_type)
+
+    if chapter_roles.validation_errors(validation):
+
+        return {
+            "ok": False,
+            "error": chapter_roles.format_validation_error(validation),
+            "validation": validation,
+        }
+
     try:
 
         applied = plan_product.apply_prefill_chapters(option, replace=replace)
@@ -439,10 +618,6 @@ def apply_plan_option(
     if not applied and replace:
 
         return {"ok": False, "error": "option.chapters 为空"}
-
-
-
-    project = _load_project(ctx)
 
     if init_review_criteria:
 
@@ -516,7 +691,7 @@ def apply_plan_option(
 
         )
 
-    return {
+    out: dict[str, Any] = {
 
         "ok": True,
 
@@ -529,4 +704,12 @@ def apply_plan_option(
         "review_criteria": plan_product.get_review_criteria(),
 
     }
+
+    warns = chapter_roles.validation_warnings(validation)
+
+    if warns:
+
+        out["validation_warnings"] = warns
+
+    return out
 

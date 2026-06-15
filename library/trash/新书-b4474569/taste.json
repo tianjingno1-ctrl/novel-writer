@@ -1,0 +1,60 @@
+{
+  "version": 2,
+  "inherit_global": true,
+  "preferences": {},
+  "notes": "",
+  "overrides": {
+    "rules": [],
+    "append_rules": [],
+    "append_examples": [
+      {
+        "id": "ex-5ba19d50",
+        "type": "good",
+        "text": "gaps\":[{\"rule_ref\":\"p_soft_001",
+        "annotation": "审阅报告中引用的有效片段",
+        "tags": [
+          "hook_strong"
+        ],
+        "source": "highlight",
+        "chapter_num": 1,
+        "created_at": "2026-06-11 14:29:57"
+      },
+      {
+        "id": "ex-9fab4dac",
+        "type": "good",
+        "text": "自动试跑通过",
+        "annotation": "用户标注亮点",
+        "tags": [
+          "hook_strong"
+        ],
+        "source": "highlight",
+        "chapter_num": 1,
+        "created_at": "2026-06-11 14:56:45"
+      },
+      {
+        "id": "ex-70331690",
+        "type": "good",
+        "text": "把荷包里最后一块碎银子倒出来放在桌上」——有画面感，不废话。「钱比什么都重要",
+        "annotation": "审阅报告中引用的有效片段",
+        "tags": [
+          "hook_strong"
+        ],
+        "source": "highlight",
+        "chapter_num": 2,
+        "created_at": "2026-06-11 15:07:22"
+      },
+      {
+        "id": "ex-dfb48750",
+        "type": "good",
+        "text": "gaps\":[{\"rule_ref\":\"profile:p_soft_002",
+        "annotation": "审阅报告中引用的有效片段",
+        "tags": [
+          "hook_strong"
+        ],
+        "source": "highlight",
+        "chapter_num": 3,
+        "created_at": "2026-06-11 15:42:11"
+      }
+    ]
+  }
+}

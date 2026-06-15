@@ -1,0 +1,15 @@
+{
+  "active_scene_id": null,
+  "chapters": {},
+  "meta": {
+    "title": "新书",
+    "platform": "tomato",
+    "genre": "urban",
+    "writing_mode": "standard",
+    "wizard_step": "reference",
+    "chapter_count": 4,
+    "word_count_per_chapter": 2503,
+    "total_word_target": 10012
+  },
+  "version": 2
+}

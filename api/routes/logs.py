@@ -62,3 +62,8 @@ def runtime_logs_get(entry_id: str) -> dict:
     if not row:
         raise HTTPException(404, "日志不存在")
     return row
+
+
+@router.get("/api/cost/summary")
+def cost_summary() -> dict:
+    return orchestration_logs.get_cost_summary()

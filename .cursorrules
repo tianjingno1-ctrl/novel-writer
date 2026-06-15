@@ -1,0 +1,59 @@
+# novel_writer 项目规则
+
+## 层级结构
+- core/ = 真正的业务逻辑，改功能认这里
+- api/routes/ = HTTP入口，每个文件独立
+- app/ = 编排层，有历史遗留，改之前要确认
+
+## 同名文件说明
+- app/chapter_io.py = 13行壳，别当业务改
+- core/chapter_io.py = 真正的章节读写逻辑
+- app/context.py = AppContext，进程依赖容器
+- core/context.py = LLM写作上下文引擎，553行
+
+## 禁止随意改动
+- app/main_forwards.py = 测试契约层，不专门重构就不碰
+
+## 口味 / 标准 / Profile 四文件（详见 docs/module-boundaries.md）
+- core/taste.py = 作者口味存取与 merge，不管 RuleRef 解析
+- core/criteria_resolver.py = L4 把 plan.review_criteria 的 RuleRef 展开成条文
+- core/profiles.py = 平台/投递 profile（library/profiles/*.yaml）
+- core/chapter_role_profiles.py = 章 role YAML（library/profiles/chapter_roles/*.yaml）
+
+## 模糊区域，改前要确认影响范围
+- app/writing_chat.py / writing_ctx.py / writing_session.py / writing_svc.py / writing_turns.py
+- core/taste.py / criteria_resolver.py / profiles.py / chapter_role_profiles.py
+
+## 清理原则
+当我问"该改哪个文件"时，如果中间有 shim 或转发层：
+直接给我两个选项：
+A) 只改功能，保留现有层级
+B) 改功能 + 顺手合并这个 shim（列出具体要改哪几行）
+让我选，不要替我决定，不要说"建议保留"。
+唯一例外：涉及 main_forwards.py 或 tests/ 时，说明原因后才可以建议保留。
+
+## 方案选择原则
+当我问怎么实现一个功能时，给我两个方案：
+A) 最小改动方案（改哪里、有什么长期代价）
+B) 最优方案（改哪里、为什么更干净）
+明确告诉我 A 方案的代价是什么，让我来决定值不值得。
+不要因为改动小就默认推荐 A。
+
+## Cursor 常见毛病，禁止以下行为
+
+1. 禁止新建文件解决问题
+   能在现有文件里改的，不许新建。要新建必须先问我。
+
+2. 禁止加参数兼容旧逻辑
+   不许用 flag / if old_mode / backward_compat 这类写法打补丁。
+   旧逻辑该删就删，不确定就问我。
+
+3. 禁止把我的问题当需求
+   我问"为什么X不工作"不等于"帮我加一个功能让X工作"。
+   先回答我的问题，再问我要不要改。
+
+4. 禁止改完不说改了什么
+   每次改动结束，必须列出：改了哪些文件、删了什么、加了什么。
+
+5. 禁止跨文件扩散
+   我让你改A，不许顺手改B和C。要改其他文件必须先告诉我为什么。

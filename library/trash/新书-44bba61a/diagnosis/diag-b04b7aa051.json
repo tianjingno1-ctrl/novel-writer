@@ -1,0 +1,28 @@
+{
+  "id": "diag-b04b7aa051",
+  "book_id": "新书-44bba61a",
+  "created_at": "2026-06-10 19:37:56",
+  "quality_log_id": "309f5a902fb1",
+  "trigger": "chapter_fail",
+  "trigger_ref": {},
+  "issue_tags": [],
+  "analysis": "问题出在审阅阶段（review.platform），未能有效检查平台硬性钩子规则，导致原本可能合格的内容被误判或未能精准定位缺陷。生成阶段（writing.main）也可能未内嵌钩子要求，但定因在审阅反馈模糊且与用户口味中的‘review_gap’标签强相关。",
+  "patch": {
+    "target_node": "review.platform",
+    "diff_preview": "在 review.platform 的提示词中追加以下检查清单，要求逐条判定并给出精准反馈：\n1. 首章是否在 3000 字内出现核心冲突或强钩子？如否，标记缺失位置。\n2. 章末是否留有悬念、情绪转折或行为钩子？如否，指出具体段落。\n3. 全文是否存在推动情绪的无效铺垫句？如有，举例建议删除。\n审阅输出格式改为：通过/不通过 + 上述点检结果。",
+    "override": {
+      "prepend": "",
+      "append": "在 review.platform 的提示词中追加以下检查清单，要求逐条判定并给出精准反馈：\n1. 首章是否在 3000 字内出现核心冲突或强钩子？如否，标记缺失位置。\n2. 章末是否留有悬念、情绪转折或行为钩子？如否，指出具体段落。\n3. 全文是否存在推动情绪的无效铺垫句？如有，举例建议删除。\n审阅输出格式改为：通过/不通过 + 上述点检结果。",
+      "system": null
+    }
+  },
+  "decision": {
+    "accepted": true,
+    "rerun_scope": "chapter_only",
+    "rerun_from_chapter_num": 1,
+    "impact_preview": "将重跑第 1 章（写作→预检→审阅）。已锁定：无。",
+    "decided_at": "2026-06-10 19:38:05"
+  },
+  "status": "accepted",
+  "updated_at": "2026-06-10 19:38:05"
+}

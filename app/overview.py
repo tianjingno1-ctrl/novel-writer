@@ -1,10 +1,9 @@
-"""书架概览 / 统计（路由依赖适配，api/routes/stats 零 import main）。"""
+"""书架统计（GET /api/stats）。"""
 
 from __future__ import annotations
 
 import threading
 
-from core.data import novel_data
 from infra import file_utils as bio
 from infra import billing as _cost
 from app import paths as _paths
@@ -40,28 +39,3 @@ def cached_stats() -> dict:
         _stats_cache = result
         _stats_sig = sig
         return result
-
-
-def bookshelf_overview() -> dict:
-    """GET /api/overview。"""
-    from core.data import book_context
-
-    chapters = list_chapters()
-    stats = stats_core.compute_stats(
-        chapters,
-        read_text=bio.read_text,
-        count_summaries=_wctx.count_summaries,
-        get_total_cost=_cost.get_total_cost,
-    )
-    latest = _wctx.get_latest_chapter()
-    current = latest[0] if latest else None
-    payload = novel_data.build_bookshelf_overview(
-        chapters=chapters,
-        chapter_stats=stats.get("chapters", []),
-        summaries_text=_wctx.get_summaries_combined(),
-        world_text=bio.read_text(_paths.resolved("WORLD_FILE")),
-        current_chapter=current,
-    )
-    payload["library"] = book_context.list_books()
-    payload["book_type"] = book_context.get_book_type()
-    return payload

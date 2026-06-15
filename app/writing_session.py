@@ -1,3 +1,4 @@
+# 写书对话会话磁盘 IO：autosave/restore/clear、`session_autosave.json`、切章号；E1 会话恢复 Banner 依赖此层。
 """会话 IO 服务层（P3-4c）。save/restore/clear/prompts/set_write_chapter_num。"""
 
 from __future__ import annotations
@@ -8,6 +9,7 @@ import uuid
 from datetime import datetime
 
 from infra import file_utils
+from infra.console import safe_print
 from app import chapter_io as chapter_io
 from infra import file_utils as bio
 from app import paths as _paths
@@ -59,9 +61,12 @@ def save_session(reason: str = "auto", *, silent: bool = False) -> bool:
         return False
 
     saved_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    from infra.session_book import get_client_scope
+
     payload = {
         "saved_at": saved_at,
         "reason": reason,
+        "client_scope": get_client_scope(),
         "chapter_num": _session_chapter_num(),
         "session_includes_chapter": state.session_includes_chapter,
         "write_chapter_num": state.write_chapter_num,
@@ -82,8 +87,8 @@ def save_session(reason: str = "auto", *, silent: bool = False) -> bool:
     )
 
     if not silent:
-        print(f"💾 会话已保存 → {session_md}")
-        print("   请将需要的正文复制到章节文件（data/chapters/）")
+        safe_print(f"💾 会话已保存 → {session_md}")
+        safe_print("   请将需要的正文复制到章节文件（data/chapters/）")
     return True
 
 
@@ -104,6 +109,22 @@ def load_session_from_disk() -> dict | None:
         return json.loads(session_file.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
+
+
+def conversation_chapter_num() -> int:
+    """会话里最后一条 AI 回复所属的章（不随侧栏切章的 write_chapter_num 漂移）。"""
+    if not state.conversation_history:
+        return 0
+    data = load_session_from_disk()
+    if data:
+        for key in ("chapter_num", "write_chapter_num"):
+            try:
+                num = int(data.get(key) or 0)
+            except (TypeError, ValueError):
+                num = 0
+            if num > 0:
+                return num
+    return state.write_chapter_num or _session_chapter_num() or 0
 
 
 def _session_history(data: dict) -> list | None:
@@ -154,6 +175,8 @@ def restore_chat_session() -> dict:
         "saved_at": data.get("saved_at", ""),
         "message_count": len(state.conversation_history),
         "pending_writes": pending,
+        "chapter_num": _session_chapter_num(),
+        "write_chapter_num": state.write_chapter_num or None,
     }
 
 
@@ -221,18 +244,41 @@ def save_chat_prompts(prompts: list[dict]) -> dict:
     return {"ok": True, **payload}
 
 
+def reset_conversation_for_chapter(num: int) -> None:
+    """侧栏切章：备份后清空内存会话与磁盘 autosave，避免错注上一章正文。"""
+    backup_session_before_clear()
+    state.conversation_history.clear()
+    state.appended_indices.clear()
+    state.session_includes_chapter = False
+    state.last_injected_chapter_num = 0
+    state.write_chapter_num = num
+    clear_session_files()
+
+
 def set_write_chapter_num(num: int) -> dict:
     """显式设置写作目标章（须有正文文件）。"""
+    from core.data import novel_data
+
     if num <= 0:
         state.write_chapter_num = 0
         return {"ok": True, "write_chapter_num": None}
     path = _paths.resolved("CHAPTERS_DIR") / f"ch{num:03d}.md"
     if not path.exists():
         return {"ok": False, "error": f"第{num}章正文文件不存在"}
-    state.write_chapter_num = num
-    if num != state.last_injected_chapter_num:
-        state.session_includes_chapter = False
-    return {"ok": True, "write_chapter_num": num}
+    prev = state.write_chapter_num or state.last_injected_chapter_num
+    if num != prev and (state.conversation_history or state.last_injected_chapter_num):
+        reset_conversation_for_chapter(num)
+    else:
+        state.write_chapter_num = num
+        if num != state.last_injected_chapter_num:
+            state.session_includes_chapter = False
+    scene_id = novel_data.set_active_scene_for_chapter(num)
+    state.last_synced_active_scene_chapter = num
+    return {
+        "ok": True,
+        "write_chapter_num": num,
+        "active_scene_id": scene_id,
+    }
 
 
 def clear_chat_session() -> None:
@@ -241,6 +287,7 @@ def clear_chat_session() -> None:
     state.session_includes_chapter = False
     state.write_chapter_num = 0
     state.last_injected_chapter_num = 0
+    state.last_synced_active_scene_chapter = -1
     state.appended_indices.clear()
     clear_session_files()
 

@@ -224,7 +224,107 @@ def get_stable_archive_block() -> str:
     return "\n\n".join(parts)
 
 
-def collect_dynamic_layer_parts() -> list[dict]:
+def _chapter_body_path(num: int) -> Path:
+    from core.data import book_context
+
+    try:
+        return book_context.get_context().chapters_dir / f"ch{num:03d}.md"
+    except RuntimeError:
+        _maybe_bind()
+        return get_paths().summaries_file.parent / "chapters" / f"ch{num:03d}.md"
+
+
+def _read_chapter_body_for_context(num: int) -> str:
+    from core import chapters as chapter_text
+
+    raw = ""
+    try:
+        from core import chapter_io
+
+        raw = chapter_io.read_chapter_content(num)
+    except RuntimeError:
+        pass
+    if not (raw or "").strip():
+        ch_path = _chapter_body_path(num)
+        if ch_path.is_file():
+            raw = ch_path.read_text(encoding="utf-8")
+    return chapter_text.strip_chapter_file_header(raw).strip()
+
+
+_WRITING_PRIOR_USER_MAX_CHARS = 20_000
+
+
+def get_prior_chapters_block(
+    chapter_num: int | None,
+    *,
+    max_total_chars: int | None = None,
+    for_user_message: bool = False,
+) -> str | None:
+    if not chapter_num or chapter_num <= 1:
+        return None
+    from core.data import book_context
+
+    if not book_context.is_short_book():
+        return None
+    from core.chapter_text import build_chapters_text_block
+
+    total_limit = max_total_chars
+    if total_limit is None and for_user_message:
+        total_limit = _WRITING_PRIOR_USER_MAX_CHARS
+
+    nums = list(range(1, chapter_num))
+    text, truncated, _ = build_chapters_text_block(
+        nums,
+        _read_chapter_body_for_context,
+        max_total_chars=total_limit,
+    )
+    if not text.strip():
+        return None
+    suffix = "（已截断）" if truncated else ""
+    return f"# 已写章节正文（短篇续写上下文）{suffix}\n{text}"
+
+
+def _iter_chapter_nums() -> list[int]:
+    from core.data import book_context
+
+    try:
+        chapters_dir = book_context.get_context().chapters_dir
+    except RuntimeError:
+        _maybe_bind()
+        chapters_dir = get_paths().summaries_file.parent / "chapters"
+    from core.chapters import list_chapter_files
+
+    return [num for num, _ in list_chapter_files(chapters_dir)]
+
+
+def count_short_written_chapters() -> int:
+    from core import chapter_io
+
+    min_chars = chapter_io.MIN_CHAPTER_BODY_CHARS
+    return sum(
+        1
+        for num in _iter_chapter_nums()
+        if len(_read_chapter_body_for_context(num)) >= min_chars
+    )
+
+
+def get_summaries_combined_for_snapshot(chapter_num: int = 0) -> str:
+    """check/writing 快照用：短篇注入 prior 正文，长篇仍用概述合并。"""
+    from core.data import book_context
+
+    if book_context.is_short_book():
+        num = chapter_num
+        if num <= 0:
+            latest = get_latest_chapter()
+            num = (latest[0] + 1) if latest else 0
+        if num <= 1:
+            return ""
+        prior = get_prior_chapters_block(num)
+        return prior or ""
+    return get_summaries_combined()
+
+
+def collect_dynamic_layer_parts(chapter_num: int | None = None) -> list[dict]:
     _maybe_bind()
     p = get_paths()
     parts: list[dict] = []
@@ -239,15 +339,27 @@ def collect_dynamic_layer_parts() -> list[dict]:
                 "content": f"# 人物动态状态（char_dynamic.md）\n{dynamic}",
             }
         )
-    recent = _read(p.summaries_recent_file).strip()
-    if recent:
+    from core.data import book_context
+
+    prior = get_prior_chapters_block(chapter_num)
+    if prior:
         parts.append(
             {
-                "id": "summaries_recent",
-                "label": "summaries_recent",
-                "content": f"# 近期章节概述（summaries_recent.md）\n{recent}",
+                "id": "prior_chapters",
+                "label": "prior_chapters",
+                "content": prior,
             }
         )
+    elif not book_context.is_short_book():
+        recent = _read(p.summaries_recent_file).strip()
+        if recent:
+            parts.append(
+                {
+                    "id": "summaries_recent",
+                    "label": "summaries_recent",
+                    "content": f"# 近期章节概述（summaries_recent.md）\n{recent}",
+                }
+            )
     active = _read_plot_active()
     if active:
         parts.append(
@@ -375,6 +487,7 @@ def build_cached_system(
     provider: str | None = None,
     *,
     include_scene_context: bool = True,
+    chapter_num: int | None = None,
     summarize_messages: Callable[[list[dict]], list[dict]] | None = None,
     messages: list[dict] | None = None,
 ) -> list[dict] | str:
@@ -384,8 +497,8 @@ def build_cached_system(
     stable = get_stable_archive_block()
     scene_ctx = ""
     if include_scene_context and config.CONTEXT_MODE in ("beats", "summaries"):
-        scene_ctx = novel_data.get_scene_context_text()
-    dynamic_parts = collect_dynamic_layer_parts()
+        scene_ctx = novel_data.get_scene_context_text(chapter_num)
+    dynamic_parts = collect_dynamic_layer_parts(chapter_num)
     dynamic_ctx = "\n\n".join(p["content"] for p in dynamic_parts)
     dynamic_prefix_parts: list[str] = []
     if scene_ctx:
@@ -498,6 +611,10 @@ def get_latest_chapter() -> tuple[int, Path, str] | None:
 
 
 def count_summaries() -> int:
+    from core.data import book_context
+
+    if book_context.is_short_book():
+        return count_short_written_chapters()
     combined = get_summaries_combined()
     return len(re.findall(r"【第\d+章", combined))
 
@@ -505,6 +622,12 @@ def count_summaries() -> int:
 def _outline_context_ready() -> str | None:
     if get_latest_chapter() is None:
         return "没有找到章节文件"
+    from core.data import book_context
+
+    if book_context.is_short_book():
+        if count_summaries() > 0:
+            return None
+        return "请先完成至少一章正文（短篇不使用章节概述）"
     if count_summaries() == 0:
         return "请先生成章节概述（/summary 或 Web「生成概述」）"
     return None
@@ -516,7 +639,7 @@ def get_last_context_debug() -> dict:
     if not state.last_context_debug:
         return {
             "ok": False,
-            "error": "尚无请求记录，请先发送一次写书对话、自由聊或检查类请求",
+            "error": "尚无请求记录，请先发送一次写书或检查类请求",
         }
     data = dict(state.last_context_debug)
     data["ok"] = True

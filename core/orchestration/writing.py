@@ -8,10 +8,15 @@ from app import writing_svc as ws
 
 
 def chat_history() -> dict:
+    from core import chapter_io as cio
+
+    cio.sync_appended_indices_with_chapter()
+    conv_chapter = ws.conversation_chapter_num()
     return {
         "messages": ws.get_chat_history(),
         "appended_indices": ws.get_appended_indices(),
         "context_turns": config.CHAT_CONTEXT_TURNS,
+        "conversation_chapter_num": conv_chapter or None,
     }
 
 
@@ -21,8 +26,15 @@ def chat(
     scene_beat: str = "",
     scene_id: str = "",
     chapter_num: int | None = None,
+    regenerate: bool = False,
 ) -> dict:
-    return ws.writing_chat(instruction, scene_beat, scene_id, chapter_num)
+    return ws.writing_chat(
+        instruction,
+        scene_beat,
+        scene_id,
+        chapter_num,
+        regenerate=regenerate,
+    )
 
 
 def chat_stream(
@@ -31,8 +43,15 @@ def chat_stream(
     scene_beat: str = "",
     scene_id: str = "",
     chapter_num: int | None = None,
+    regenerate: bool = False,
 ) -> Iterator[str]:
-    return ws.writing_chat_stream(instruction, scene_beat, scene_id, chapter_num)
+    return ws.writing_chat_stream(
+        instruction,
+        scene_beat,
+        scene_id,
+        chapter_num,
+        regenerate=regenerate,
+    )
 
 
 def clear_chat() -> dict:

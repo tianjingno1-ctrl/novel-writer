@@ -17,7 +17,6 @@ _heartbeat_stop = threading.Event()
 def get_app_status() -> dict:
     from app import writing_ctx as _wctx
     from app import writing_session as ws
-    from app.free_chat import _active_free_thread
 
     latest = _wctx.get_latest_chapter()
     cfg = config.get_provider_config()
@@ -34,6 +33,7 @@ def get_app_status() -> dict:
     import review_prompts
 
     review_profile = review_prompts.active_profile_for_project(project)
+    pending_session = ws.load_session_from_disk() if ws.has_pending_session() else None
     return {
         "book_id": book_id,
         "book_type": book_type,
@@ -51,37 +51,41 @@ def get_app_status() -> dict:
         "outline_provider": config.OUTLINE_PROVIDER,
         "context_turns": config.CHAT_CONTEXT_TURNS,
         "context_mode": config.CONTEXT_MODE,
-        "free_chat_context_turns": config.FREE_CHAT_CONTEXT_TURNS,
         "max_tokens": config.MAX_TOKENS,
-        "free_chat_max_tokens": config.FREE_CHAT_MAX_TOKENS,
         "total_cost": state.total_cost,
         "chapter_num": latest[0] if latest else None,
         "write_chapter_num": state.write_chapter_num or None,
         "summary_count": _wctx.count_summaries(),
         "history_len": len(state.conversation_history),
-        "session_on_disk": ws.has_pending_session(),
-        "session_saved_at": (
-            ws.load_session_from_disk() or {}
-        ).get("saved_at")
-        if ws.has_pending_session()
+        "session_on_disk": bool(pending_session),
+        "session_saved_at": (pending_session or {}).get("saved_at") if pending_session else None,
+        "session_chapter_num": (
+            int((pending_session or {}).get("chapter_num") or 0)
+            or int((pending_session or {}).get("write_chapter_num") or 0)
+            or None
+        )
+        if pending_session
         else None,
         "active_scene_id": novel_data.load_plan().get("active_scene_id"),
         "active_codex": novel_data.get_active_codex_ids(),
         "codex_count": len(novel_data.list_codex_entries()),
-        "free_chat_provider": state.free_chat_provider,
-        "free_chat_len": len(state.free_chat_history),
-        "free_chat_thread_count": len(state.free_chat_threads),
-        "free_chat_active_thread_id": state.free_chat_active_thread_id,
-        "free_chat_active_thread_title": (_active_free_thread() or {}).get("title", ""),
         "api_key_ok": config.is_api_key_configured(),
         "api_keys": {
             key: config.is_api_key_configured(key) for key in config.PROVIDERS
         },
         "writing_cache_supported": config.supports_prompt_cache(config.PROVIDER),
-        "batch_job_running": state.batch_job_running,
-        "batch_job_id": state.batch_job_id or None,
         "runtime_log": runtime_log.get_status(),
+        "session_scope": _session_scope_label(),
     }
+
+
+def _session_scope_label() -> str:
+    try:
+        from infra.session_book import get_client_scope
+
+        return get_client_scope()
+    except Exception:
+        return "default"
 
 
 def get_prompt_cache_status() -> dict:

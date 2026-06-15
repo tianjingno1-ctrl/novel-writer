@@ -69,11 +69,28 @@ def put_node_override(
     node_id: str,
     *,
     system: str | None = None,
+    append: str | None = None,
+    prepend: str | None = None,
     clear: bool = False,
 ) -> dict:
-    result = prompt_nodes.save_node_override(
-        _book_dir(ctx), node_id, system=system, clear=clear,
-    )
+    book_dir = _book_dir(ctx)
+    if clear:
+        result = prompt_nodes.save_node_override(book_dir, node_id, clear=True)
+        if not result.get("ok"):
+            return result
+        return get_node(ctx, node_id)
+
+    patch: dict[str, str] = {}
+    if system is not None:
+        patch["system"] = system
+    if append is not None:
+        patch["append"] = append
+    if prepend is not None:
+        patch["prepend"] = prepend
+    if not patch:
+        return {"ok": False, "error": "无更新字段"}
+
+    result = prompt_nodes.merge_node_override(book_dir, node_id, patch)
     if not result.get("ok"):
         return result
     return get_node(ctx, node_id)

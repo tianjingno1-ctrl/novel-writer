@@ -1,0 +1,22 @@
+{
+  "id": "diag-0ad7cb89da",
+  "book_id": "新书-44bba61a",
+  "created_at": "2026-06-10 19:30:34",
+  "quality_log_id": "2f4a5040cf49",
+  "trigger": "chapter_fail",
+  "trigger_ref": {},
+  "issue_tags": [],
+  "analysis": "首章被拒因未满足平台强钩子规则，归因于写作节点未内嵌平台要求且审查节点缺失",
+  "patch": {
+    "target_node": "writing.main",
+    "diff_preview": "在 writing.main 的 Beat 续写指令中追加规则约束：\n- 首章字数控制在3000字以内，开篇500字内明确核心冲突。\n- 章末必须设置至少一个悬念或情绪钩子（如：认知反转、身份揭示、即将爆发的矛盾）。\n- 删除不推动情绪的铺垫句，确保每段对话或动作具有推进剧情的功能。",
+    "override": {
+      "prepend": "",
+      "append": "在 writing.main 的 Beat 续写指令中追加规则约束：\n- 首章字数控制在3000字以内，开篇500字内明确核心冲突。\n- 章末必须设置至少一个悬念或情绪钩子（如：认知反转、身份揭示、即将爆发的矛盾）。\n- 删除不推动情绪的铺垫句，确保每段对话或动作具有推进剧情的功能。",
+      "system": null
+    }
+  },
+  "decision": {},
+  "status": "pending",
+  "updated_at": "2026-06-10 19:30:34"
+}

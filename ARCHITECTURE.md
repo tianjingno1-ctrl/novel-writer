@@ -50,7 +50,7 @@ web_app.py           → FastAPI 装配 + lifespan
 | 5 | `review` → `core/orchestration/review.py` | ✅ |
 | 6 | `web_app.py` → `api/routes/*` | ✅ |
 | 7 | 业务迁 `app/*`；`main.py` 瘦身至 ~148 行 | ✅ P3 完成 |
-| 8 | 清理 `*Deps` Callable、收敛 `LlmHooks` → `core.api` | 待做（低优先级） |
+| 8 | 清理 `*Deps` Callable、收敛 `LlmHooks` → `core.llm` | 待做（低优先级） |
 
 ### P3 重构摘要（2026-06）
 
@@ -59,9 +59,9 @@ web_app.py           → FastAPI 装配 + lifespan
 | `app/paths.py` | 路径 source of truth；`mirror_to_main` 兼容测试 |
 | `app/bootstrap.py` | `bootstrap_library` / `init_data_dirs` / `init_context` |
 | `app/bootstrap_data.py` | `INITIAL_FILE_TEMPLATES` / `DEFAULT_CHAT_PROMPTS` |
-| `app/llm.py` | `call_api` / `build_cached_system` / `_request_lock` |
-| `app/book_io.py` | `read_text` / `write_text` / archive 双写 |
-| `app/cost.py` | 费用链 |
+| `core/llm.py` | `call_api` / `build_cached_system` / `_request_lock` |
+| `infra/file_utils.py` + `core/book_store.py` | `read_text` / `write_text` / archive 双写 |
+| `infra/billing/` | 费用链 |
 | `app/writing_ctx.py` | 写作上下文块 |
 | `app/chapter_io.py` | 章节 IO |
 | `app/writing_session.py` | 会话 IO |

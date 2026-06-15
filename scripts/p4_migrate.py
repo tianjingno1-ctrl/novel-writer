@@ -157,10 +157,6 @@ def move_files() -> None:
     write_shim(ROOT / "novel_data.py", "core.data.novel_data")
     write_shim(ROOT / "change_history.py", "core.data.change_history")
     write_shim(ROOT / "book_context.py", "core.data.book_context")
-    write_shim(ROOT / "app" / "cost.py", "infra.billing")
-    write_shim(ROOT / "app" / "book_io.py", "infra.file_utils")
-    write_shim(ROOT / "core" / "api.py", "core.llm")
-    write_shim(ROOT / "app" / "llm.py", "core.llm")
 
 
 def rewrite_line(line: str) -> str:
@@ -259,10 +255,6 @@ SHIM_FILES = {
     "novel_data.py",
     "change_history.py",
     "book_context.py",
-    "app/cost.py",
-    "app/book_io.py",
-    "core/api.py",
-    "app/llm.py",
 }
 
 

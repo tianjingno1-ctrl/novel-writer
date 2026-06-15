@@ -306,12 +306,14 @@ def build_cached_system(
     provider: str | None = None,
     *,
     include_scene_context: bool = True,
+    chapter_num: int | None = None,
 ) -> list[dict] | str:
     _wctx.bind_writing_context()
     return writing_context.build_cached_system(
         instruction,
         provider,
         include_scene_context=include_scene_context,
+        chapter_num=chapter_num,
         summarize_messages=_summarize_messages,
     )
 
@@ -390,7 +392,7 @@ def _api_error_message(exc: Exception) -> str:
             "network": "网络或 AI 服务连接中断，请重试、换模型或检查 API Key/余额",
             "server_error": (
                 "AI 服务商暂时异常（多为 kie 网关 500）。"
-                "请稍后重试；自由聊建议切到 DeepSeek；写书可暂换 DeepSeek 或换 Sonnet/Opus 型号"
+                "请稍后重试；写书可暂换 DeepSeek 或换 Sonnet/Opus 型号"
             ),
         }
         hint = hints.get(exc.kind)

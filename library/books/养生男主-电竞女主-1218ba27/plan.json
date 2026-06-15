@@ -1,0 +1,125 @@
+{
+  "active_scene_id": "ch1_47debc2d",
+  "chapters": {
+    "1": {
+      "title": "我重生回来跪求复合",
+      "status": "pending",
+      "hook": "系统提示：请让男主在三天内接受你的礼物，否则将失去重生资格。",
+      "word_count_target": 1200,
+      "scenes": [
+        {
+          "id": "ch1_47debc2d",
+          "title": "我重生回来跪求复合",
+          "beat": "【场景目的】重生倒追+第一次打脸，800字内建立核心冲突与系统金手指\n【核心动作】女主闯进养生店当众跪求复合，男主冷漠拒绝，女主从系统得知必须完成攻略任务\n【节奏档位】快\n【结尾钩子】系统倒计时：72:00:00 开始",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-13T17:50:12",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "hook_open",
+      "intent": {
+        "kind": "hook_open",
+        "ai_suggest": "",
+        "final": "惨烈对比有金手指前后的局面"
+      }
+    },
+    "2": {
+      "title": "系统任务的第一次考验",
+      "status": "pending",
+      "hook": "对手冷笑：比赛见真章，输了就滚出电竞圈。",
+      "word_count_target": 1600,
+      "scenes": [
+        {
+          "id": "ch2_86049176",
+          "title": "系统任务的第一次考验",
+          "beat": "【场景目的】铺垫付费点前最大冲突，让读者迫切想知道女主如何破局\n【核心动作】女主送养生茶被男主退回；对手当众羞辱女主实力；女主签下对赌协议\n【节奏档位】快\n【结尾钩子】男主突然出现在女主身后，拿走了茶杯。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-13T17:50:12",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "paywall",
+      "intent": {
+        "kind": "paywall",
+        "ai_suggest": "读者付费前心理状态：想看女主如何完成攻略任务、如何在比赛中打脸对手，以及男主态度的微妙变化",
+        "final": "{\n  \"debt\": \"攻略人物\",\n  \"trigger\": \"看表现\"\n}"
+      }
+    },
+    "3": {
+      "title": "比赛前的意外温柔",
+      "status": "pending",
+      "hook": "女主望着背叛的队友照片，握紧拳头：这场比赛，我不能输。",
+      "word_count_target": 1300,
+      "scenes": [
+        {
+          "id": "ch3_04ca097b",
+          "title": "比赛前的意外温柔",
+          "beat": "【场景目的】承接付费后情绪，给甜头又埋下新危机\n【核心动作】男主关切举动；女主查出卖队友的叛徒；女主制定偷换战术\n【节奏档位】中\n【结尾钩子】比赛开始前一小时，对手露出胜券在握的笑容。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-13T17:50:12",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "paid_open"
+    },
+    "4": {
+      "title": "冠军与爱情的双赢",
+      "status": "pending",
+      "hook": "男主揽住她：我等你这句话，等了两辈子。",
+      "word_count_target": 1500,
+      "scenes": [
+        {
+          "id": "ch4_601f33e5",
+          "title": "冠军与爱情的双赢",
+          "beat": "【场景目的】完成逆袭主线，感情线收束，给读者情感满足\n【核心动作】比赛绝地反击；幕后黑手揭露；男主公开支持并表白\n【节奏档位】快\n【结尾钩子】两人拥抱在漫天彩带中。",
+          "pace": "中",
+          "summary": "",
+          "done": false,
+          "updated_at": "2026-06-13T17:50:12",
+          "emotion_anchor": {}
+        }
+      ],
+      "role": "finale",
+      "intent": {
+        "kind": "finale",
+        "ai_suggest": "",
+        "final": {}
+      }
+    }
+  },
+  "meta": {
+    "title": "重生：电竞女王攻略养生男神",
+    "platform": "tomato",
+    "wizard_step": null,
+    "chapter_count": 4,
+    "word_count_per_chapter": null,
+    "total_word_target": 10000,
+    "logline": "前世她嫌他无趣，重生后她倒追养生店老板，只为抢回冠军和爱情。",
+    "sell_point": "重生倒追×爽点前置，开局就跪求复合，800字内完成第一次打脸。",
+    "tone": "重生逆袭+系统攻略",
+    "option_id": "C",
+    "risk_note": "重生开头易老套，必须第一句就有冲击力；避免系统金手指过强。",
+    "characters": [],
+    "paywall_chapter": 2,
+    "wizard_complete": true
+  },
+  "version": 2,
+  "review_criteria": {
+    "platform_profile": "tomato_text_editor_v1",
+    "hard_rules": [
+      "profile:p_hard_001",
+      "profile:p_hard_002"
+    ],
+    "soft_rules": [
+      "profile:p_soft_001",
+      "profile:p_soft_002"
+    ],
+    "custom_checks": []
+  }
+}

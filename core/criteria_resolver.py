@@ -1,3 +1,4 @@
+# L4 审阅标准解析：把 plan.review_criteria 里的 RuleRef 展开成 hard/soft 条目（读 taste / profiles / custom）；不存盘、不改规则。
 """审阅标准 RuleRef → 可执行条目。"""
 
 from __future__ import annotations

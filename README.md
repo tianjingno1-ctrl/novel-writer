@@ -22,8 +22,8 @@ pip install -r requirements.txt
 
 | 场景 | 默认提供商 | 配置项 |
 |------|------------|--------|
-| 正文续写、润色 | kie (Claude Sonnet) | `PROVIDER` 或 Web 顶栏切换 |
-| 更强推理写作 | kie-opus (Claude Opus) | Web 写书对话区 / `/provider kie-opus` |
+| 正文续写、润色 | kie (Claude Sonnet) | `PROVIDER` 或 **设置 → 模型** |
+| 更强推理写作 | kie-opus (Claude Opus) | 设置 / `/provider kie-opus` |
 | `/summary` 概述 | DeepSeek | `SUMMARY_PROVIDER` |
 | `/check` 检查 | DeepSeek | `CHECK_PROVIDER` |
 
@@ -145,8 +145,8 @@ System prompt 按「稳定 → 变化」分三层，均带 `cache_control`，利
 ## 新手提示
 
 - **CLI**：`python main.py`，使用 `/summary`、`/check`、`/outline`、`/patch` 等命令（见上表）。
-- **API**：在 http://127.0.0.1:8765/docs 调用对应路由（如 `POST /api/summary`、`POST /api/check`）。
-- 书库与设定文件位于 `library/books/{id}/`（多书）或迁移前的 `data/`。详见 [用户手册](./docs/novel-writer-manual.md)（手册中部分 Web 顶栏说明针对已移除的旧 UI，以 CLI/API 为准）。
+- **API**：在 http://127.0.0.1:8765/docs 浏览 OpenAPI；产品主路径见 `docs/workflow.md`。
+- 书库与设定文件位于 `library/books/{id}/`。产品流程见 [workflow.md](./docs/workflow.md)；做了/没做见 [canonical-status.md](./docs/canonical-status.md)；数据文件见 [novel-writer-manual.md](./docs/novel-writer-manual.md)。
 
 ## 费用说明
 

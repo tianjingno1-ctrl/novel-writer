@@ -1,3 +1,4 @@
+# 单轮写入状态机：把助手/用户草稿 apply 到章节文件、undo 上一次 append；CLI undo 与 Gate 改章后同步走这里。
 """章节写入状态机（apply-turn / undo）。P3-4a：实迁函数体；main re-export 测试/CLI 兼容。"""
 
 from __future__ import annotations
@@ -43,6 +44,7 @@ def apply_assistant_turn_to_chapter(chapter_num: int, msg_index: int) -> dict:
     """用某条 AI 回复**替换**整章正文（非追加）。"""
     from app import writing_session as ws
 
+    ch.sync_appended_indices_with_chapter()
     path = _chapter_path(chapter_num)
     if not path.exists():
         return {"ok": False, "error": f"章节 ch{chapter_num:03d} 不存在"}

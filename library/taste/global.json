@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "updated_at": "2026-06-09 16:45:41",
+  "updated_at": "2026-06-13 11:32:17",
   "preferences": {
     "likes": [],
     "dislikes": [],
@@ -10,7 +10,43 @@
     "style_notes": "",
     "review_notes": ""
   },
-  "tag_stats": {},
+  "tag_stats": {
+    "review_gap": {
+      "count": 7,
+      "last_at": "2026-06-13 11:32:17",
+      "outcomes": {
+        "rejected": 7
+      }
+    },
+    "submission_reject": {
+      "count": 18,
+      "last_at": "2026-06-13 11:18:22",
+      "outcomes": {
+        "rejected": 18
+      }
+    },
+    "submission_pass": {
+      "count": 18,
+      "last_at": "2026-06-13 11:18:23",
+      "outcomes": {
+        "accepted": 18
+      }
+    },
+    "hook_strong": {
+      "count": 7,
+      "last_at": "2026-06-13 10:36:00",
+      "outcomes": {
+        "accepted": 7
+      }
+    },
+    "ai_tone": {
+      "count": 2,
+      "last_at": "2026-06-11 14:01:05",
+      "outcomes": {
+        "needs_revision": 2
+      }
+    }
+  },
   "rules": [],
   "examples": []
 }

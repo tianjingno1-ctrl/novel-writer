@@ -147,9 +147,9 @@ def persist_bulk_state(
 def _build_chapters_text_for_nums(
     store: BookStore, chapter_nums: list[int]
 ) -> tuple[str, bool]:
-    import batch_world
+    from core.chapter_text import build_chapters_text_block
 
-    text, truncated, _ = batch_world.build_chapters_text_block(
+    text, truncated, _ = build_chapters_text_block(
         chapter_nums,
         store.read_chapter,
     )

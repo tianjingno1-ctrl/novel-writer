@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 from core import plan_product
 from core import rerun_execute
 from core import rerun_scope
-from core.orchestration.flow_runner import CHAPTER_STEP_IDS, STEP_BY_ID
+from core.orchestration.flow_runner import STEP_BY_ID, chapter_step_ids_for_plan
 from infra import file_utils
 
 if TYPE_CHECKING:
@@ -20,8 +20,19 @@ CHAPTER_STEP_CHAIN = tuple(
         "method": STEP_BY_ID[step_id]["method"],
         "path": STEP_BY_ID[step_id]["path"],
     }
-    for step_id in CHAPTER_STEP_IDS
+    for step_id in chapter_step_ids_for_plan()
 )
+
+
+def chapter_step_chain_for_plan(plan: dict | None = None) -> tuple[dict[str, Any], ...]:
+    return tuple(
+        {
+            "step": step_id,
+            "method": STEP_BY_ID[step_id]["method"],
+            "path": STEP_BY_ID[step_id]["path"],
+        }
+        for step_id in chapter_step_ids_for_plan(plan)
+    )
 
 
 def _chapter_title(plan: dict, chapter_num: int) -> str:
@@ -40,11 +51,15 @@ def reset_chapter_draft(chapters_dir: Path, chapter_num: int, *, title: str = ""
     return path
 
 
-def build_chapter_work_queue(chapter_nums: list[int]) -> list[dict[str, Any]]:
+def build_chapter_work_queue(
+    chapter_nums: list[int],
+    plan: dict | None = None,
+) -> list[dict[str, Any]]:
+    chain = chapter_step_chain_for_plan(plan)
     queue: list[dict[str, Any]] = []
     for num in sorted(chapter_nums):
         steps = []
-        for row in CHAPTER_STEP_CHAIN:
+        for row in chain:
             steps.append({
                 **row,
                 "path": row["path"].format(chapter_num=num, log_id="{log_id}"),
@@ -81,7 +96,7 @@ def build_work_queue(
         "pending_review": pending_review,
         "pending_summary": pending_summary,
         "locked": plan_product.locked_chapter_nums(p),
-        "chapter_work_queues": build_chapter_work_queue(pending_write + pending_review),
+        "chapter_work_queues": build_chapter_work_queue(pending_write + pending_review, p),
     }
 
 
@@ -257,9 +272,9 @@ def run_pipeline(
     result["chapter_prepare"] = prepared
     result["write_chapter"] = bind
     result["work_queue"] = {
-        "chapters": build_chapter_work_queue(affected),
+        "chapters": build_chapter_work_queue(affected, plan_product.load_plan()),
         "primary_chapter": bind.get("primary_chapter") or (min(affected) if affected else None),
-        "flow": CHAPTER_STEP_CHAIN,
+        "flow": chapter_step_chain_for_plan(),
     }
     if not bind.get("ok"):
         result["ok"] = False

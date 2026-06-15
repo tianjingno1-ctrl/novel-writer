@@ -2,23 +2,20 @@
 
 from __future__ import annotations
 
-import sys
 from contextlib import asynccontextmanager
+
+from infra.console import ensure_utf8_stdio, safe_print
 
 import infra.config as config
 from infra.logs import runtime as runtime_log
 from app.bootstrap import bootstrap_library, init_data_dirs, init_context
 from infra.billing import load_total_cost, set_total_cost
 from app import writing_session as ws
-from app.free_chat import load_free_chat
-from api.routes import batch as batch_routes
+from api.routes import book_files as book_files_routes
 from api.routes import chapters as chapters_routes
-from api.routes import codex as codex_routes
 from api.routes import config as config_routes
 from api.routes import female_fiction as female_fiction_routes
 from api.routes import finalize as finalize_routes
-from api.routes import free_chat as free_chat_routes
-from api.routes import guide as guide_routes
 from api.routes import history as history_routes
 from api.routes import library as library_routes
 from api.routes import logs as logs_routes
@@ -27,7 +24,6 @@ from api.routes import prefill as prefill_routes
 from api.routes import prompts as prompts_routes
 from api.routes import maintain as maintain_routes
 from api.routes import meta as meta_routes
-from api.routes import outline as outline_routes
 from api.routes import plan as plan_routes
 from api.routes import product as product_routes
 from api.routes import project as project_routes
@@ -35,7 +31,6 @@ from api.routes import review as review_routes
 from api.routes import stats as stats_routes
 from api.routes import taste as taste_routes
 from api.routes import tools as tools_routes
-from api.routes import workshop as workshop_routes
 from api.routes import writing as writing_routes
 from app import runtime as app_runtime
 from core import model_routing
@@ -62,22 +57,16 @@ def _is_local_client(host: str) -> bool:
 
 
 def _safe_print(msg: str) -> None:
-    """Windows GBK 控制台可能无法输出 emoji，降级为可打印字符。"""
-    try:
-        print(msg)
-    except UnicodeEncodeError:
-        print(msg.encode(sys.stdout.encoding or "utf-8", errors="replace").decode(
-            sys.stdout.encoding or "utf-8", errors="replace"
-        ))
+    safe_print(msg)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    ensure_utf8_stdio()
     bootstrap_library()
     init_data_dirs()
     config.load_runtime_settings()
     set_total_cost(load_total_cost())
-    load_free_chat()
     if ws.auto_restore_session_if_needed():
         _safe_print("[OK] 已从磁盘恢复写书对话（session_autosave.json）")
     if config.WEB_TOKEN:
@@ -103,16 +92,10 @@ app.include_router(finalize_routes.router)
 app.include_router(review_routes.router)
 app.include_router(maintain_routes.router)
 app.include_router(library_routes.router)
-app.include_router(outline_routes.router)
-app.include_router(workshop_routes.router)
 app.include_router(female_fiction_routes.router)
-app.include_router(batch_routes.router)
-app.include_router(guide_routes.router)
-app.include_router(codex_routes.router)
 app.include_router(chapters_routes.router)
 app.include_router(product_routes.router)
 app.include_router(plan_routes.router)
-app.include_router(free_chat_routes.router)
 app.include_router(writing_routes.router)
 app.include_router(stats_routes.router)
 app.include_router(history_routes.router)
@@ -120,11 +103,27 @@ app.include_router(config_routes.router)
 app.include_router(tools_routes.router)
 app.include_router(meta_routes.router)
 app.include_router(project_routes.router)
+app.include_router(book_files_routes.router)
 app.include_router(logs_routes.router)
 app.include_router(prompts_routes.router)
 app.include_router(prefill_routes.router)
 app.include_router(manuscripts_routes.router)
 app.include_router(taste_routes.router)
+
+
+@app.middleware("http")
+async def session_scope_middleware(request: Request, call_next):
+    from infra.session_book import set_client_scope
+
+    path = request.url.path
+    if path.startswith("/api/"):
+        token = request.headers.get("X-Novel-Token", "").strip()
+        if config.WEB_TOKEN and token == config.WEB_TOKEN:
+            set_client_scope(f"tok:{token[:24]}")
+        else:
+            host = request.client.host if request.client else "local"
+            set_client_scope(f"host:{host}")
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -224,4 +223,9 @@ if __name__ == "__main__":
         _port = int(os.environ.get("NOVEL_WEB_PORT", "8765"))
     except ValueError:
         pass
-    run(port=_port)
+    _no_browser = os.environ.get("NOVEL_WEB_NO_BROWSER", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    run(port=_port, open_browser=not _no_browser)

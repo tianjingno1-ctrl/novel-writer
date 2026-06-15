@@ -199,40 +199,41 @@ def patch(ctx: AppContext, manuscript_id: str, fields: dict[str, Any]) -> dict:
         result_val = str(sub.get("result") or "").strip().lower()
 
         if result_val in ("rejected", "reject", "拒稿", "failed"):
+            reject_kind = str(
+                sub.get("reject_kind") or sub.get("rejection_kind") or "content"
+            ).strip().lower()
+            strategy_kinds = frozenset({
+                "strategy", "submission", "投递策略", "e4b",
+            })
+            if reject_kind in strategy_kinds:
+                result["rejection_fork"] = "strategy"
+                result["next_action"] = "E4b"
+            else:
+                from core import diagnosis_store
+                from core.data import book_context
 
-            from core import diagnosis_store
-
-            from core.data import book_context
-
-
-
-            submissions = doc.get("submissions") or []
-
-            last_sub = submissions[-1] if submissions else {}
-
-            diag = diagnosis_store.create_pending(
-
-                ctx.store.paths.data_dir,
-
-                book_id=book_context.get_context().book_id,
-
-                trigger="rejection",
-
-                trigger_ref={"type": "submission", "id": last_sub.get("id", "")},
-
-                issue_tags=sub.get("reject_tags") or [],
-
-                analysis=str(sub.get("reject_reason") or "投递拒稿")[:2000],
-
-                patch={},
-
-            )
-
-            diagnosis_id = diag.get("id")
-
-            result["diagnosis_id"] = diagnosis_id
-
-            result["next_action"] = "POST /api/prompts/diagnose 或 PATCH diagnosis 归因"
+                submissions = doc.get("submissions") or []
+                last_sub = submissions[-1] if submissions else {}
+                diag = diagnosis_store.create_pending(
+                    ctx.store.paths.data_dir,
+                    book_id=book_context.get_context().book_id,
+                    trigger="rejection",
+                    trigger_ref={"type": "submission", "id": last_sub.get("id", "")},
+                    issue_tags=sub.get("reject_tags") or [],
+                    analysis=str(sub.get("reject_reason") or "投递拒稿")[:2000],
+                    patch={},
+                )
+                diagnosis_id = diag.get("id")
+                if diagnosis_id:
+                    patched = manuscript.patch_last_submission(
+                        manuscript_id,
+                        {"diagnosis_id": diagnosis_id},
+                    )
+                    if patched.get("ok"):
+                        result["manuscript"] = patched["manuscript"]
+                result["diagnosis_id"] = diagnosis_id
+                result["rejection_fork"] = "content"
+                result["next_action"] = "P1"
 
 
 

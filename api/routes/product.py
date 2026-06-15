@@ -39,6 +39,7 @@ class ChapterStatusBody(BaseModel):
 
 class PrecheckBody(BaseModel):
     content: str = ""
+    skip_paywall_intent: bool = False
 
 
 class ReaderPreviewBody(BaseModel):
@@ -53,7 +54,17 @@ class HighlightBody(BaseModel):
     text: str
     annotation: str = ""
     tags: list[str] | None = None
+    skip_conflict_check: bool = False
 
+
+class HighlightConflictBody(BaseModel):
+    text: str
+    annotation: str = ""
+
+
+class AttributionLogBody(BaseModel):
+    source: str = "L5b"
+    note: str = ""
 
 class RerunPreviewBody(BaseModel):
     scope: str
@@ -67,6 +78,8 @@ class DiagnosisDecideBody(BaseModel):
     from_chapter_num: int = 0
     apply_override: bool = True
     execute_rerun: bool = False
+    apply_author_profile: bool = False
+    author_profile_book_id: str = ""
 
 
 class RerunExecuteBody(BaseModel):
@@ -77,24 +90,6 @@ class RerunExecuteBody(BaseModel):
     clear_chapter_drafts: bool = True
     auto_plan_llm: bool = True
     plan_context_note: str = ""
-
-
-class FlowRunBody(BaseModel):
-    mode: str = "continue"
-    chapter_num: int = 0
-    from_step: str = ""
-    stop_after: str = ""
-    scope: str = ""
-    from_chapter_num: int = 0
-    current_chapter_num: int = 0
-    reset_plan_fields: bool = False
-    clear_chapter_drafts: bool = True
-    auto_plan_llm: bool = True
-    plan_context_note: str = ""
-    write_instruction: str = ""
-    auto_adopt_write: bool = False
-    judgment: dict[str, Any] | None = None
-    auto_confirm_summary: bool = False
 
 
 class LifecycleBody(BaseModel):
@@ -142,7 +137,10 @@ def chapter_precheck(
     chapter_num: int, body: PrecheckBody, request: Request,
 ) -> dict:
     return orchestration_product.run_precheck(
-        _ctx(request), chapter_num, body.content,
+        _ctx(request),
+        chapter_num,
+        body.content,
+        skip_paywall_intent=body.skip_paywall_intent,
     )
 
 
@@ -152,6 +150,53 @@ def chapter_reader_preview(
 ) -> dict:
     return orchestration_product.run_reader_preview(
         _ctx(request), chapter_num, body.content,
+    )
+
+
+@router.post("/api/chapters/{chapter_num}/editor-preview")
+def chapter_editor_preview(
+    chapter_num: int, body: ReaderPreviewBody, request: Request,
+) -> dict:
+    result = orchestration_product.run_editor_preview(
+        _ctx(request), chapter_num, body.content,
+    )
+    _err(result, "编辑点评失败")
+    return result
+
+
+@router.post("/api/chapters/{chapter_num}/rhythm-check")
+def chapter_rhythm_check(chapter_num: int, request: Request) -> dict:
+    return orchestration_product.run_rhythm_check(_ctx(request), chapter_num=chapter_num)
+
+
+@router.post("/api/chapters/{chapter_num}/attribution-log")
+def chapter_attribution_log(
+    chapter_num: int, body: AttributionLogBody, request: Request,
+) -> dict:
+    result = orchestration_product.create_attribution_log(
+        _ctx(request),
+        chapter_num=chapter_num,
+        source=body.source,
+        note=body.note,
+    )
+    _err(result)
+    return result
+
+
+@router.post("/api/taste/highlights/{chapter_num}/conflicts")
+def highlight_conflicts(
+    chapter_num: int, body: HighlightConflictBody, request: Request,
+) -> dict:
+    from core import highlight_conflict
+
+    from core.data import book_context
+
+    ctx = _ctx(request)
+    return highlight_conflict.check_highlight_conflicts(
+        book_id=book_context.get_context().book_id,
+        text=body.text,
+        annotation=body.annotation,
+        book_dir=ctx.store.paths.data_dir,
     )
 
 
@@ -175,6 +220,7 @@ def taste_push_highlight(
         text=body.text,
         annotation=body.annotation,
         tags=body.tags,
+        skip_conflict_check=body.skip_conflict_check,
     )
 
 
@@ -221,40 +267,17 @@ def flow_steps() -> dict:
     return orchestration_product.list_flow_steps()
 
 
-@router.post("/api/flow/run")
-def flow_run(body: FlowRunBody, request: Request) -> dict:
-    """可选一键串联；stop_after 或人工确认点会停住。单步 API 仍可直接调用。"""
-    result = orchestration_product.run_flow(
-        _ctx(request),
-        mode=body.mode,
-        chapter_num=body.chapter_num,
-        from_step=body.from_step,
-        stop_after=body.stop_after,
-        scope=body.scope,
-        from_chapter_num=body.from_chapter_num,
-        current_chapter_num=body.current_chapter_num,
-        reset_plan_fields=body.reset_plan_fields,
-        clear_chapter_drafts=body.clear_chapter_drafts,
-        auto_plan_llm=body.auto_plan_llm,
-        plan_context_note=body.plan_context_note,
-        write_instruction=body.write_instruction,
-        auto_adopt_write=body.auto_adopt_write,
-        judgment=body.judgment,
-        auto_confirm_summary=body.auto_confirm_summary,
-    )
-    if not result.get("ok") and result.get("stop_reason") != "step_failed":
-        _err(result)
-    if result.get("stop_reason") == "step_failed":
-        raise HTTPException(400, result.get("error", "流程步骤失败"))
-    return result
-
-
 @router.get("/api/chapters/{chapter_num}/summary")
 def get_chapter_summary(chapter_num: int, request: Request) -> dict:
     result = orchestration_product.get_chapter_summary(_ctx(request), chapter_num)
     if not result.get("ok"):
         raise HTTPException(404, result.get("error", "概述不存在"))
     return result
+
+
+@router.get("/api/chapters/{chapter_num}/review")
+def get_chapter_review(chapter_num: int, request: Request) -> dict:
+    return orchestration_product.get_chapter_review(_ctx(request), chapter_num)
 
 
 @router.post("/api/chapters/{chapter_num}/summary/confirm")
@@ -293,6 +316,13 @@ def list_diagnoses(request: Request, limit: int = 30) -> dict:
     return orchestration_product.list_diagnoses(_ctx(request), limit=limit)
 
 
+@router.get("/api/diagnosis/{diagnosis_id}")
+def get_diagnosis(diagnosis_id: str, request: Request) -> dict:
+    result = orchestration_product.get_diagnosis(_ctx(request), diagnosis_id)
+    _err(result)
+    return result
+
+
 @router.post("/api/diagnosis/{diagnosis_id}/decide")
 def decide_diagnosis(
     diagnosis_id: str, body: DiagnosisDecideBody, request: Request,
@@ -304,7 +334,9 @@ def decide_diagnosis(
         rerun_scope_name=body.rerun_scope,
         from_chapter_num=body.from_chapter_num,
         apply_override=body.apply_override,
-        execute_rerun=body.execute_rerun,
+        run_rerun_pipeline=body.execute_rerun,
+        apply_author_profile=body.apply_author_profile,
+        author_profile_book_id=body.author_profile_book_id,
     )
     _err(result)
     return result

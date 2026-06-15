@@ -1,7 +1,7 @@
 # 产品数据 Schema（定稿）
 
-> **流程**：[workflow.md](./workflow.md) · **索引**：[product-plan.md](./product-plan.md)  
-> **LLM fence**：[schemas.md](./schemas.md) · **现盘格式摘要**：[core/schemas/persist.py](../core/schemas/persist.py)
+> **流程**：[workflow.md](./workflow.md) · **章 role**：[chapter-roles.md](./chapter-roles.md) · **排期**：[canonical-status.md §七](./canonical-status.md) · **索引**：[product-plan.md](./product-plan.md)  
+> **LLM fence**：[schemas.md](./schemas.md) · **现盘格式摘要**：[persist-formats.md](./persist-formats.md)
 
 本文档消除结构设计中的「后患」：**单一真相源、命名统一、引用可解析、与现码路径对齐**。实现可分期，但 **不得** 再引入与本文冲突的平行字段。
 
@@ -50,6 +50,8 @@ custom:…             → plan.review_criteria.custom_checks[]（无 id 时用�
 ```
 
 读取审阅标准时：**合并** global + local override 权重 + profile checks + custom_checks，**不回写** global。
+
+**口味规则 `book_types`**（可选）：`short` · `novel` · 缺省=全部书型；注入预填/审阅上下文时按 `project.type` 过滤。
 
 ### 1.4 Prompt 与 Rules 边界
 
@@ -113,6 +115,7 @@ prompts/review/                # 执行层：LLM system 文本（已有）
       "weight": "hard",
       "source": "manual | deconstruct | elevated | judgment",
       "tags": ["hook", "opening"],
+      "book_types": ["short"],
       "created_at": "2026-06-01",
       "linked_examples": ["ex_002"]
     }
@@ -273,6 +276,15 @@ submission_template:
 
 保留现码 **`chapters` 为 dict**（key = 章号字符串），扩展字段；短篇默认每章 1 个 scene。
 
+**章叙事角色**（v1.0，详见 [chapter-roles.md](./chapter-roles.md)）：
+
+- `chapters[n].role`：8 值封闭枚举（`hook_open` … `finale`）
+- `chapters[n].intent`：`{ kind, ai_suggest, final }`；`kind` 与 `role` 一致
+- `paywall_side`：**不落盘**，运行时由章号与 `meta.paywall_chapter` 推导
+- `meta.characters[].role` 为**人物**角色（如 `female_lead`），与 `chapters[n].role` 不同命名空间
+- `meta.paywall_chapter`：与 `role=paywall` 章号一致（短篇建议持久化）
+- 章级 `review_criteria`：**不存**；L4 overlay 由 role + intent 动态加载；plan 级 `review_criteria` 为 base
+
 ```json
 {
   "version": 2,
@@ -283,6 +295,7 @@ submission_template:
     "tone": "",
     "chapter_count": 30,
     "word_count_per_chapter": 2000,
+    "paywall_chapter": 9,
     "characters": [{"name": "", "role": "female_lead", "note": ""}]
   },
   "review_criteria": {
@@ -295,8 +308,14 @@ submission_template:
     "1": {
       "title": "第一章",
       "status": "pending | drafting | approved",
+      "role": "hook_open",
       "hook": "结尾钩子描述",
       "word_count_target": 2000,
+      "intent": {
+        "kind": "hook_open",
+        "ai_suggest": "偷听梗+转折+愤怒+代入女主",
+        "final": "作者确认的梗×情绪配方"
+      },
       "scenes": [
         {
           "id": "ch1_abc123",
@@ -312,6 +331,8 @@ submission_template:
   }
 }
 ```
+
+**已废弃（读/写均 strip）**：`meta.writing_mode`（历史 fast/standard，2026-06 移除）。
 
 | 分工 | plan | chapters/ 文件 |
 |------|------|----------------|
@@ -497,18 +518,10 @@ flowchart TB
 
 ---
 
-## 十一、实现 backlog（按依赖）
+## 十一、排期
 
-1. `core/schemas/rule_refs.py` — RuleRef 解析 ✅  
-2. taste global v2 读写 + v1 迁移  
-3. `plan.meta` / `review_criteria` / `chapter.status`  
-4. `library/profiles` + profile 引用  
-5. `library/deconstruct` 持久化  
-6. L5a → examples + summary highlights 引用  
-7. diagnosis 持久化 + patch 写入 override  
-8. P3b impact_preview + 章锁定  
-9. chapters/ Phase 2 目录  
+功能排期与实现状态见 **[canonical-status.md §七](./canonical-status.md)**。数据迁移见 §十。
 
 ---
 
-相关：[workflow.md §三–§六](./workflow.md) · [product-plan.md](./product-plan.md)
+相关：[workflow.md](./workflow.md) · [chapter-roles.md](./chapter-roles.md) · [canonical-status.md](./canonical-status.md) · [product-plan.md](./product-plan.md)

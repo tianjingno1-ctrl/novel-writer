@@ -56,6 +56,10 @@ def save_summary_draft(
 def list_pending_summary_nums(book_dir: Path, plan: dict | None = None) -> list[int]:
     """E1b：有未确认概述的章（summary.json status=pending）。"""
     from core import plan_product
+    from core.data import book_context
+
+    if book_context.is_short_book():
+        return []
 
     p = plan if plan is not None else plan_product.load_plan()
     pending: list[int] = []

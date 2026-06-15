@@ -1,3 +1,4 @@
+# 兼容层：re-export `core.context`；旧代码 `import app.writing_ctx` 时读 world/char/概述并拼 system prompt。
 """P4-C shim：writing_ctx 已合并进 core.context。"""
 from core.context import *  # noqa: F401,F403
 from core.context import (

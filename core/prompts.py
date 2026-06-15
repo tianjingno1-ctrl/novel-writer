@@ -21,8 +21,6 @@ LEGACY_NAME_TO_ID: dict[str, str] = {
     "READER_REVIEW_SYSTEM": "reader_review",
     "EDITOR_REVIEW_SYSTEM": "editor_review",
     "DECONSTRUCT_SYSTEM": "deconstruct",
-    "WORLD_BATCH_CHUNK_REVIEW_SYSTEM": "world_batch_chunk_review",
-    "WORLD_BATCH_MERGE_SYSTEM": "world_batch_merge",
     "OUTLINE_SYSTEM": "outline",
     "CHARACTER_DRIFT_SYSTEM": "character_drift",
     "DETAIL_EXTRACT_SYSTEM": "detail_extract",
@@ -31,11 +29,8 @@ LEGACY_NAME_TO_ID: dict[str, str] = {
     "OBSERVE_SYSTEM": "observe",
     "POST_CHAPTER_MAINTAIN_SYSTEM": "post_chapter_maintain",
     "QUALITY_CHECK_BUNDLE_SYSTEM": "quality_check_bundle",
-    "WORLD_REMEDIATE_DIAGNOSE_SYSTEM": "world_remediate_diagnose",
     "BULK_ARCHIVE_SUMMARIES_SYSTEM": "bulk_archive_summaries",
     "BULK_ARCHIVE_STATE_SYSTEM": "bulk_archive_state",
-    "WORLD_REMEDIATE_BULK_CHANGE_LOG_SYSTEM": "world_remediate_bulk_change_log",
-    "WORLD_REMEDIATE_CHANGE_LOG_SYSTEM": "world_remediate_change_log",
 }
 
 

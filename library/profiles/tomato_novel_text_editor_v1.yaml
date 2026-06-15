@@ -1,0 +1,39 @@
+id: tomato_novel_text_editor_v1
+platform: tomato
+platform_label: 番茄
+submission_target: text_editor
+book_types:
+  - novel
+review_prompt_id: novel-tomato
+version: 1
+updated_at: "2026-06-10"
+
+checks:
+  hard:
+    - id: p_hard_n001
+      content: 每章结尾须留追更动机（悬念、情绪未落地或下一阶段期待）
+    - id: p_hard_n002
+      content: 单章须有一次可感知的情绪波动或信息推进，禁止纯日常水章
+  soft:
+    - id: p_soft_n001
+      content: 章均字数建议2000~3000字
+    - id: p_soft_n002
+      content: 每3~5章应有一个小阶段兑现（感情/打脸/真相一角）
+    - id: p_soft_n003
+      content: 新设定/新人物出场须服务本章冲突，避免一次性倾倒世界观
+
+tone_preferences:
+  - 追更钩子
+  - 阶段兑现
+
+forbidden:
+  - 连续两章无推进的日常铺陈
+  - 用长篇借口稀释单章爽点
+
+submission_template:
+  required_fields:
+    - 书名
+    - 字数
+    - 简介（100字内）
+    - 前三章
+  format: word

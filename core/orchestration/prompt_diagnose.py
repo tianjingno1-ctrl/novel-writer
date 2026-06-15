@@ -239,11 +239,20 @@ def apply_patch(
     if not save:
         return {**preview_r, "saved": False}
 
-    result = prompt_nodes.save_node_override(
-        _book_dir(ctx),
-        node_id,
-        system=str(preview_r.get("preview_system") or ""),
-    )
+    book_dir = _book_dir(ctx)
+    mode = (patch_mode or "append").strip().lower()
+    if mode in ("append", "prepend"):
+        result = prompt_nodes.merge_node_override(
+            book_dir,
+            node_id,
+            {mode: suggested_patch},
+        )
+    else:
+        result = prompt_nodes.save_node_override(
+            book_dir,
+            node_id,
+            system=str(preview_r.get("preview_system") or ""),
+        )
     if not result.get("ok"):
         return result
     return {**preview_r, "saved": True, "message": "已写入 prompt_overrides.yaml"}
@@ -264,11 +273,13 @@ def get_workflow_map() -> dict[str, Any]:
             "P3b 重跑前选范围",
         ],
         "patches": [
-            {"id": "L5a", "name": "正向案例写入口味库", "status": "planned"},
-            {"id": "E4b", "name": "投递类型与模板", "status": "planned"},
-            {"id": "L1b", "name": "字数与大纲关键词预检", "status": "planned"},
-            {"id": "P3b", "name": "重跑范围选择", "status": "planned"},
-            {"id": "E7_P1", "name": "拒稿归因复用 PROMPT", "status": "flow_defined"},
+            {"id": "L5a", "name": "正向案例写入口味库", "status": "implemented"},
+            {"id": "L5b", "name": "节奏预警", "status": "implemented"},
+            {"id": "A10c", "name": "写作模式（已移除）", "status": "removed"},
+            {"id": "E4b", "name": "投递类型与模板", "status": "implemented"},
+            {"id": "L1b", "name": "字数与大纲关键词预检", "status": "implemented"},
+            {"id": "P3b", "name": "重跑范围选择", "status": "implemented"},
+            {"id": "E7_P1", "name": "拒稿归因复用 PROMPT", "status": "implemented"},
         ],
         "rerun_scopes": ["chapter_only", "from_chapter_n", "plan_only"],
         "submission_targets": ["text_editor", "comic_drama", "short_drama"],
@@ -288,7 +299,7 @@ def get_workflow_map() -> dict[str, Any]:
                     {"action": "PUT /api/taste/global", "optional": True},
                     {"action": "POST /api/prefill/direction", "writes": "plan.meta (target)", "current": "brief.md"},
                     {"action": "POST /api/prefill/plan/apply", "writes": "plan.chapters"},
-                    {"action": "confirm review_criteria", "status": "planned"},
+                    {"action": "confirm review_criteria", "node": "A10b"},
                 ],
             },
             {
@@ -296,13 +307,15 @@ def get_workflow_map() -> dict[str, Any]:
                 "name": "章循环",
                 "steps": [
                     {"action": "POST /api/chat/stream", "node": "L1"},
-                    {"action": "machine_precheck", "node": "L1b", "status": "implemented"},
+                    {"action": "POST /api/chapters/{n}/precheck", "node": "L1b", "status": "implemented"},
                     {"action": "user_preview_adopt", "node": "L2-L3"},
                     {"action": "POST /api/review/female-fiction", "node": "L4-L5"},
-                    {"action": "positive_taste_extract", "node": "L5a", "status": "implemented"},
+                    {"action": "POST /api/taste/highlights/{n}", "node": "L5a", "status": "implemented"},
+                    {"action": "POST /api/chapters/{n}/rhythm-check", "node": "L5b", "status": "implemented"},
+                    {"action": "POST /api/chapters/{n}/attribution-log", "node": "L4a/L5b→P1", "status": "implemented"},
                     {"action": "summary_confirm", "node": "L10-L10b"},
                     {"action": "POST /api/quality/log/{id}/judgment", "when": "L6 改本章"},
-                    {"action": "goto P1", "when": "L6 改规则"},
+                    {"action": "goto P1", "when": "L6 改规则 / L4a / L5b / E7a 内容"},
                 ],
             },
             {
@@ -315,7 +328,6 @@ def get_workflow_map() -> dict[str, Any]:
                     {"action": "select_rerun_scope", "node": "P3b", "status": "implemented"},
                     {"action": "POST /api/rerun/pipeline", "node": "P4", "status": "implemented"},
                     {"action": "GET /api/flow/work-queue", "node": "P4", "status": "implemented"},
-                    {"action": "POST /api/flow/run", "node": "flow", "status": "implemented", "note": "可选聚合；单步 API 并存"},
                     {"action": "GET /api/flow/steps", "node": "flow", "status": "implemented"},
                 ],
             },
@@ -329,7 +341,8 @@ def get_workflow_map() -> dict[str, Any]:
                     {"action": "select_submission_target", "node": "E4b", "status": "implemented"},
                     {"action": "PATCH submission", "node": "E5-E6"},
                     {"action": "reject_tags_taste", "node": "E7"},
-                    {"action": "goto P1", "node": "E7", "note": "与 L6 改规则同一套"},
+                    {"action": "E7a fork", "node": "E7a", "note": "content→P1 / strategy→E4b", "status": "implemented"},
+                    {"action": "POST /api/compliance/preview", "node": "E4c", "status": "implemented"},
                 ],
             },
         ],

@@ -8,6 +8,7 @@ from pathlib import Path
 
 from core.data import novel_data
 from infra import file_utils as bio
+from infra.console import safe_print
 from infra.state import state
 from core import chapters as chapter_text
 from core import context as writing_context
@@ -78,6 +79,24 @@ def ensure_chapter_path(chapter_num: int) -> Path:
 def get_or_create_write_chapter(chapter_num: int | None = None) -> tuple[int, Path]:
     num = resolve_write_chapter_num(chapter_num)
     return num, ensure_chapter_path(num)
+
+
+def reset_chapter_for_regenerate(chapter_num: int) -> dict:
+    """整章重写前：保留章标题行，清空正文。"""
+    if chapter_num < 1:
+        return {"ok": False, "error": "章节号无效"}
+    plan = novel_data.get_chapter_plan(chapter_num)
+    title = str((plan or {}).get("title") or "").strip()
+    header = f"# 第{chapter_num}章"
+    if title and title not in {
+        f"第{chapter_num}章",
+        f"第{chapter_text.chapter_cn(chapter_num)}章",
+    }:
+        header = f"{header} · {title}"
+    content = f"{header}\n\n"
+    path = ensure_chapter_path(chapter_num)
+    bio.write_text(path, content, append=False, chapter_num=chapter_num)
+    return {"ok": True, "chapter_num": chapter_num, "chapter_title": title or None}
 
 
 def sanitize_chapter_text(text: str) -> str:
@@ -208,25 +227,62 @@ def flush_chapter_writes(*, silent: bool = False) -> int:
             count += 1
 
     if count and not silent:
-        print(
+        safe_print(
             f"💾 已保存 {count} 条正文到 data/chapters/ch{chapter_num:03d}.md"
             f"（共 +{total_chars} 字）"
         )
     return count
 
 
+MIN_CHAPTER_BODY_CHARS = 80
+
+
+def count_body_chars(text: str) -> int:
+    import re
+
+    body = chapter_text.strip_chapter_file_header(text or "")
+    return len(re.sub(r"\s", "", body))
+
+
+def chapter_disk_body_chars(chapter_num: int) -> int:
+    return count_body_chars(read_chapter_content(chapter_num))
+
+
 def sync_appended_indices_with_chapter() -> None:
+    """对齐 appended_indices：磁盘已有正文则标记；磁盘过短则撤销误标记。"""
     if not state.conversation_history:
         return
     _, chapter_path = get_or_create_write_chapter()
-    body = bio.read_text(chapter_path)
-    if not body.strip():
+    disk_text = bio.read_text(chapter_path) if chapter_path.exists() else ""
+    disk_chars = count_body_chars(disk_text)
+
+    if disk_text.strip():
+        for i, msg in enumerate(state.conversation_history):
+            if msg["role"] != "assistant" or i in state.appended_indices:
+                continue
+            if not should_append_to_chapter(msg["content"]):
+                continue
+            content = msg["content"].strip()
+            if len(content) >= MIN_CHAPTER_BODY_CHARS and content in disk_text:
+                state.appended_indices.add(i)
+
+    if disk_chars < MIN_CHAPTER_BODY_CHARS:
+        for i in list(state.appended_indices):
+            if i < len(state.conversation_history) and state.conversation_history[
+                i
+            ].get("role") == "assistant":
+                state.appended_indices.discard(i)
         return
-    for i, msg in enumerate(state.conversation_history):
-        if msg["role"] != "assistant" or i in state.appended_indices:
+
+    for i in list(state.appended_indices):
+        if i >= len(state.conversation_history):
+            state.appended_indices.discard(i)
+            continue
+        msg = state.conversation_history[i]
+        if msg.get("role") != "assistant":
             continue
         if not should_append_to_chapter(msg["content"]):
             continue
         content = msg["content"].strip()
-        if len(content) >= 80 and content in body:
-            state.appended_indices.add(i)
+        if len(content) >= MIN_CHAPTER_BODY_CHARS and content not in disk_text:
+            state.appended_indices.discard(i)

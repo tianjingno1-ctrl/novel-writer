@@ -12,7 +12,7 @@ type Props = {
   onSaved?: (content: string) => void
 }
 
-/** 章节编辑器：衬线排版 + 手动保存（轻量富文本，避免打断心流时可只读） */
+/** 章节编辑器：衬线排版 + 手动保存 */
 export function ChapterEditor({
   chapterNum,
   initialContent,
@@ -36,9 +36,9 @@ export function ChapterEditor({
 
   if (readOnly && !editing) {
     return (
-      <div className="font-serif text-lg leading-[2] whitespace-pre-wrap text-foreground">
+      <div className="font-serif text-[12px] leading-[1.8] whitespace-pre-wrap text-[var(--color-text-primary)]">
         {draft || (
-          <span className="text-muted italic">（暂无正文）</span>
+          <span className="text-[var(--color-text-tertiary)]">（暂无正文）</span>
         )}
       </div>
     )
@@ -47,14 +47,14 @@ export function ChapterEditor({
   if (!editing) {
     return (
       <div>
-        <div className="font-serif text-lg leading-[2] whitespace-pre-wrap">
+        <div className="font-serif text-[12px] leading-[1.8] whitespace-pre-wrap">
           {draft}
         </div>
         {!readOnly ? (
           <Button
             variant="ghost"
             size="sm"
-            className="mt-4 text-muted"
+            className="mt-4 text-[var(--color-text-tertiary)]"
             onClick={() => setEditing(true)}
           >
             编辑正文
@@ -67,7 +67,7 @@ export function ChapterEditor({
   return (
     <div className="space-y-3">
       <Textarea
-        className="min-h-[50vh] font-serif text-base leading-relaxed"
+        className="min-h-[50vh] font-serif text-[13px] leading-relaxed"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
       />
@@ -91,7 +91,9 @@ export function ChapterEditor({
         </Button>
       </div>
       {save.error ? (
-        <p className="text-sm text-danger">{(save.error as Error).message}</p>
+        <p className="text-[13px] text-[var(--color-danger)]">
+          {(save.error as Error).message}
+        </p>
       ) : null}
     </div>
   )

@@ -1,3 +1,4 @@
+# 路由薄封装：把 `api/routes/writing` 与 orchestration 的调用转发到 writing_session / writing_chat，无独立业务。
 """writing 路由适配层（P3-4b/c/d）。session → writing_session；chat → writing_chat。"""
 
 from __future__ import annotations
@@ -16,6 +17,10 @@ def get_appended_indices() -> list[int]:
     return ws.get_appended_indices()
 
 
+def conversation_chapter_num() -> int:
+    return ws.conversation_chapter_num()
+
+
 def touch_user_active() -> None:
     ws.touch_user_active()
 
@@ -25,8 +30,12 @@ def writing_chat(
     scene_beat: str = "",
     scene_id: str = "",
     chapter_num: int | None = None,
+    *,
+    regenerate: bool = False,
 ) -> dict:
-    return wc.writing_chat(instruction, scene_beat, scene_id, chapter_num)
+    return wc.writing_chat(
+        instruction, scene_beat, scene_id, chapter_num, regenerate=regenerate
+    )
 
 
 def writing_chat_stream(
@@ -34,8 +43,12 @@ def writing_chat_stream(
     scene_beat: str = "",
     scene_id: str = "",
     chapter_num: int | None = None,
+    *,
+    regenerate: bool = False,
 ) -> Iterator[str]:
-    return wc.writing_chat_stream(instruction, scene_beat, scene_id, chapter_num)
+    return wc.writing_chat_stream(
+        instruction, scene_beat, scene_id, chapter_num, regenerate=regenerate
+    )
 
 
 def clear_chat_session() -> None:

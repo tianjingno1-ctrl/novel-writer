@@ -1,0 +1,35 @@
+{
+  "id": "ms-9692427b39",
+  "book_id": "e2e-向导全路径-1781150307338-d65ee735",
+  "title": "E2E 向导全路径 1781150307338",
+  "state": "result",
+  "language": "zh",
+  "market_tags": [],
+  "ip_tags": [],
+  "submissions": [
+    {
+      "id": "sub-8b6d496e",
+      "target": "text_editor",
+      "target_name": "",
+      "platform_profile": "tomato_text_editor_v1",
+      "submitted_at": "2026-06-11",
+      "result": "passed",
+      "reject_reason": "",
+      "reject_tags": [],
+      "reject_kind": "",
+      "notes": "",
+      "pushed_to_taste": false,
+      "compliance_checked": true
+    }
+  ],
+  "versions": [
+    {
+      "version": 1,
+      "created_at": "2026-06-11 11:58:30",
+      "note": "从当前书交接为稿件"
+    }
+  ],
+  "created_at": "2026-06-11 11:58:30",
+  "updated_at": "2026-06-11 11:58:31",
+  "notes": ""
+}

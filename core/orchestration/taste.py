@@ -97,11 +97,20 @@ def context_block(ctx: AppContext, *, max_chars: int = 3500) -> str:
     )
 
 
-def import_deconstruct(ctx: AppContext, quality_log_id: str, *, merge_global: bool = True) -> dict:
+def import_deconstruct(
+    ctx: AppContext,
+    quality_log_id: str,
+    *,
+    merge_global: bool = True,
+    hook_patterns: list[str] | None = None,
+    structure_notes: list[str] | None = None,
+) -> dict:
     return taste.import_deconstruct_patterns(
         quality_log_id,
         book_dir=_book_dir(ctx),
         merge_global=merge_global,
+        hook_patterns=hook_patterns,
+        structure_notes=structure_notes,
     )
 
 
@@ -153,6 +162,21 @@ def put_reader_pattern(ctx: AppContext, reader_pattern: dict[str, Any]) -> dict:
     cur["reader_pattern"] = reader_pattern
     saved = taste.save_book_taste(book_dir, cur)
     return {"ok": True, "taste": saved}
+
+
+def delete_rule(rule_id: str) -> dict:
+    removed = taste.delete_rule(rule_id)
+    if not removed:
+        return {"ok": False, "error": "规则不存在"}
+    return {"ok": True, "rule": removed}
+
+
+def localize_rule(ctx: AppContext, rule_id: str) -> dict:
+    try:
+        result = taste.localize_rule_to_book(rule_id, _book_dir(ctx))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    return {"ok": True, "book_id": _book_id(ctx), **result}
 
 
 def on_quality_judgment(
