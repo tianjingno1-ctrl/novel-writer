@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "active_book_id": "养生男主-电竞女主-1218ba27",
+  "active_book_id": "快穿-我在各个世界找妈妈-52f8b8b9",
   "books": [
     {
       "id": "养生男主-电竞女主-1218ba27",
@@ -11,6 +11,24 @@
       "tagline": "",
       "updated_at": "2026-06-13T17:39:06",
       "created_at": "2026-06-13T17:39:06",
+      "progress_pct": 0,
+      "shelf_status": "draft",
+      "chapter_label": "草稿 · 继续向导",
+      "wizard_complete": false,
+      "wizard_step": "reference",
+      "chapter_total": 0,
+      "chapter_approved": 0,
+      "lifecycle_status": "drafting"
+    },
+    {
+      "id": "快穿-我在各个世界找妈妈-52f8b8b9",
+      "title": "《快穿：我在各个世界找妈妈》",
+      "world_label": "",
+      "type": "novel",
+      "platform": "tomato",
+      "tagline": "",
+      "updated_at": "2026-06-16T11:58:33",
+      "created_at": "2026-06-16T11:58:32",
       "progress_pct": 0,
       "shelf_status": "draft",
       "chapter_label": "草稿 · 继续向导",

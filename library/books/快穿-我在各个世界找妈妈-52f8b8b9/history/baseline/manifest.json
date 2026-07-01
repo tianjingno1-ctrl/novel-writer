@@ -1,0 +1,72 @@
+{
+  "chapter_num": 0,
+  "label": "第0章基准版本",
+  "created_at": "2026-06-16T11:58:32",
+  "files": {
+    "world": {
+      "path": "world.md",
+      "tier": "stable",
+      "chars": 344
+    },
+    "style": {
+      "path": "style.md",
+      "tier": "stable",
+      "chars": 209
+    },
+    "characters": {
+      "path": "characters.md",
+      "tier": "stable",
+      "chars": 33
+    },
+    "char_static": {
+      "path": "char_static.md",
+      "tier": "stable",
+      "chars": 121
+    },
+    "char_dynamic": {
+      "path": "char_dynamic.md",
+      "tier": "dynamic",
+      "chars": 125
+    },
+    "char_current": {
+      "path": "char_current.md",
+      "tier": "stable",
+      "chars": 97
+    },
+    "summaries_archive": {
+      "path": "summaries_archive.md",
+      "tier": "dynamic",
+      "chars": 15
+    },
+    "summaries_recent": {
+      "path": "summaries_recent.md",
+      "tier": "dynamic",
+      "chars": 64
+    },
+    "summaries": {
+      "path": "summaries.md",
+      "tier": "dynamic",
+      "chars": 75
+    },
+    "plot_threads_locked": {
+      "path": "plot_threads_locked.md",
+      "tier": "dynamic",
+      "chars": 68
+    },
+    "plot_threads_active": {
+      "path": "plot_threads_active.md",
+      "tier": "dynamic",
+      "chars": 39
+    },
+    "plot_threads": {
+      "path": "plot_threads.md",
+      "tier": "dynamic",
+      "chars": 90
+    },
+    "plan": {
+      "path": "plan.json",
+      "tier": "plan",
+      "chars": 47
+    }
+  }
+}
